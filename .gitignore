@@ -27,9 +27,15 @@ output/calibration_*.json
 
 # Models (regeneratable, large)
 signals/models/ckpt/
+signals/models/configs/phase1_*.json
 *.pkl
 *.joblib
 *.pth
+
+# Output (regeneratable)
+output/holdout_metrics_*.json
+output/retrain_history.json
+output/risk_state.json
 
 # Logs
 *.log

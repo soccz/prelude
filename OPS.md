@@ -143,6 +143,25 @@ BTC regime: bull_quiet | universe: 100 코인
 - 일일 손실 한도 발동 (LEDGER §8.1)
 - **P(≥+5%) ≥ 0.5 코인 0 개** (의미 있는 시그널 없음)
 
+### 3.5 텔레그램 봇 — 기존 MAE 봇 공유
+
+**별도 봇 발급 X**. gan_t / xsec_alpha 가 이미 쓰는 **MAE 봇** 그대로 사용 (사용자 본인 봇).
+
+설정 (`prelude/.env`, `.gitignore` 처리됨):
+```
+TELEGRAM_BOT_TOKEN=...   # gan_t/.env 의 값
+TELEGRAM_CHAT_ID=...     # 동일
+```
+
+`notifier/telegram.py` 가 자동 `load_dotenv()` — 추가 export 불필요.
+
+메시지 구분: prelude 메시지는 prefix `🌅 prelude` — gan_t / xsec_alpha 메시지와 구분 가능.
+
+**연결 테스트**:
+```bash
+python -c "from notifier.telegram import send_telegram; send_telegram('test')"
+```
+
 침묵해도 매일 짧은 "prelude alive" ping 은 보냄 (cron 죽었는지 사용자가 알 수 있게).
 
 ---

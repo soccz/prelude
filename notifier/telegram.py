@@ -13,9 +13,18 @@ from __future__ import annotations
 import logging
 import os
 import time
+from pathlib import Path
 from typing import Optional
 
 import requests
+
+# .env 자동 로드 (PROJECT_ROOT/.env)
+try:
+    from dotenv import load_dotenv
+    _PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    load_dotenv(_PROJECT_ROOT / ".env")
+except ImportError:
+    pass
 
 logger = logging.getLogger("telegram")
 

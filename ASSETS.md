@@ -99,6 +99,7 @@
 
 | 출처 | 용도 |
 |---|---|
+| `/home/soccz/22tb/main/gan_t/.env` | **MAE 텔레그램 봇** 토큰 / chat_id — prelude/.env 에 동일 값 복사 (gan_t/xsec_alpha 와 봇 공유, 메시지 prefix `🌅 prelude` 로 구분) |
 | `/home/soccz/22tb/main/wqbrain/CLAUDE.md` | IQC 알파 실패 4 유형 (LOW_FITNESS, SELF_CORRELATION, LOW_SHARPE, SUB_UNIVERSE) — prelude 도 동일 패턴 디버깅 시 참조 |
 | `/home/soccz/22tb/fin/ICQ_legacy/ICQ9/04_crowding_contrarian.md` | "조용해진 뒤 터질 코인" 알파 컨셉 — range_contraction 과 일치 |
 | `/home/soccz/22tb/fin/ICQ_legacy/ICQ8/01_microstructure.md` | 일봉 안 마이크로 시그널 — Phase 2 추가 피처 후보 |
