@@ -57,16 +57,17 @@
 - [ ] `data/upbit_d1.db` 백필 (3 년치, top 200 코인)
 - [ ] `data/database.py` — sqlite 헬퍼 (load / save / latest_timestamp)
 - [ ] 첫 EDA 노트북: `notebooks/01_data_eda.ipynb`
-  - 라벨 분포 (X=8% / Y=3% 시작값 비율)
   - 코인별 데이터 길이 / 결측 분포
   - BTC regime 분포 (4-state)
+  - 일봉 max(high)/open 분포 (multi-class 라벨 후보 bin 검증용)
 
-### 1.2 라벨 + EDA (signals/)
-- [ ] `signals/labels.py::today_pump_label`
-- [ ] `notebooks/02_label_sweep.ipynb`
-  - X ∈ {5, 8, 10, 15} × Y ∈ {2, 3, 5} 격자
-  - 라벨 비율 분포 + sweep 결과 보고
-  - **사용자 컨펌**: X / Y 최종 결정
+### 1.2 라벨 + EDA (signals/) — Multi-class 분포
+- [ ] `signals/labels.py::today_pump_label` (multi-class, max(high)/open 기반, SIGNAL §2.1)
+- [ ] `notebooks/02_label_distribution.ipynb`
+  - bin 경계 후보 (0/5/10/15/20%) 별 라벨 분포
+  - 각 bin 비율 5~30% 가 학습에 좋음 — sparse / dense 면 cutoff 조정
+  - 4h 봉 데이터로 max(high) 정확 측정
+  - **사용자 컨펌**: bin 경계 최종 결정
 
 ### 1.3 피처 (signals/features.py)
 - [ ] alt multi-lookback {3, 5, 7, 14, 21} 일 (return / vol / range_contraction)
@@ -77,31 +78,35 @@
 - [ ] cross-sectional rank norm (코인별 피처) + rolling z (BTC 피처)
 - [ ] **`fillna(0)` 절대 X** (gan_t known gap)
 
-### 1.4 모델 (signals/models/)
-- [ ] `signals/models/xgb_phase1.py` — XGBoost binary
-  - 출처: `gan_t/training/pump_trainer.py` (4-class → binary 단순화)
-  - Optuna 50 trial (objective: binary cross-entropy + sample_weight balanced)
+### 1.4 모델 (signals/models/) — Multi-class softprob
+- [ ] `signals/models/xgb_phase1.py` — XGBoost multi-class (objective='multi:softprob', num_class=6)
+  - 출처: `gan_t/training/pump_trainer.py` (4-class 패턴 차용, 6-class 로 확장)
+  - Optuna 50 trial (objective: mlogloss + per-bin macro F1)
 - [ ] `notebooks/03_xgb_baseline.ipynb`
   - 첫 학습 + SHAP 피처 중요도
   - lookback 별 기여 분석
+  - bin 별 적중률 (per-class accuracy)
 
 ### 1.5 검증 (signals/validate.py + scripts/backtest_wf.py)
 - [ ] `signals/validate.py::PurgedWalkForward` (5-fold + 10d embargo)
-- [ ] `scripts/backtest_wf.py` — 전체 WF 실행 + 리포트
-- [ ] 트레이딩 메트릭: net Sharpe (왕복 0.15% 차감), Max DD, hit rate, 누적 PnL
-- [ ] 진단 메트릭 (사후): IC, ICIR, CRPS — 옆에 표기만
+- [ ] `scripts/backtest_wf.py` — 전체 WF 실행
+- [ ] **트레이딩** 메트릭: net Sharpe (옵션 3 익절/손절 시뮬, 왕복 0.15%), Max DD, 누적 PnL
+- [ ] **정확도** 메트릭 (사용자 핵심 요구): Brier score, Reliability diagram, Quantile coverage, per-bin accuracy
+- [ ] 진단 (학술 사후): IC, ICIR — 옆 표기만
 
 ### 1.6 Calibration (signals/calibration.py)
-- [ ] `signals/calibration.py::SigmaBucketCalibration` — fit / predict / save
-- [ ] `output/calibration_sigma.json` 첫 생성
+- [ ] `signals/calibration.py::ReliabilityCalibration` — multi-class 보정
+- [ ] `output/reliability_curves.json` (각 cutoff: P(≥5%), P(≥10%), ...) 첫 생성
+- [ ] `output/brier_history.json` (Brier score 누적)
 
-### 1.7 가상 ledger (ledger/)
-- [ ] `ledger/config.py` — 가상 자본 1,000 만, K=3, max position 5%, max exposure 60%
+### 1.7 가상 ledger (ledger/) — TP/SL 시뮬
+- [ ] `ledger/config.py` — 가상 자본 1,000 만, K=3, max position 5%, TP=0.10, SL=0.05 (placeholder)
 - [ ] `ledger/sizing.py::equal_weight` — 1/K 균등 (Phase 1 단순)
-- [ ] `ledger/tracker.py` — 시가 진입 / 종가 청산, 거래비용 0.15% 차감
+- [ ] `ledger/tracker.py` — 옵션 3: 시가 진입 → TP/SL 또는 24h 종가 청산 (4h 봉 시뮬)
 - [ ] `ledger/risk.py` — 일일 -3% / MDD -15% kill switch
-- [ ] `ledger/metrics.py` — Sharpe / MDD / hit rate
+- [ ] `ledger/metrics.py` — Sharpe / MDD / TP-SL hit rate / 평균 hold
 - [ ] `output/ledger.csv` 자동 누적
+- [ ] `scripts/tp_sl_sweep.py` — TP × SL 격자 백테스트 → 최적 조합 추천
 
 ### 1.8 운영 (ops/ + notifier/ + scripts/)
 - [ ] `ops/preflight.py` — freshness / NaN / churn 체크
@@ -127,7 +132,8 @@
 
 ### Exit criteria → Phase 2
 - [ ] **라이브 기간 충분** (초기 2 주, 데이터 안정성 보고 조정 — CLAUDE.md §2.5)
-- [ ] 가상 net Sharpe **양수 + 의미 있는 수준** (cutoff 도 데이터 기반: 음수면 모델 재설계, 0~0.5 면 Phase 2 갈지 모델 강화 갈지 고민, ≥ 0.5 면 자연스럽게 Phase 2)
+- [ ] 가상 net Sharpe **양수 + 의미 있는 수준** (음수면 모델 재설계, 0~0.5 면 Phase 2 갈지 고민, ≥ 0.5 면 자연스럽게 Phase 2)
+- [ ] **시스템 정확도 검증**: Reliability 가 대각선 ± 10pp 이내 (예: 예측 50% → 실제 40~60%)
 - [ ] 일관성 검증 통과 (verify_telegram 모든 날 OK)
 - [ ] 사용자가 Phase 2 명시 OK
 
@@ -248,4 +254,7 @@
 |---|---|---|
 | 2026-05-03 | Phase 0 | 폴더 + 8 개 MD 설계 시작 |
 | 2026-05-03 | Phase 0 | 모든 숫자 placeholder 명시 + CLAUDE.md §2.5 신설 (데이터가 결정) |
+| 2026-05-03 | Phase 0 | 라벨 binary → multi-class (max(high)/open 분포), ledger 단순 hold → TP/SL 옵션 3 |
+| 2026-05-03 | Phase 0 | `today_pump` 폴더명 → `prelude` 통일 + GitHub `soccz/prelude` push |
+| 2026-05-03 | Phase 0 | `data/database.py` + `data/collector_d1.py` 작성, KRW-BTC smoke test PASS |
 | | | |
