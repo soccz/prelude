@@ -1,0 +1,44 @@
+# Core
+numpy
+pandas
+scipy
+scikit-learn
+
+# Models
+xgboost
+lightgbm
+optuna
+
+# Time series / TA
+pandas-ta
+
+# DB
+# sqlite3 is stdlib
+
+# Crypto exchange
+pyupbit
+ccxt
+
+# Telegram
+python-telegram-bot
+
+# Schedule / Ops
+schedule
+python-dotenv
+
+# Backtest helpers
+properscoring  # CRPS
+
+# Notebooks
+jupyterlab
+ipykernel
+matplotlib
+seaborn
+
+# Tests
+pytest
+pytest-cov
+
+# Deep learning (Phase 2+, optional)
+# torch
+# einops

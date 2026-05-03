@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Virtual env
+venv/
+.venv/
+env/
+
+# DB
+*.db
+*.db-journal
+*.sqlite
+
+# Output (regeneratable)
+output/predictions_*.csv
+output/ledger.csv
+output/ic_history*.json
+output/drift_state.json
+output/calibration_*.json
+
+# Models (regeneratable, large)
+signals/models/ckpt/
+*.pkl
+*.joblib
+*.pth
+
+# Logs
+*.log
+logs/
+
+# Personal notes
+NOTES.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Secrets
+.env
+*.key
+secrets/
