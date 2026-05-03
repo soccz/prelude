@@ -19,6 +19,7 @@ Changes:
 사용:
     python -m data.collector_d1 --coin KRW-BTC --days 365     # 단일 코인
     python -m data.collector_d1 --top 100 --days 365          # top 100 코인
+    python -m data.collector_d1 --all --days 1095             # 전체 KRW 마켓 3년치
     python -m data.collector_d1 --update                      # 모든 기존 코인 incremental 갱신
 """
 from __future__ import annotations
@@ -213,6 +214,7 @@ def main():
     parser = argparse.ArgumentParser(description="Upbit KRW 일봉 수집기")
     parser.add_argument("--coin", type=str, help="단일 코인 (예: KRW-BTC)")
     parser.add_argument("--top", type=int, help="24h 거래대금 top N")
+    parser.add_argument("--all", action="store_true", help="KRW 전체 마켓 (top N 제한 X)")
     parser.add_argument("--days", type=int, default=365 * 3, help="백필 일수 (기본 3년)")
     parser.add_argument("--update", action="store_true", help="기존 모든 코인 incremental update")
     parser.add_argument("--db", type=str, default=str(DB_PATH), help="DB 경로")
@@ -230,6 +232,14 @@ def main():
     if args.coin:
         n = collect_market(args.coin, days=args.days, db_path=db_path)
         print(f"Saved {n} rows for {args.coin}")
+    elif args.all:
+        markets = get_krw_markets()
+        print(f"전체 KRW 마켓 {len(markets)}개 백필 시작 (days={args.days})")
+        results = collect_all(markets, days=args.days, db_path=db_path)
+        ok = sum(1 for v in results.values() if v >= 0)
+        fail = sum(1 for v in results.values() if v < 0)
+        total = sum(v for v in results.values() if v >= 0)
+        print(f"\n=== Done: OK {ok} / FAIL {fail} / Total {total} rows ===")
     elif args.top:
         markets = get_top_markets(args.top)
         results = collect_all(markets, days=args.days, db_path=db_path)
