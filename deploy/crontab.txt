@@ -1,0 +1,33 @@
+# prelude cron 등록 (KST 기준)
+#
+# 등록 방법:
+#   1. 'crontab -e' 로 열고 아래 내용 추가
+#   2. 또는 'crontab deploy/crontab.txt' 로 통째 적용 (기존 cron 덮어씀 — 주의)
+#
+# 시스템이 KST 가 아니면 (UTC 인 경우) 아래 KST 시각 -9 시간 (또는 CRON_TZ 사용)
+
+# Cron timezone (시스템 지원 시)
+CRON_TZ=Asia/Seoul
+
+# 환경 (cron 은 PATH 가 짧음)
+PATH=/usr/local/bin:/usr/bin:/bin:/home/soccz/.pyenv/shims
+
+# ============================================================================
+# 메인 — 매일 KST 08:30 추론 + 텔레그램 알림
+# ============================================================================
+30 8 * * * cd /home/soccz/22tb/prelude && bash scripts/daily_run.sh >> output/cron_daily.log 2>&1
+
+# ============================================================================
+# 매일 KST 09:30 — 어제 ledger 검증 + risk
+# ============================================================================
+30 9 * * * cd /home/soccz/22tb/prelude && bash scripts/post_open_run.sh >> output/cron_post_open.log 2>&1
+
+# ============================================================================
+# 주간 재학습 — 일요일 KST 06:00
+# ============================================================================
+0 6 * * 0 cd /home/soccz/22tb/prelude && bash scripts/retrain_run.sh >> output/cron_retrain.log 2>&1
+
+# ============================================================================
+# 데이터 매시 정각 — incremental 갱신 (옵션, 안 해도 daily_run 이 알아서 update)
+# ============================================================================
+# 0 * * * * cd /home/soccz/22tb/prelude && source venv/bin/activate && python -m data.collector_d1 --update >> output/cron_collect.log 2>&1
