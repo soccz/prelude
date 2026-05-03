@@ -210,7 +210,7 @@ date,coin,signal_score,signal_sigma,signal_tier,btc_regime,
 
 xsec_alpha 의 verify_telegram.py 패턴: 텔레그램이 ledger 와 부호 / 크기 일치하는지 자동 검증. (이전에 LONG 부호 버그로 모든 행 반대 표시된 적 있음)
 
-`scripts/verify_telegram.py` (today_pump 안에 새로):
+`scripts/verify_telegram.py` (prelude 안에 새로):
 - 매일 KST 09:30 (가상 진입 후) 자동 실행
 - ledger.csv 의 어제 행 vs 오늘 텔레그램 메시지 비교
 - 부호 / 크기 / 코인 일치 확인

@@ -194,7 +194,7 @@ binance_lead_1h      (바이낸스 1h 수익률 — 글로벌 선행)
 
 ### 4.2 Phase 2 — Hybrid (Transformer + TCN + FiLM + CVAE)
 
-ASSETS.md 의 gan_t/models/hybrid_model.py 구조를 today_pump 안에 새로 (self-contained):
+ASSETS.md 의 gan_t/models/hybrid_model.py 구조를 prelude 안에 새로 (self-contained):
 
 ```
 [입력 (B, T=21일, F)]
@@ -220,7 +220,7 @@ ASSETS.md 의 gan_t/models/hybrid_model.py 구조를 today_pump 안에 새로 (s
 
 ### 4.3 Phase 3 — APF motif 진단 (옵션, 학술 트랙)
 
-ASSETS.md 의 fin/Attention Pattern Fields 코드를 참조해서 today_pump 안에 새로:
+ASSETS.md 의 fin/Attention Pattern Fields 코드를 참조해서 prelude 안에 새로:
 
 - 매일 추론 시 attention map 의 motif (stripe / block / spike / diagonal) 분류
 - "이 추천은 spike motif 기반" 식의 진단을 텔레그램 알림에 추가
@@ -233,7 +233,7 @@ ASSETS.md 의 fin/Attention Pattern Fields 코드를 참조해서 today_pump 안
 ## 5. Calibration (signals/calibration.py)
 
 ### 5.1 σ-bucket calibration
-xsec_alpha 의 magnitude.py 패턴을 today_pump 안에 새로.
+xsec_alpha 의 magnitude.py 패턴을 prelude 안에 새로.
 
 학습 / holdout 의 모든 예측을 모은 뒤:
 

@@ -42,19 +42,19 @@ post-hoc (drift_detector / ic_gate / verify_telegram)
 CRON_TZ=Asia/Seoul
 
 # 데이터 수집 (매시 정각)
-0 * * * * cd /home/soccz/22tb/today_pump && bash scripts/collect_run.sh >> output/cron_collect.log 2>&1
+0 * * * * cd /home/soccz/22tb/prelude && bash scripts/collect_run.sh >> output/cron_collect.log 2>&1
 
 # 일일 추론 + 알림 (KST 08:30)
-30 8 * * * cd /home/soccz/22tb/today_pump && bash scripts/daily_run.sh >> output/cron_daily.log 2>&1
+30 8 * * * cd /home/soccz/22tb/prelude && bash scripts/daily_run.sh >> output/cron_daily.log 2>&1
 
 # 어제 ledger 청산 + 검증 (KST 09:30, 어제 일봉 100% 마감 후)
-30 9 * * * cd /home/soccz/22tb/today_pump && bash scripts/post_open_run.sh >> output/cron_post_open.log 2>&1
+30 9 * * * cd /home/soccz/22tb/prelude && bash scripts/post_open_run.sh >> output/cron_post_open.log 2>&1
 
 # IC + drift 측정 (KST 00:00)
-0 0 * * * cd /home/soccz/22tb/today_pump && bash scripts/measure_run.sh >> output/cron_measure.log 2>&1
+0 0 * * * cd /home/soccz/22tb/prelude && bash scripts/measure_run.sh >> output/cron_measure.log 2>&1
 
 # 주간 재학습 (일요일 KST 06:00)
-0 6 * * 0 cd /home/soccz/22tb/today_pump && bash scripts/retrain_run.sh >> output/cron_retrain.log 2>&1
+0 6 * * 0 cd /home/soccz/22tb/prelude && bash scripts/retrain_run.sh >> output/cron_retrain.log 2>&1
 ```
 
 ### 1.3 systemd 대안 (deploy/systemd/)
@@ -87,7 +87,7 @@ cron 대신 systemd timer 사용 시 `td-pump-daily.timer` / `td-pump-measure.ti
 ### 3.1 매일 KST 08:30 메인 알림
 
 ```
-🌅 today_pump 2026-05-03 (KST 08:30)
+🌅 prelude 2026-05-03 (KST 08:30)
 BTC regime: bull_quiet | universe: 100 코인
 
 ━━━ 오늘 추천 (top 3) ━━━
@@ -129,7 +129,7 @@ hit rate (이번 주): 67%
 - 일일 손실 한도 발동 (LEDGER §7.1)
 - σ-tier ≥ ✅ 코인 0 개
 
-침묵해도 매일 짧은 "today_pump alive" ping 은 보냄 (cron 죽었는지 사용자가 알 수 있게).
+침묵해도 매일 짧은 "prelude alive" ping 은 보냄 (cron 죽었는지 사용자가 알 수 있게).
 
 ---
 

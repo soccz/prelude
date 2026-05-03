@@ -1,6 +1,6 @@
-# CLAUDE.md — today_pump 작업 규칙
+# CLAUDE.md — prelude 작업 규칙
 
-이 문서는 Claude 가 이 프로젝트 (`/home/soccz/22tb/today_pump/`) 에서 따라야 할 규칙이다.
+이 문서는 Claude 가 이 프로젝트 (`/home/soccz/22tb/prelude/`) 에서 따라야 할 규칙이다.
 글로벌 `~/.claude/CLAUDE.md` 와 auto memory 규칙은 그대로 적용되고, 이 문서는 그 위에 프로젝트 한정 규칙을 더한다.
 
 ---
@@ -30,17 +30,17 @@
 
 ## 2. 핵심 작업 규칙
 
-### 2.1 모든 코드는 today_pump 안에 self-contained
-**다른 폴더 (gan_t, xsec_alpha, fin) 에서 import 하지 않는다.** 참고는 OK 이지만 코드는 today_pump 안에 새로 짠다.
+### 2.1 모든 코드는 prelude 안에 self-contained
+**다른 폴더 (gan_t, xsec_alpha, fin) 에서 import 하지 않는다.** 참고는 OK 이지만 코드는 prelude 안에 새로 짠다.
 
 이유:
-- 다른 폴더 변경 시 today_pump 가 깨지지 않음
-- 백업·이동·공유 시 today_pump 폴더 하나로 됨
+- 다른 폴더 변경 시 prelude 가 깨지지 않음
+- 백업·이동·공유 시 prelude 폴더 하나로 됨
 - 의존성 명확 (이 폴더 안의 것만 책임)
 
 작업 흐름:
 1. 다른 폴더에서 비슷한 코드 발견 → 읽고 이해
-2. today_pump/ 안에 새 모듈로 작성 (필요한 부분만, 이 프로젝트에 맞게)
+2. prelude/ 안에 새 모듈로 작성 (필요한 부분만, 이 프로젝트에 맞게)
 3. ASSETS.md 에 "어디서 어떤 아이디어 가져왔는지" 출처만 기록
 
 ### 2.2 시그널 / 가상 ledger / 운영 — 책임 분리
@@ -108,8 +108,8 @@
 ## 3. 금지/주의 사항
 
 ### 3.1 절대 금지
-- **다른 폴더에 새 파일 생성 금지** — 모든 새 파일은 today_pump 안에
-- **gan_t / xsec_alpha 코드 수정 금지** — 그쪽 시스템 깨짐. 필요하면 today_pump 로 fork 후 수정
+- **다른 폴더에 새 파일 생성 금지** — 모든 새 파일은 prelude 안에
+- **gan_t / xsec_alpha 코드 수정 금지** — 그쪽 시스템 깨짐. 필요하면 prelude 로 fork 후 수정
 - **다른 폴더에서 import 금지** — `from gan_t.*` `from xsec_alpha.*` 절대 X
 - **실거래 API 자동 주문 코드 추가 금지** (사용자 명시 전). 업비트 API key 사용 금지
 - **`/tmp` 직접 사용 금지** → `/home/soccz/22tb/tmp` 사용
@@ -173,10 +173,10 @@ python scripts/label_sweep.py --x-grid 0.05,0.08,0.10,0.15 --y-grid 0.02,0.03,0.
 
 ---
 
-## 6. 폴더 구조 (코드도 다 today_pump 안)
+## 6. 폴더 구조 (코드도 다 prelude 안)
 
 ```
-today_pump/
+prelude/
 ├── *.md (8 개)              # 설계 문서
 ├── .claude/                  # Claude Code 세팅
 │   ├── settings.local.json   # 권한, 환경
@@ -220,7 +220,7 @@ today_pump/
 
 ### 7.4 메모리
 - 글로벌 auto memory (`~/.claude/projects/-mnt-20t/memory/`) 그대로 적용
-- 이 프로젝트 한정 메모리는 `project_today_pump_*.md` 형식으로 글로벌 memory 에 저장
+- 이 프로젝트 한정 메모리는 `project_prelude_*.md` 형식으로 글로벌 memory 에 저장
 - NOTES.md (사용자 손글) 와 별개
 
 ---

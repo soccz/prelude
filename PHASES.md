@@ -23,7 +23,7 @@
 **목적**: 코드 짜기 전 8 개 MD 로 모든 결정 명문화. 합의된 설계 위에서 구현.
 
 ### 액션
-- [x] 폴더 위치 확정 (`/home/soccz/22tb/today_pump`)
+- [x] 폴더 위치 확정 (`/home/soccz/22tb/prelude`)
 - [x] 폴더 스켈레톤 (data/signals/ledger/ops/notifier/scripts/notebooks/output/tests/deploy)
 - [x] `.gitignore` + `requirements.txt`
 - [x] `.claude/settings.local.json` (권한 / 환경)

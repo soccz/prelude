@@ -1,4 +1,4 @@
-# today_pump
+# prelude
 
 > 업비트 KRW 코인의 **오늘 일봉 (KST 09:00 시작) 이 안정적으로 X% 이상 오를지** 매일 KST 08:30 에 텔레그램으로 미리 알리는 **개인 트레이딩 보조 시스템**.
 
@@ -23,7 +23,7 @@ KST 08:30 ─→ [어제까지 데이터로 추론] ─→ 텔레그램 알림 +
 
 ### 1. 환경 셋업
 ```bash
-cd /home/soccz/22tb/today_pump
+cd /home/soccz/22tb/prelude
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 ```
@@ -44,7 +44,7 @@ git log --oneline -5               # 최근 커밋
 ## 폴더 구조
 
 ```
-today_pump/
+prelude/
 ├── README.md         # ← 지금 이 파일
 ├── CLAUDE.md         # Claude 작업 규칙 (매 세션 시작 시 자동 적용)
 ├── SIGNAL.md         # 시그널 생성 (라벨, 피처, 모델, 추론)
