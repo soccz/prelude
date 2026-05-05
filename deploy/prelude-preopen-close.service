@@ -1,0 +1,12 @@
+[Unit]
+Description=prelude pre-open paper ledger close-out daily 10:05 KST
+After=network.target
+
+[Service]
+Type=oneshot
+User=soccz
+WorkingDirectory=/home/soccz/22tb/prelude
+ExecStart=/bin/bash /home/soccz/22tb/prelude/scripts/daily_close_preopen.sh
+TimeoutStartSec=300
+StandardOutput=append:/home/soccz/22tb/prelude/output/cron_preopen_close.log
+StandardError=append:/home/soccz/22tb/prelude/output/cron_preopen_close.log

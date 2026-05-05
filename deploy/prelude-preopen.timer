@@ -1,0 +1,12 @@
+[Unit]
+Description=prelude pre-open trigger daily 08:55 KST timer
+
+[Timer]
+# 08:55 KST = 23:55 UTC (previous day)
+OnCalendar=*-*-* 23:55:00 UTC
+# Pre-open is timing-critical; do not catch up missed runs
+Persistent=false
+RandomizedDelaySec=30
+
+[Install]
+WantedBy=timers.target

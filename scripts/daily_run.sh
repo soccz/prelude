@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 매일 KST 08:30 cron entry — 추론 + 텔레그램 알림.
-# 사용: cron 등록 → '30 8 * * * cd /home/soccz/22tb/prelude && bash scripts/daily_run.sh'
+# 매일 KST 09:05 cron entry — 추론 + 텔레그램 알림.
+# 사용: cron 등록 → '5 9 * * * cd /home/soccz/22tb/prelude && bash scripts/daily_run.sh'
 
 set -euo pipefail
 

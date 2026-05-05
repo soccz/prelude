@@ -1,0 +1,12 @@
+[Unit]
+Description=prelude pre-open trigger daily 08:55 KST (Stage 2 telegram ON)
+After=network.target
+
+[Service]
+Type=oneshot
+User=soccz
+WorkingDirectory=/home/soccz/22tb/prelude
+ExecStart=/bin/bash /home/soccz/22tb/prelude/scripts/daily_run_preopen.sh
+TimeoutStartSec=300
+StandardOutput=append:/home/soccz/22tb/prelude/output/cron_preopen.log
+StandardError=append:/home/soccz/22tb/prelude/output/cron_preopen.log

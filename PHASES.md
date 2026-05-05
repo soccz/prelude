@@ -4,21 +4,85 @@
 
 ---
 
-## 현재 상태 (요약)
+## 현재 상태 (요약, 2026-05-03)
 
-- **현재 Phase**: Phase 0 — 설계 문서 작성
-- **마지막 갱신**: 2026-05-03
-- **다음 액션**: 8 개 MD 작성 마무리 → Phase 1 데이터 수집 시작
+- **현재 운영**: detector_v1 Stage 1 dry-run (cron 등록 직전)
+- **백테스트 채택**: C3 (bull_all p99.95 cap2), EV +7.40% / 2024 -0.89% / 3 active fold 양수
+- **아카이브**: Phase 0/1 (6-class 분포 + 일반 펌프 detector) — legacy 보존, 미운영
 
-진행률 한눈에:
-- [x] Phase 0 — 설계 문서 (8 개 MD)
-- [ ] Phase 1 — XGBoost baseline + KST 08:30 알림 + paper trading
-- [ ] Phase 2 — hybrid 모델 / σ-tier 사이징 / window signature
-- [ ] Phase 3 (옵션) — APF motif / prototype bank / 학술 트랙
+진행 트랙:
+- [x] Phase 0 — 8 MD 설계 완료
+- [x] Phase 1 — 데이터 수집 / 6-class 모델 / 인프라 (legacy)
+- [x] Phase X — leak 발견 → detector 재정의 → C3 채택 → detector_v1 artifact (이번 세션)
+- [ ] **Stage 1** (cron dry-run, telegram off) — 사용자 cron 등록 후 1~2주
+- [ ] **Stage 2** (telegram beta, 자동매매 X) — Stage 1 결과 보고 결정
+- [ ] **Stage 3** (NOTES 기반 threshold/tier 조정) — Stage 2 후
+- [ ] **Phase X+1** — Distribution head (multi-target) + label space discovery (사용자 신규 방향, §"향후 방향" 참조)
+- [ ] [Research] Downside guard / 4h confirmation tier (병렬)
+- [ ] [Later] MTF features / regime split / Optuna
+
+### Algorithm audit update (2026-05-05)
+
+- v1 dry-run 유지. **v2 multi-scale swap 보류** — 1주 live paper 결과 확인 후 결정.
+- Common-period ablation: head 별 best scale 이 다름.
+  - h2 즉발 +3%: daily+1h / daily+15m 둘 다 강함
+  - h5 +20% tail: daily+1h+15m 가 우위
+  - h6 +5% 24h: daily+1h 정도면 충분
+- Baseline showdown: distribution_beta 가 TP3/TP5 에서 setup/momentum baseline 을 이김.
+- 다만 edge modest: TP5 path-aware Sharpe diff vs setup_momentum +0.18, bootstrap CI 가 0 근처를 걸침.
+- MDD 큼: full-size TP5 MDD 약 -55%; 운영 해석은 1/4~1/8 fractional sizing 기준.
+- SL 룰: 4h SL-first 와 15m path 양쪽 모두 음수. 자동 SL 룰은 운영 채택 X, 사용자 수동 판단.
+- 09:05 timer audit: 전체 시장 첫 15m hit 비중은 9~12% 수준이지만, distribution alerts 는 +3% hit 의 33%, +5% hit 의 25% 가 첫 15m candle 에 발생. 09:05 는 데이터 위생상 유지하되, 실제 즉발 진입용 08:55 pre-open trigger 는 별도 모델/검증 트랙으로 분리.
+- Pre-open first15 model audit: 08:55 as-of 를 엄격히 맞춰 `D-2 closed daily + D-1 08:30 precursor` 로 검증. `preopen_15m` 단독이 first15_t3 top1% precision 38.2% (base 5.1%, lift 7.6), first15_t5 top1% precision 22.4% (base 2.8%, lift 8.1). 08:55 전용 모델은 연구/운영 후보로 충분히 정당화됨. 단 v1 09:05 distribution timer 는 유지.
+- Pre-open code audit: live 모델을 15m precursor-only 19 features 로 재빌드해 daily partial mismatch 제거. late manual run guard 추가(08:45~08:59 밖에서는 telegram/ledger skip), raw score 문구로 표시, 15m recent-window 로 predict runtime 4m48s → 21s. close-out 은 15m DB update wrapper 필요(`scripts/daily_close_preopen.sh`).
+- Survivorship bias 는 여전히 미처리 caveat.
 
 ---
 
-## Phase 0 — 설계 문서 (현재)
+## Phase X — Detector 재정의 (2026-05-03 완료)
+
+**lessons (이번 세션 핵심)**:
+- 일반 6-class softprob 모델 → ledger 음수 → "task 정의 자체가 잘못" 진단
+- 재정의: ≥20% tail pump detector (rare event, silence-heavy)
+- BTC bull regime conditional + TP20-only execution
+- Sweep 90 조합 (regime × threshold × cap) → bull_quiet × p99.95 sweet spot
+- Fold stability 검증 v1 (regime-internal threshold leak) → v2 (train direct, overfit zero-trade) → v3 (train-OOF, **C3 통과**)
+- v3 발견:
+  - C1/C2 (bull_quiet 단독) sparse → 3/5 fold 침묵 → fail
+  - **C3 (bull_all p99.95 cap2)** 3/4 active 양수, 2024 -0.89% — 채택
+  - C8-C10 rank fallback EV 음수 → 폐기 (silence-heavy 가 옳다는 증거)
+- artifact: threshold 0.8815 (full panel OOF p99.95, KRW 136,924 samples) 고정
+- 운영 원칙: threshold 라이브 quantile 재계산 금지, bear regime silence, cap 2
+
+---
+
+## 향후 방향 — Distribution head + label space discovery (사용자 2026-05-03 제안)
+
+**문제 의식**: detector_v1 은 "≥20% tail" 한 점만 본 것. 사용자가 원하는 건 매매 판단에 필요한 **조건부 확률 분포 + 다중 head**.
+
+**제안 구조**:
+```
+Distribution head (multiple binary XGBoost):
+- upside heads:    P(high ≥ +3/+5/+7/+10/+15/+20%)
+- close heads:     P(close ≥ +0/+3/+5%)
+- downside heads:  P(low ≤ -2/-3/-5%)
+- path heads:      P(hit +X before drawdown -Y)
+- expected:        E[max_return], E[close_return], E[max_drawdown]
+
+알림 출력 = 분포 테이블 (코인당), 단일 score X
+```
+
+**Label space discovery (선결)**:
+- profit_target × min_close_hold × max_pre_hit_dd × max_post_hit_giveback × time_to_hit × btc_regime sweep
+- 평가: base_rate, lift@top, avg fail EOD, worst5%, active_days, hit time
+- 4 조건 동시 만족: 너무 sparse X, model lift > random, fail 손실 작음, 사용자 대응 가능
+- detector_v1 = 분포의 오른쪽 꼬리 head 1개로 자연스럽게 흡수됨
+
+**우선순위**: Stage 1 dry-run + Downside guard / 4h confirmation 보다 **뒤** (detector_v1 안정 후 트랙 분리). 단 stable_v1 prototype 은 detector_v1 운영과 병렬 research 가능.
+
+---
+
+## Phase 0 — 설계 문서 (legacy)
 
 **목적**: 코드 짜기 전 8 개 MD 로 모든 결정 명문화. 합의된 설계 위에서 구현.
 
@@ -44,9 +108,9 @@
 
 ---
 
-## Phase 1 — XGBoost baseline + KST 08:30 알림 (1-2 주)
+## Phase 1 — XGBoost baseline + KST 09:05 알림 (1-2 주)
 
-**목적**: 가장 단순한 작동 시스템 완성. 매일 KST 08:30 텔레그램 알림 받기. 가상 ledger 자동 누적. 실거래는 사용자 직접.
+**목적**: 가장 단순한 작동 시스템 완성. 매일 KST 09:05 텔레그램 알림 받기. 가상 ledger 자동 누적. 실거래는 사용자 직접.
 
 ### 1.1 데이터 (data/)
 - [ ] `data/collector_d1.py` — 업비트 KRW 일봉 수집 (pyupbit)
@@ -117,7 +181,7 @@
 - [ ] **별도 텔레그램 봇 발급 + 채팅 ID** (gan_t 와 분리)
   - **사용자 컨펌**: 봇 토큰 / 채팅 ID 환경변수 셋업 (`.env`, .gitignore)
 - [ ] `scripts/predict_today.py` — 수동 dry-run
-- [ ] `scripts/daily_run.sh` — KST 08:30 cron entry
+- [ ] `scripts/daily_run.sh` — KST 09:05 cron entry
 - [ ] `scripts/post_open_run.sh` — KST 09:30 청산 + verify
 - [ ] `deploy/crontab.txt` — cron 등록 명령 + README
 - [ ] `scripts/health_check.py` — 일일 헬스
@@ -127,7 +191,7 @@
 - [ ] dry-run 1 일 (수동 실행, 텔레그램 발송 X)
 - [ ] dry-run 결과 + 알림 포맷 사용자 검토
 - [ ] **사용자 컨펌**: 라이브 cron 등록
-- [ ] **D-Day**: 첫 KST 08:30 라이브 알림
+- [ ] **D-Day**: 첫 KST 09:05 라이브 알림
 - [ ] 매일 KST 09:30 ledger 자동 갱신 확인
 
 ### Exit criteria → Phase 2
@@ -257,4 +321,15 @@
 | 2026-05-03 | Phase 0 | 라벨 binary → multi-class (max(high)/open 분포), ledger 단순 hold → TP/SL 옵션 3 |
 | 2026-05-03 | Phase 0 | `today_pump` 폴더명 → `prelude` 통일 + GitHub `soccz/prelude` push |
 | 2026-05-03 | Phase 0 | `data/database.py` + `data/collector_d1.py` 작성, KRW-BTC smoke test PASS |
+| 2026-05-03 | Phase 1.0 | 4 collectors 백필 완료 (KRW d1 252, KRW 4h 252, BINANCE 1h 185, BINANCE d1 427) |
+| 2026-05-03 | Phase 1.1 | **leak 발견** — features[t] (close[t]) → label[t] (high[t]/open[t]) 동시점 사용 |
+| 2026-05-03 | Phase 1.1 | label_panel **market별 shift(-1)** 수정 — leak 제거 |
+| 2026-05-03 | Phase 1.1 | leak 후 accuracy 67%→30% (random 17% 대비 1.83x — 약한 신호만) |
+| 2026-05-03 | Phase 1.2 | 알림 시간 **08:30 → 09:05** (어제 일봉 100% 마감 후 leak-free) |
+| 2026-05-03 | Phase 1.2 | Pattern sweep — 7 family WF ledger backtest 모두 음수 Sharpe |
+| 2026-05-03 | Phase 1.2 | EDA hit rate ≠ Sharpe — momentum hit 21% but Sharpe -5.2 (SL 46% 함정) |
+| 2026-05-03 | Phase 1.3 | Execution sweep — 15 룰 × 3 family → **TP15_only 만 Sharpe +0.13** |
+| 2026-05-03 | Phase 1.3 | Filter alpha X — baseline_full random 이 모든 family 이김 |
+| 2026-05-03 | Phase 1.3 | 진단: 일봉 long 대부분 손해, 드문 +15% 꼬리 펌프만 알파 가능성 |
+| 2026-05-03 | Phase 1.4 | 핵심 검증: TP15_only execution + binary 모델 vs random (진행 중) |
 | | | |

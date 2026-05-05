@@ -1,10 +1,67 @@
 # SIGNAL.md — 시그널 생성 (라벨 / 피처 / 모델 / 추론)
 
-> "**오늘 일봉 (KST 09:00 시작) 의 장중 max(high) 가 시가 대비 어디까지 올라갈지의 확률 분포**" 를 만드는 모든 책임. 출력은 코인별 **multi-class 확률 분포** + 기대값 + CI. 포지션 사이징 / 익절 손절 / 알림 전송은 LEDGER / OPS 의 일.
+> **현재 메인 = detector_v1 (binary tail detector).** 6-class 분포 모델은 legacy 보존.
+> 책임: 라벨 / 피처 / 모델 / 추론. 사이징·청산·알림은 LEDGER / OPS.
 
 ---
 
-## 0. 한 줄 결론
+## 0. 한 줄 결론 (현재 운영, detector_v1)
+
+```
+입력  : 어제까지 KRW 코인 일봉 + BTC 일봉 (multi-lookback)
+모델  : XGBoost binary, target = next-day max(high)/open ≥ 20%
+출력  : { 코인, model_score (0~1), btc_regime }
+게이트: regime ∈ {bull_quiet, bull_volatile} AND score ≥ 0.8815 (고정)
+       → per-day top 2
+운영  : silence-heavy. bear regime 전체 침묵.
+관계자: SIGNAL.detector_v1 → (alerts) → notifier.format_detector_beta → 텔레그램 (Stage 2)
+```
+
+**운영 안전장치**:
+- threshold = `output/detector_threshold.json` 의 0.8815 그대로. 라이브 quantile 재계산 절대 X
+- `signals/detector.py::DetectorV1` 가 단일 진입점 (load + score + detect + diagnose)
+- artifact 재구축 = `scripts/build_detector_v1.py` (재학습 시 1회)
+
+---
+
+## 0.5 detector_v1 (메인 — Phase X-2-D 채택)
+
+### 정의
+- target: `next_max_return ≥ 0.20` (next-day high / next-day open - 1)
+- model: XGBoost binary (objective=binary:logistic, n_estimators=400, depth=6, balanced sample_weight)
+- 검증: 5-fold purged WF + per-fold inner OOF threshold (overfit 보정)
+- 채택 후보: **C3** (regimes=bull_quiet+bull_volatile, threshold=OOF p99.95, cap=2)
+  - 3/4 active fold 양수 EV (+7.40% 평균), 2024 EV -0.89% (resilient), no_trade 1/5
+  - rank-based fallback (cap만, threshold 없음) 은 모두 EV 음수 → 폐기
+
+### artifact
+- `signals/models/ckpt/detector_v1.json` — 모델 (full panel 학습)
+- `signals/models/ckpt/detector_v1_meta.json` — feature_cols, params, train range
+- `output/detector_threshold.json` — operational rule + threshold + framing
+
+### LEAK_COLS (학습 시 제외)
+```
+{net_under_tp, max_return, label, label_tail,
+ next_open, next_high, next_low, next_close,
+ next_max_return, next_eod_return, next_max_dd}
+```
++ `next_*` prefix 전체
+
+---
+
+## 0.9 6-class 분포 모델 (legacy / 보조)
+
+아래 §1~§9 는 **6-class softprob 분포 모델 (Phase 1)** 설계 — **현재 운영 X**, 보존.
+재가동 시 `signals/predict.py` (= legacy multi-class entry, `scripts/predict_today_legacy.py` 가 호출).
+
+언제 다시 볼지:
+- detector_v1 의 보조 시그널로 분포 정보가 필요할 때
+- Phase 2 hybrid 모델로 진화 시 분포 학습이 다시 메인이 될 가능성
+- calibration / reliability diagram 컨셉 재사용
+
+---
+
+## 1. (legacy) 한 줄 결론
 
 ```
 입력  : 어제까지 KRW 코인 일봉 + BTC 일봉 (multi-lookback 흐름)
@@ -46,7 +103,7 @@
 - 업비트 일봉 마감 = **UTC 00:00 = KST 09:00**
 - DB 저장은 **KST naive** (pyupbit 기본). timestamp = KST 09:00:00 = 그 봉 시작
 - 추론 시 "오늘 일봉" = KST 09:00 시작 ~ 다음 KST 09:00 마감
-- 추론 시점 KST 08:30 = 어제 일봉 100% 마감 후 30 분
+- 추론 시점 KST 09:05 = 어제 일봉 100% 마감 후 30 분
 - 바이낸스 (UTC) join 시 +9 시간 변환 1 줄
 
 ### 1.4 유니버스
@@ -335,7 +392,7 @@ brier = np.mean(np.sum((pred_probs - actual_one_hot) ** 2, axis=1))
 
 ```python
 def predict_today():
-    """매일 KST 08:30 cron"""
+    """매일 KST 09:05 cron"""
     universe = get_top100_by_quote_volume(asof=now_kst())
     btc_features = compute_btc_regime_features(asof=yesterday_d1())
 

@@ -1,0 +1,13 @@
+[Unit]
+Description=prelude distribution beta daily 09:05 KST timer
+
+[Timer]
+# 09:05 KST = 00:05 UTC
+OnCalendar=*-*-* 00:05:00 UTC
+# Trading alerts are only valid near the scheduled decision time.
+# Do not catch up a missed 09:05 run later in the day as a paper entry.
+Persistent=false
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,31 @@
+{
+  "version": "detector_v1",
+  "asof": "2026-05-03T17:41:44.304891",
+  "btc_regime": "bear_quiet",
+  "universe_size": 242,
+  "threshold": 0.881450287878512,
+  "regimes_active": [
+    "bull_quiet",
+    "bull_volatile"
+  ],
+  "cap": 2,
+  "diagnose": {
+    "n_universe": 242,
+    "n_in_regime": 0,
+    "n_above_threshold": 2,
+    "n_pass_both": 0,
+    "score_max": 0.8968815207481384,
+    "score_p99": 0.7764382290840149,
+    "score_p99_5": 0.8630856245756138,
+    "threshold": 0.881450287878512,
+    "regimes_in_universe": [
+      [
+        "bear_quiet",
+        242
+      ]
+    ]
+  },
+  "n_alerts": 0,
+  "alerts": [],
+  "dry_run": true
+}

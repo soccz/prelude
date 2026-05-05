@@ -57,6 +57,62 @@ def _next_kst_9am(dt: pd.Timestamp) -> pd.Timestamp:
     return dt + pd.Timedelta(hours=24)
 
 
+def simulate_d1_simple(
+    open_price: float,
+    high_price: float,
+    low_price: float,
+    close_price: float,
+    tp_pct: float = TP_PCT,
+    sl_pct: float = SL_PCT,
+    cost_pct: float = ROUND_TRIP_COST_PCT,
+    sl_priority: bool = SL_PRIORITY,
+) -> dict:
+    """
+    빠른 일봉 단순 시뮬 (4h 봉 안 씀, backtest 대량 시뮬용).
+
+    근사:
+      - entry = open
+      - TP_hit if high >= entry × (1+tp_pct)
+      - SL_hit if low  <= entry × (1-sl_pct)
+      - 둘 다 시 → SL 우선 (보수)
+      - 둘 다 안 도달 → close 청산
+      - hold 시간 정보 없음 (eod 가정)
+
+    return: { exit_type, gross_return_pct, net_return_pct }
+    """
+    if open_price <= 0:
+        return {"exit_type": "skip", "gross_return_pct": 0.0, "net_return_pct": 0.0}
+
+    tp_price = open_price * (1 + tp_pct)
+    sl_price = open_price * (1 - sl_pct)
+    tp_hit = high_price >= tp_price
+    sl_hit = low_price <= sl_price
+
+    if tp_hit and sl_hit:
+        if sl_priority:
+            exit_type = "sl"
+            exit_price = sl_price
+        else:
+            exit_type = "tp"
+            exit_price = tp_price
+    elif tp_hit:
+        exit_type = "tp"
+        exit_price = tp_price
+    elif sl_hit:
+        exit_type = "sl"
+        exit_price = sl_price
+    else:
+        exit_type = "eod"
+        exit_price = close_price
+
+    gross = (exit_price - open_price) / open_price
+    return {
+        "exit_type": exit_type,
+        "gross_return_pct": gross,
+        "net_return_pct": gross - cost_pct,
+    }
+
+
 def simulate_position(
     market: str,
     entry_date: pd.Timestamp,

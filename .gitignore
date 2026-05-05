@@ -44,6 +44,11 @@ logs/
 # Personal notes
 NOTES.md
 
+# Personal trading ledger (감시 trail — public push X)
+output/paper_ledger.csv
+output/paper_ledger_backfill.csv
+output/paper_ledger_preopen.csv
+
 # OS
 .DS_Store
 Thumbs.db

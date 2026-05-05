@@ -82,26 +82,179 @@ def label_panel(
     return_col: str = "max_return",
 ) -> pd.DataFrame:
     """
-    DataFrame (panel) 에 multi-class 라벨 추가.
+    DataFrame (panel) 에 multi-class 라벨 추가 — market별 shift(-1).
+
+    panel[t] features = t 시점 (어제까지 본 정보)
+    panel[t] label    = t+1 시점 (내일 일봉의 max_return)
+
+    즉 "어제 보고 오늘 예측" 구조 (추론 흐름과 일치).
+    look-ahead leak 방지 (CLAUDE.md §2.5 위생).
 
     df_d1 columns 기대:
         market, timestamp, open, high, low, close, volume, ...
 
     추가 column:
-        max_return : high / open - 1
+        max_return : (next day high) / (next day open) - 1
         label      : multi-class bin (0 ~ len(bins))
+
+    참고: 마지막 row 의 max_return / label 은 NaN
+          (다음 일봉 없음) → prepare_features 에서 dropna(label) 자동 제거.
     """
     df = df_d1.copy()
-    df[return_col] = df["high"] / df["open"] - 1
+
+    # ===== 핵심: market별 shift(-1) =====
+    # 단순 shift(-1) 는 다른 코인 데이터로 shift 됨 → 반드시 groupby
+    if "market" not in df.columns:
+        raise ValueError("label_panel requires 'market' column")
+    df = df.sort_values(["market", "timestamp"]).reset_index(drop=True)
+    g = df.groupby("market", sort=False)
+    target_open = g["open"].shift(-1)
+    target_high = g["high"].shift(-1)
+    df[return_col] = target_high / target_open - 1
 
     bin_arr = np.array([-np.inf] + list(bins) + [np.inf])
-    df[label_col] = np.digitize(df[return_col].values, bin_arr) - 1
-    # np.digitize: bin_arr[i-1] ≤ x < bin_arr[i] 일 때 i 반환
-    # -1 로 0 부터 시작
+    # NaN safe: digitize 가 NaN 처리 못하니 별도
+    valid = df[return_col].notna()
+    df[label_col] = np.nan
+    df.loc[valid, label_col] = np.digitize(
+        df.loc[valid, return_col].values, bin_arr
+    ) - 1
 
-    # 비정상 (open <= 0) 처리
-    df.loc[df["open"] <= 0, label_col] = 0
-    df.loc[df["open"] <= 0, return_col] = 0.0
+    # 비정상 (next open <= 0) 처리
+    bad = (target_open <= 0) | target_open.isna()
+    df.loc[bad, label_col] = np.nan
+    df.loc[bad, return_col] = np.nan
+
+    return df
+
+
+# ============================================================================
+# Path-aware 라벨 (실행 룰 인식 — TP 먼저 도달 vs SL 먼저)
+# ============================================================================
+def label_panel_path_aware(
+    df_d1: pd.DataFrame,
+    df_4h: pd.DataFrame,
+    tp_pct: float = 0.10,
+    sl_pct: float = 0.05,
+    sl_priority: bool = True,
+    label_col: str = "label_path_tp_first",
+    return_col: str = "net_return_under_rule",
+) -> pd.DataFrame:
+    """
+    Path-aware 라벨 — 다음 일봉의 4h 봉 path 기반.
+
+    panel[t] features = t 시점 (어제까지)
+    panel[t] label    = t+1 일봉의 4h path 시뮬 결과:
+        1 = TP_pct 먼저 도달 (TP first)
+        0 = SL_pct 먼저 도달 또는 안 도달 (eod close)
+    panel[t] net_return_under_rule = 같은 룰의 실제 net return (cost 미차감)
+
+    df_4h: 4h 봉 panel (timestamp, market, open, high, low, close)
+    same_bar 정책: sl_priority=True 면 같은 4h 봉 둘 다 시 SL 먼저 (보수)
+    """
+    df = df_d1.copy()
+    if "market" not in df.columns:
+        raise ValueError("requires market column")
+    df = df.sort_values(["market", "timestamp"]).reset_index(drop=True)
+
+    # next-day OHLC (시뮬용)
+    g = df.groupby("market", sort=False)
+    next_open = g["open"].shift(-1)
+    next_date = g["timestamp"].shift(-1)
+
+    # 4h panel index (market, day)
+    df_4h = df_4h.copy()
+    df_4h["timestamp"] = pd.to_datetime(df_4h["timestamp"])
+    df_4h["day"] = df_4h["timestamp"].dt.normalize()
+    g4 = df_4h.groupby(["market", "day"])
+
+    labels = np.full(len(df), np.nan)
+    rets = np.full(len(df), np.nan)
+
+    for i, (market, ts, opn) in enumerate(zip(df["market"], next_date, next_open)):
+        if pd.isna(opn) or opn <= 0 or pd.isna(ts):
+            continue
+        day_key = (market, pd.to_datetime(ts).normalize())
+        if day_key not in g4.groups:
+            continue
+        bars = df_4h.loc[g4.groups[day_key]].sort_values("timestamp")
+        if len(bars) == 0:
+            continue
+
+        tp_price = opn * (1 + tp_pct)
+        sl_price = opn * (1 - sl_pct)
+        ret = None
+        outcome = 0  # default: not TP first
+
+        for _, b in bars.iterrows():
+            tp_hit = b["high"] >= tp_price
+            sl_hit = b["low"] <= sl_price
+            if tp_hit and sl_hit:
+                if sl_priority:
+                    ret = (sl_price - opn) / opn
+                else:
+                    ret = (tp_price - opn) / opn
+                    outcome = 1
+                break
+            if tp_hit:
+                ret = (tp_price - opn) / opn
+                outcome = 1
+                break
+            if sl_hit:
+                ret = (sl_price - opn) / opn
+                break
+
+        if ret is None:
+            # eod close
+            ret = (bars["close"].iloc[-1] - opn) / opn
+
+        labels[i] = outcome
+        rets[i] = ret
+
+    df[label_col] = labels
+    df[return_col] = rets
+    return df
+
+
+# ============================================================================
+# Binary 라벨 (setup detector v2 — momentum-continuation)
+# ============================================================================
+def label_panel_binary(
+    df_d1: pd.DataFrame,
+    threshold: float = 0.10,
+    label_col: str = "label_binary",
+    return_col: str = "max_return",
+) -> pd.DataFrame:
+    """
+    Binary 라벨: next_day_max(high) / next_day_open - 1 >= threshold → 1, else 0.
+
+    panel[t] features = t 시점 (어제까지 본 정보)
+    panel[t] label    = t+1 일봉의 max(high) ≥ threshold 도달 yes/no
+
+    market별 shift(-1) — coin 간 leak 방지.
+
+    추가 column:
+        max_return    : (next day high) / (next day open) - 1 (이미 있으면 재사용)
+        label_binary  : 0 / 1
+    """
+    df = df_d1.copy()
+    if "market" not in df.columns:
+        raise ValueError("label_panel_binary requires 'market' column")
+    df = df.sort_values(["market", "timestamp"]).reset_index(drop=True)
+
+    # max_return 없으면 계산
+    if return_col not in df.columns:
+        g = df.groupby("market", sort=False)
+        target_open = g["open"].shift(-1)
+        target_high = g["high"].shift(-1)
+        df[return_col] = target_high / target_open - 1
+        bad = (target_open <= 0) | target_open.isna()
+        df.loc[bad, return_col] = np.nan
+
+    # binary 라벨
+    df[label_col] = (df[return_col] >= threshold).astype(float)
+    # max_return NaN → label NaN
+    df.loc[df[return_col].isna(), label_col] = np.nan
 
     return df
 

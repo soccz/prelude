@@ -1,0 +1,29 @@
+{
+  "version": "detector_v1",
+  "built_at": "2026-05-03T08:38:21.505940Z",
+  "model_ckpt": "signals/models/ckpt/detector_v1.json",
+  "model_meta": "signals/models/ckpt/detector_v1_meta.json",
+  "operational_rule": {
+    "regimes": [
+      "bull_quiet",
+      "bull_volatile"
+    ],
+    "cap": 2,
+    "threshold_pct": 0.9995,
+    "target_pct": 0.2,
+    "bear_action": "silence",
+    "threshold": 0.881450287878512,
+    "threshold_source": "OOF p99.95 over KRW universe (136,924 samples)"
+  },
+  "framing": "BTC bull regime에서 ≥20% tail pump 가능성이 과거 OOF 기준 최상위 0.05%에 들어온 후보 (매수 추천 X)",
+  "validation_summary": {
+    "method": "5-fold purged walk-forward + per-fold inner OOF threshold",
+    "candidate": "C3 (bull_all p99.95 cap2)",
+    "n_folds_positive": "3 of 4 active",
+    "no_trade_folds": "1 of 5",
+    "ev_avg_pct": 7.4,
+    "ev_2024_pct": -0.89,
+    "n_total_trades": 56,
+    "rank_fallback_rejected": true
+  }
+}

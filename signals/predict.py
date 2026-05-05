@@ -1,4 +1,4 @@
-"""일일 추론 — 매일 KST 08:30 cron 호출용.
+"""일일 추론 — 매일 KST 09:05 cron 호출용.
 
 설계 (SIGNAL.md §6):
   - 어제까지 데이터로 오늘 일봉 분포 예측
@@ -75,7 +75,7 @@ def predict_today(
     only_tradable: bool = True,
 ) -> pd.DataFrame:
     """
-    매일 KST 08:30 cron 추론.
+    매일 KST 09:05 cron 추론.
 
     asof: 추론 기준 시점 (None=now). 어제 마감된 일봉이 마지막 입력.
     only_tradable: True 면 KRW-* 만 추천 candidate (학습은 BINANCE 도 사용 가능).

@@ -24,7 +24,7 @@ import pandas as pd
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS candles (
     market TEXT NOT NULL,
-    timestamp DATETIME NOT NULL,    -- UTC, ISO 8601 (예 '2026-05-03 00:00:00')
+    timestamp DATETIME NOT NULL,    -- timezone-naive exchange timestamp
     open REAL NOT NULL,
     high REAL NOT NULL,
     low REAL NOT NULL,
@@ -69,7 +69,7 @@ def save_candles(db_path: str | Path, df: pd.DataFrame, market: str) -> int:
     candles DataFrame 을 DB 에 저장 (UPSERT).
 
     df columns 기대:
-        timestamp (datetime, UTC), open, high, low, close, volume, quote_volume
+        timestamp (datetime, timezone-naive), open, high, low, close, volume, quote_volume
     또는 pyupbit get_ohlcv 결과 (index 가 timestamp, columns 가 open/high/low/close/volume)
     + value column (KRW 거래대금) → quote_volume 으로 매핑
 
@@ -95,7 +95,9 @@ def save_candles(db_path: str | Path, df: pd.DataFrame, market: str) -> int:
 
     df["market"] = market
 
-    # timestamp 타입 정규화 (UTC)
+    # timestamp 타입 정규화.
+    # 각 collector 가 만든 exchange timestamp 를 timezone-naive 로 저장한다.
+    # Upbit 는 KST candle boundary, Binance 는 UTC candle boundary 를 사용한다.
     df["timestamp"] = pd.to_datetime(df["timestamp"]).dt.tz_localize(None)
     df["timestamp"] = df["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -157,7 +159,7 @@ def list_markets(db_path: str | Path) -> list[str]:
 
 
 def latest_timestamp(db_path: str | Path, market: str) -> Optional[pd.Timestamp]:
-    """특정 market 의 최신 candle timestamp (UTC)."""
+    """특정 market 의 최신 candle timestamp (timezone-naive exchange timestamp)."""
     init_db(db_path)
     with connect(db_path) as conn:
         row = conn.execute(

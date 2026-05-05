@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import sys
+import argparse
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -63,6 +64,11 @@ def check_drift_state() -> tuple[bool, str]:
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--no-telegram", action="store_true",
+                        help="Do not send Telegram on failure; exit nonzero only")
+    args = parser.parse_args()
+
     print(f"=== prelude health {datetime.now()} ===")
     issues = []
 
@@ -96,7 +102,8 @@ def main():
 
     if issues:
         msg = "⚠️ prelude health issues:\n" + "\n".join(f"  • {i}" for i in issues)
-        send_telegram(msg)
+        if not args.no_telegram:
+            send_telegram(msg)
         sys.exit(1)
     else:
         print("\n✅ ALL OK")

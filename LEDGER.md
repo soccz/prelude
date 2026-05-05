@@ -1,6 +1,16 @@
-# LEDGER.md — 가상 포트폴리오 추적
+# LEDGER.md — 가상 reference ledger
 
-> 시스템은 **알림 + 가상 ledger 만**. 실제 매매는 사용자 직접. 이 문서는 "**시스템이 추천대로 가상 자본을 굴렸으면 어떻게 됐을까**" 자동 추적부.
+> **현재 운영: detector_v1 detector beta. ledger 는 "추천 그대로 따라갔으면" reference 만.**
+> 시스템 = 텔레그램 알림. 실제 매매는 사용자 직접. ledger 는 시스템 정직성 검증용 reference.
+> 자동매매 0. 백테스트 EV(+7.4% 평균, 2024 -0.89%)는 운영 보장 X — Stage 1/2 라이브 데이터로 재확인.
+
+**detector beta 단계 (현재) ledger 역할**:
+- alerts → 가상 reference ledger 자동 누적 (TP=+20%, EOD close, 왕복 0.15%)
+- 사용자 실제 매매 NOTES 와 비교 (시스템 가상 vs 사용자 실제)
+- backtest 와 라이브 reference 의 EV 차이 추적 (백테스트 → 라이브 drift 감지)
+- **시스템 사이징/익절 룰은 사용자에게 강제 X** — 사용자 본인 룰
+
+아래 §1~§9 는 **TP/SL 옵션 3** 기반 가상 ledger 인프라 (legacy + reference) — 자동매매 X 원칙 유지.
 
 ---
 

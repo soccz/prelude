@@ -2,6 +2,10 @@
 
 > 다른 폴더에서 **import 안 함**. 코드는 prelude 안에 self-contained 새로 짠다 (CLAUDE.md §2.1). 이 문서는 어디서 어떤 아이디어 / 패턴을 참조했는지 출처만 기록.
 
+> **운영 컨텍스트 (2026-05-03)**:
+> 현재 메인 = `detector_v1` (binary tail ≥20%). 6-class softprob (gan_t pump_classifier 차용 패턴) 은 **legacy** — `signals/predict.py` + `scripts/predict_today_legacy.py` 에 보존.
+> 사용자 제안 신규 방향 (distribution head + label discovery, PHASES "향후 방향" §) 은 6-class 분포 모델 패턴을 **다중 binary head 형태로 재사용** 가능.
+
 ---
 
 ## 0. 원칙
@@ -25,7 +29,7 @@
 | `data/preprocessor.py::create_pump_labels` | 미래 N 시간 max high 기반 펌프 라벨 (10/15/20% multi-class) | `signals/labels.py::today_pump_label` (일봉 + drawdown 추가, binary) |
 | `training/pump_trainer.py` | XGBoost 4-class + Optuna 튜닝 (n_estimators=782, max_depth=10) | `signals/models/xgb_phase1.py` (binary 로 단순화) |
 | `models/hybrid_model.py` | Transformer + TCN + Gate + FiLM + GAN/CVAE 하이브리드 | `signals/models/hybrid_phase2.py` (Phase 2 — 일봉, residual return) |
-| `utils/scheduled_modes.py::run_morning_report_mode` | KST 08:00 morning cron 흐름 (preflight → predict → telegram) | `ops/preflight.py` + `scripts/daily_run.sh` (KST 08:30, 일봉) |
+| `utils/scheduled_modes.py::run_morning_report_mode` | KST 08:00 morning cron 흐름 (preflight → predict → telegram) | `ops/preflight.py` + `scripts/daily_run.sh` (KST 09:05, 일봉) |
 | `utils/telegram_bot.py::send_morning_report` | 텔레그램 메시지 포맷 + signal alert dedup | `notifier/telegram.py` + `notifier/format.py` (prelude 톤) |
 | `utils/freshness.py` | 데이터 신선도 게이트 + exit code 2 fallback | `ops/preflight.py::check_freshness` |
 | `utils/run_lock.py` | cron 중복 실행 방지 lock | `ops/run_lock.py` (그대로 차용 가능, single-file) |

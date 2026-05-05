@@ -1,0 +1,11 @@
+[Unit]
+Description=prelude paper ledger close-out daily 09:30 KST timer
+
+[Timer]
+# 09:30 KST = 00:30 UTC
+OnCalendar=*-*-* 00:30:00 UTC
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

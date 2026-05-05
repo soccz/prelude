@@ -1,26 +1,40 @@
 # OPS.md — 매일 자동 운영 인프라
 
-> 매일 KST 08:30 정확히 알림 발사. freshness 보장. 텔레그램 포맷. drift 감지. 주 1 회 재학습. 운영 인프라 모두.
+> **현재 운영: detector_v1 Stage 1 dry-run (cron 미등록).**
+> 매일 KST 09:05 후보 탐지 (≥20% tail), silence-heavy. Stage 2 진입 시 텔레그램 발송.
 
 ---
 
-## 0. 한 줄 결론
+## 0. 한 줄 결론 (현재 운영, detector_v1)
 
 ```
-KST 08:30 cron 발사
+KST 09:05 cron 발사
    ↓
-preflight (데이터 fresh? NaN? 유니버스 안정?)
-   ↓
-SIGNAL → predict → predictions_YYYYMMDD.csv
-   ↓
-LEDGER → 어제 가상 포지션 청산 + 오늘 진입 ledger 기록
-   ↓
-notifier → 텔레그램 메시지 (오늘 추천 + 어제 결과)
-   ↓
-post-hoc (drift_detector / ic_gate / verify_telegram)
+scripts/daily_run.sh
+   ├─ data update (어제 일봉 incremental)
+   └─ python scripts/predict_today.py    ← Stage 1: --send-telegram 없음 (dry-run default)
+       ↓
+   DetectorV1.load() — 고정 threshold 0.8815 + regime gate + cap 2
+       ↓
+   panel build (until=asof) — 미래 데이터 차단
+       ↓
+   detect → alerts (0~2건)
+       ↓
+   ├─ output/predictions_YYYYMMDD.csv      (전체 KRW score 분포)
+   ├─ output/detector_log_YYYYMMDD.json    (alerts + diagnose)
+   └─ stdout 메시지 (Stage 1) | telegram 발송 (Stage 2)
 ```
 
-매일 약 5 분 안에 끝남.
+**Stage 진행**:
+- Stage 1: cron dry-run, telegram OFF — 라이브 분포 1~2주 관찰
+- Stage 2: telegram 발송, 자동매매 X — 사용자 NOTES 평가
+- Stage 3: NOTES 기반 threshold/tier 조정
+
+**원칙 (양보 X)**:
+- threshold = artifact 고정값. 라이브 quantile 재계산 금지
+- BTC bear regime → 침묵
+- alert framing = "≥20% tail 후보, 매수 추천 X"
+- Stage 변경 = 사용자 명시 컨펌 후
 
 ---
 
@@ -30,7 +44,7 @@ post-hoc (drift_detector / ic_gate / verify_telegram)
 
 | 시각 (KST) | UTC | task | 스크립트 |
 |---|---|---|---|
-| **08:30 매일** | 23:30 | 일일 추론 + 알림 | `scripts/daily_run.sh` |
+| **09:05 매일** | 00:05 | 일일 추론 + 알림 (어제 일봉 100% 마감 후 — leak-free) | `scripts/daily_run.sh` |
 | **09:30 매일** | 00:30 | 어제 가상 포지션 청산 + ledger 갱신 + verify | `scripts/post_open_run.sh` |
 | **00:00 매일** | 15:00 | 어제 holdout IC + drift 측정 | `scripts/measure_run.sh` |
 | **일 06:00 주간** | 토 21:00 | 주간 재학습 + promotion gate | `scripts/retrain_run.sh` |
@@ -44,8 +58,8 @@ CRON_TZ=Asia/Seoul
 # 데이터 수집 (매시 정각)
 0 * * * * cd /home/soccz/22tb/prelude && bash scripts/collect_run.sh >> output/cron_collect.log 2>&1
 
-# 일일 추론 + 알림 (KST 08:30)
-30 8 * * * cd /home/soccz/22tb/prelude && bash scripts/daily_run.sh >> output/cron_daily.log 2>&1
+# 일일 추론 + 알림 (KST 09:05)
+5 9 * * * cd /home/soccz/22tb/prelude && bash scripts/daily_run.sh >> output/cron_daily.log 2>&1
 
 # 어제 ledger 청산 + 검증 (KST 09:30, 어제 일봉 100% 마감 후)
 30 9 * * * cd /home/soccz/22tb/prelude && bash scripts/post_open_run.sh >> output/cron_post_open.log 2>&1
@@ -82,66 +96,86 @@ cron 대신 systemd timer 사용 시 `td-pump-daily.timer` / `td-pump-measure.ti
 
 ---
 
-## 3. 텔레그램 알림 포맷 (notifier/telegram.py)
+## 3. 텔레그램 알림 포맷 (notifier/format.py)
 
-### 3.1 매일 KST 08:30 메인 알림
+### 3.1 detector beta 알림 (현재 운영, `format_detector_beta`)
 
+silence-heavy. 알림은 0~2건. bear regime 전체 침묵.
+
+**alert 발생 시**:
 ```
-🌅 prelude 2026-05-03 (KST 08:30)
+🌅 prelude detector v1 2025-11-05 (KST 09:05)
+BTC regime: bull_volatile | universe: 215
+threshold: 0.8815 (OOF p99.95, 고정)
+
+━━━ ≥20% tail 후보 (2건) ━━━
+※ 매수 추천 아님 / 실패 시 큰 손실 가능
+🔍 XYZ      score 0.9123  (threshold +3.08pp)  rank #1
+🔍 ABC      score 0.8932  (threshold +1.17pp)  rank #2
+
+━━━ 진단 ━━━
+in_regime  215 / above_thr   4 / both 4
+score max 0.9123 | p99 0.7821 | p99.5 0.8534
+
+📎 framing: BTC bull regime 에서 ≥20% tail pump 가능성이
+   과거 OOF 기준 최상위 0.05% 후보. 사용자 본인 판단.
+```
+
+**침묵 (bear regime)**:
+```
+━━━ 침묵 ━━━
+(BTC bear regime — 알림 비활성)
+```
+
+**침묵 (threshold 미통과)**:
+```
+━━━ 침묵 ━━━
+(threshold 통과 후보 없음 — 오늘은 강한 tail 신호 X)
+```
+
+### 3.2 출력 필드 정의 (detector beta)
+| 필드 | 의미 |
+|---|---|
+| 🔍 | tail 후보 마커 (매수 추천 아님 — 사용자 판단 보조) |
+| score | binary detector raw score (0~1) |
+| threshold +N pp | 고정 threshold 0.8815 대비 마진 |
+| rank #N | 그날 cap 안 순위 (cap=2) |
+| 진단 in_regime / above_thr / both | 게이트 통과 단계별 카운트 (모니터링) |
+
+### 3.3 톤 원칙
+- "**후보**" framing — "매수 추천" 표현 절대 X
+- silence-heavy 정직: 0건이면 0건이라고 침묵 메시지
+- 실패 가능성 명시: "실패 시 큰 손실 가능"
+- 거짓 자신감 금지: score 가 threshold 막 넘은 건 margin 표기로 사용자에게 그대로 노출
+
+### 3.4 침묵 조건 (현재 운영)
+- BTC regime ∈ {bear_quiet, bear_volatile}
+- threshold 0.8815 통과 후보 0개
+- preflight 실패 (드물게)
+
+### 3.5 (legacy) 6-class 분포 알림 포맷 — `format_daily_alert`
+아래 §3.5x 는 **legacy multi-class 모델용** (`scripts/predict_today_legacy.py` 가 호출). 현재 운영 X.
+
+#### 3.5.1 legacy 메인 알림 예시
+```
+🌅 prelude 2026-05-03 (KST 09:05)
 BTC regime: bull_quiet | universe: 100 코인
 
 ━━━ 오늘 장중 펌프 분포 (top 3) ━━━
 
 🔥 KAITO  P(≥+5/10/15/20%) = 70/45/20/8%
          기대 max +7.2% | CI [+1, +14] | ⭐⭐
-         과거 비슷 패턴: 평균 도달 14시 / 도달 전 -2.1%
-
 ✅ ETH    P(≥+5/10/15/20%) = 62/35/15/4%
-         기대 max +5.8% | CI [+0, +12] | ⭐
-         
 ✅ SOL    P(≥+5/10/15/20%) = 58/30/12/3%
-         기대 max +5.1% | CI [-1, +11] | ⭐⭐
-
-━━━ 어제 결과 (5/2 진입 → 익절/손절) ━━━
-✓ KAITO  TP +10% in 3h 🎯 (P(≥10%) 예측 45%)
-✓ ETH    TP +10% in 7h 🎯 (예측 35%)
-✗ SOL    SL -5% in 2h ❌ (예측 30%)
-
-━━━ 가상 ledger ━━━
-누적 net +47.3 만원 (+4.7%)  MDD -3.2%
-이번 주 TP 적중: 67% | SL 적중: 17% | 평균 hold 4.2h
-
-━━━ 시스템 정확도 (지난 7일) ━━━
-≥+5%  예측 70% → 실제 75%  ✓
-≥+10% 예측 45% → 실제 50%  ✓ 
-≥+15% 예측 20% → 실제 17%  ⚠ 살짝 과신
-95% CI 커버: 93% (목표 95%)
 ```
 
-### 3.2 출력 필드 정의
+#### 3.5.2 legacy 출력 필드
 | 필드 | 의미 |
 |---|---|
 | 🔥/✅/▫/· | σ-tier (SIGNAL §5) |
 | **P(≥+X%)** | 장중 max(high) 가 시가 대비 X% 도달할 확률 (multi-class cumulative) |
 | 기대 max | bin 중간값 × 확률의 가중 평균 |
 | CI [a, b] | 95% confidence interval |
-| ⭐⭐ | 과거 안정도 (이 코인 ledger TP 적중률 ≥ 60% 면 ⭐⭐, 70% 면 ⭐⭐⭐) |
-| 도달 패턴 | 비슷 패턴의 평균 도달 시각 + 도달 전 max drawdown |
-| 🎯/❌ | TP 적중 / SL 손절 |
-| 정확도 ✓/⚠ | 예측 확률과 실제 적중률 매칭 여부 (calibration) |
-
-### 3.3 톤 원칙
-- "**오늘**" 표현 (사용자 멘탈 모델 정확히)
-- 미래형 "내일 오를" 절대 X
-- 거짓 자신감 금지: 확률은 calibration 기반 정직 표시 (78% 가 78% 의미)
-- 실패는 명시: ❌ 표시 빠지면 안 됨
-
-### 3.4 침묵 조건
-다음 중 하나면 알림 발사 X (또는 "오늘 침묵" 만):
-- BTC regime = bear_volatile
-- preflight 실패
-- 일일 손실 한도 발동 (LEDGER §8.1)
-- **P(≥+5%) ≥ 0.5 코인 0 개** (의미 있는 시그널 없음)
 
 ### 3.5 텔레그램 봇 — 기존 MAE 봇 공유
 
@@ -299,7 +333,7 @@ LEDGER §8 참조. 매일 KST 09:30 cron 자동:
 |---|---|
 | `deploy/crontab.txt` | cron 정의 |
 | `deploy/systemd/*.{service,timer}` | systemd fallback |
-| `scripts/daily_run.sh` | KST 08:30 메인 |
+| `scripts/daily_run.sh` | KST 09:05 메인 |
 | `scripts/post_open_run.sh` | KST 09:30 청산 / 검증 |
 | `scripts/measure_run.sh` | KST 00:00 IC / drift |
 | `scripts/retrain_run.sh` | 일 06:00 재학습 |

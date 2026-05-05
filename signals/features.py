@@ -127,6 +127,15 @@ def compute_alt_features(
     out["roc_3d"] = close.pct_change(3) * 100
     out["roc_7d"] = close.pct_change(7) * 100
 
+    # ATR (volatility-scaled TP/SL 용)
+    tr = pd.concat([
+        high - low,
+        (high - close.shift(1)).abs(),
+        (low - close.shift(1)).abs(),
+    ], axis=1).max(axis=1)
+    out["atr_14"] = tr.rolling(14).mean()
+    out["atr_pct_14"] = out["atr_14"] / (close + EPS)  # close 대비 ATR 비율
+
     return out
 
 

@@ -1,0 +1,12 @@
+[Unit]
+Description=prelude paper ledger close-out daily 09:30 KST
+After=network.target
+
+[Service]
+Type=oneshot
+User=soccz
+WorkingDirectory=/home/soccz/22tb/prelude
+ExecStart=/home/soccz/22tb/prelude/venv/bin/python /home/soccz/22tb/prelude/scripts/close_paper_ledger.py
+TimeoutStartSec=300
+StandardOutput=append:/home/soccz/22tb/prelude/output/cron_close.log
+StandardError=append:/home/soccz/22tb/prelude/output/cron_close.log
