@@ -35,6 +35,12 @@
 
 **라이브 첫 결과 (28 closed dist + 24 closed preopen)**: 누적 가상 PnL 둘 다 음수 (dist -12.97%, preopen -13.47%). avg_max +6.82% / avg_min -5.94% (dist) — 변동성은 크지만 5% TP 룰 + 비용으로 누적은 깎임. 라이브 paper 데이터 더 쌓이면서 calibration 트랙 (사용자 NOTES + dashboard) 으로 룰 조정.
 
+**Tear sheet 강화 (2026-05-07 추가)**: pyfolio / quantstats / Bailey & Lopez de Prado (2014) 표준까지 cover. 추가된 metric (총 22+) — Volatility / Skew / Kurt / VaR / CVaR / Tail Ratio / Recovery Factor / Ulcer Index / Common Sense Ratio / W-L streak / **PSR / DSR / MinTRL** / Information Ratio / Beta / Tracking Error vs BTC HODL / Top 5 Drawdowns / Underwater plot / Rolling Sharpe (30d ann) / Monthly returns heatmap / Best & Worst trades / Stratification (regime/setup/score) / Score×PnL scatter / CSV download. PIN 9963 PBKDF2+AES 암호화 + papers viewer 와 동일 패턴.
+
+**Methodology 출처 1:1**: Sharpe (1966) / Sortino & Price (1994) / Young 1991 / Martin 1987 / Rockafellar & Uryasev 2000 / Treynor & Black 1973 / Bailey & Lopez de Prado 2014 / Efron 1979 / pyfolio / quantstats — chip sub + about-card + References 3중 표기.
+
+**메인 보고서와 중복 제거**: dashboard About 섹션이 이전에 메인 페이지의 #architecture / #distribution / #preopen 과 중복. 이 부분은 anchor link 5개로 reframe (Architecture / Distribution Engine v1 / Pre-open Trigger v1 / 6 Experiments / Failures Wall). dashboard 만의 가치 = EXECUTION RULE + METRIC SOURCES + 라이브 통계 한계 5 + References.
+
 **주의**: 첫 site repo commit + push 는 사용자 수동 (라이브 반영 confirmation). 그 후부터 자동.
 
 ---

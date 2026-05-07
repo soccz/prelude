@@ -1021,9 +1021,14 @@ def main():
     parser.add_argument("--asof", type=str, help="기준 시점 (default=now)")
     parser.add_argument(
         "--pin",
-        default=os.environ.get("PRELUDE_DASHBOARD_PIN", DEFAULT_PIN),
-        help="암호화 PIN (default 9963 또는 PRELUDE_DASHBOARD_PIN env). "
-             "빈 값 ('') 으로 주면 평문 출력 (테스트용).",
+        default=None,
+        help="명시 암호화 PIN. 미지정 시 PRELUDE_DASHBOARD_PIN env "
+             f"또는 default {DEFAULT_PIN}.",
+    )
+    parser.add_argument(
+        "--no-encrypt",
+        action="store_true",
+        help="평문 출력 (테스트용 only). 라이브 publish 에는 절대 금지.",
     )
     args = parser.parse_args()
 
@@ -1033,7 +1038,15 @@ def main():
     asof = pd.Timestamp(args.asof) if args.asof else pd.Timestamp.now()
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    pin = args.pin or None
+
+    # PIN 우선순위 — 빈 문자열을 절대 평문으로 해석하지 X.
+    # 평문 원하면 명시적 --no-encrypt.
+    if args.no_encrypt:
+        pin = None
+    else:
+        pin = args.pin or os.environ.get("PRELUDE_DASHBOARD_PIN") or DEFAULT_PIN
+        if not pin:  # extra guard
+            pin = DEFAULT_PIN
     log.info(f"encryption: {'PIN ' + ('*' * len(pin)) if pin else 'OFF (plaintext)'}")
 
     df_dist = _load_or_empty(args.paper_ledger)
