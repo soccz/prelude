@@ -60,6 +60,116 @@ def _virtual_pnl_per_alert(max_ret_pct: float, close_ret_pct: float) -> float:
     return gross - ROUND_TRIP_COST_PCT
 
 
+def _per_alert_pnl_series(closed: pd.DataFrame, max_col: str, close_col: str) -> pd.Series:
+    """알림별 net PnL (TP rule 적용, 비용 차감) — 단일 시리즈."""
+    pnl = closed.apply(
+        lambda r: _virtual_pnl_per_alert(r[max_col], r[close_col]), axis=1
+    ).dropna()
+    return pnl
+
+
+def compute_quant_metrics(closed: pd.DataFrame, max_col: str, close_col: str) -> dict:
+    """헤드라인 metric — Sharpe/Sortino/Calmar/Profit Factor/Expectancy.
+
+    daily aggregation 으로 Sharpe (그날 net 의 평균 / std × √252).
+    Calmar = annualized return / |MDD|.
+    Profit Factor = sum(positive) / |sum(negative)|.
+    Expectancy = avg per trade.
+    """
+    pnl = _per_alert_pnl_series(closed, max_col, close_col)
+    if len(pnl) == 0:
+        return {"n_trades": 0}
+
+    closed = closed.copy()
+    closed["pnl"] = closed.apply(
+        lambda r: _virtual_pnl_per_alert(r[max_col], r[close_col]), axis=1
+    )
+    closed = closed.dropna(subset=["pnl"])
+    closed["date_dt"] = pd.to_datetime(closed["date"])
+
+    # daily aggregate (같은 날 알림 N 개면 그날 net = mean)
+    daily = closed.groupby(closed["date_dt"].dt.date)["pnl"].sum().sort_index()
+    n_days = len(daily)
+    avg_daily = float(daily.mean())
+    std_daily = float(daily.std(ddof=1)) if n_days > 1 else float("nan")
+    downside_daily = daily[daily < 0]
+    downside_std = (
+        float(downside_daily.std(ddof=1)) if len(downside_daily) > 1 else float("nan")
+    )
+
+    sharpe = (avg_daily / std_daily) * np.sqrt(252) if std_daily and std_daily > 0 else float("nan")
+    sortino = (avg_daily / downside_std) * np.sqrt(252) if downside_std and downside_std > 0 else float("nan")
+
+    cum = daily.cumsum()
+    mdd = float((cum - cum.cummax()).min())
+    annualized_return = avg_daily * 252
+    calmar = annualized_return / abs(mdd) if mdd < 0 else float("nan")
+
+    wins = pnl[pnl > 0]
+    losses = pnl[pnl < 0]
+    profit_factor = (
+        float(wins.sum() / abs(losses.sum())) if len(losses) and losses.sum() < 0 else float("nan")
+    )
+    expectancy = float(pnl.mean())
+    avg_win = float(wins.mean()) if len(wins) else float("nan")
+    avg_loss = float(losses.mean()) if len(losses) else float("nan")
+    win_loss_ratio = float(abs(avg_win / avg_loss)) if avg_loss and not np.isnan(avg_loss) and avg_loss < 0 else float("nan")
+
+    return {
+        "n_trades": int(len(pnl)),
+        "n_days": int(n_days),
+        "n_wins": int(len(wins)),
+        "n_losses": int(len(losses)),
+        "sharpe_ann": _maybe_float(sharpe),
+        "sortino_ann": _maybe_float(sortino),
+        "calmar": _maybe_float(calmar),
+        "profit_factor": _maybe_float(profit_factor),
+        "expectancy_pct": _maybe_float(expectancy * 100),
+        "avg_win_pct": _maybe_float(avg_win * 100) if len(wins) else None,
+        "avg_loss_pct": _maybe_float(avg_loss * 100) if len(losses) else None,
+        "win_loss_ratio": _maybe_float(win_loss_ratio),
+        "annualized_return_pct": _maybe_float(annualized_return * 100),
+    }
+
+
+def _maybe_float(v):
+    if v is None or (isinstance(v, float) and (np.isnan(v) or np.isinf(v))):
+        return None
+    return round(float(v), 4)
+
+
+def compute_bootstrap_ci(closed: pd.DataFrame, max_col: str, close_col: str,
+                         n_iter: int = 1000, seed: int = 42) -> dict:
+    """Trade-level bootstrap 95% CI for cum PnL, mean PnL, Sharpe.
+
+    표본이 28 정도라 CI 는 매우 넓을 것 — 그게 "정직한" 신호.
+    """
+    pnl = _per_alert_pnl_series(closed, max_col, close_col).reset_index(drop=True)
+    n = len(pnl)
+    if n < 5:
+        return {"n_trades": int(n), "note": "n<5: bootstrap skipped"}
+    rng = np.random.default_rng(seed)
+    cum_samples = np.empty(n_iter)
+    mean_samples = np.empty(n_iter)
+    for i in range(n_iter):
+        idx = rng.integers(0, n, size=n)
+        sample = pnl.iloc[idx].values
+        cum_samples[i] = sample.sum()
+        mean_samples[i] = sample.mean()
+    return {
+        "n_trades": int(n),
+        "n_iter": int(n_iter),
+        "cum_pnl_pct_ci95": [
+            _maybe_float(np.quantile(cum_samples, 0.025) * 100),
+            _maybe_float(np.quantile(cum_samples, 0.975) * 100),
+        ],
+        "mean_pnl_pct_ci95": [
+            _maybe_float(np.quantile(mean_samples, 0.025) * 100),
+            _maybe_float(np.quantile(mean_samples, 0.975) * 100),
+        ],
+    }
+
+
 def compute_distribution_summary(df: pd.DataFrame) -> dict:
     """distribution paper_ledger → KPI dict."""
     closed = df[df["status"].astype(str) == "closed"].copy()
@@ -106,6 +216,12 @@ def compute_distribution_summary(df: pd.DataFrame) -> dict:
                 (closed["next_max_return_pct"].dropna() / 100.0 >= TP_PCT).mean() * 100
             ),
         }
+        out["quant"] = compute_quant_metrics(
+            closed, "next_max_return_pct", "next_close_return_pct"
+        )
+        out["bootstrap"] = compute_bootstrap_ci(
+            closed, "next_max_return_pct", "next_close_return_pct"
+        )
     return out
 
 
@@ -157,6 +273,12 @@ def compute_preopen_summary(df: pd.DataFrame) -> dict:
                     (closed["first_1h_max_return_pct"].dropna() / 100.0 >= TP_PCT).mean() * 100
                 ),
             }
+            out["quant"] = compute_quant_metrics(
+                closed, "first_1h_max_return_pct", "first_1h_close_return_pct"
+            )
+            out["bootstrap"] = compute_bootstrap_ci(
+                closed, "first_1h_max_return_pct", "first_1h_close_return_pct"
+            )
     return out
 
 
