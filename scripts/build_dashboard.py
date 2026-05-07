@@ -21,8 +21,10 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import logging
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,6 +40,8 @@ from ledger.config import ROUND_TRIP_COST_PCT
 DEFAULT_OUT_DIR = "/home/soccz/22tb/soccz.github.io/projects/prelude/dashboard/data"
 ROLLING_WINDOW_DAYS = 30
 TP_PCT = 0.05  # 사용자 가이드: "5% 오르면 즉시 매도"
+DEFAULT_PIN = "9963"
+PBKDF2_ITERATIONS = 250000
 
 
 # ============================================================================
@@ -170,6 +174,7 @@ def history_rows(df_dist: pd.DataFrame, df_preopen: pd.DataFrame) -> list[dict]:
             "coin": str(r["coin"]).replace("KRW-", ""),
             "setups": str(r.get("setup_ids", "") or ""),
             "btc_regime": str(r.get("btc_regime", "")),
+            "entry_price": _safe_float(r.get("next_open")),
             "p_h2": _safe_float(r.get("p_h2_3pct_4h")),
             "p_h6": _safe_float(r.get("p_h6_5pct_24h")),
             "p_h5": _safe_float(r.get("p_h5_20pct_tail")),
@@ -187,12 +192,18 @@ def history_rows(df_dist: pd.DataFrame, df_preopen: pd.DataFrame) -> list[dict]:
     for _, r in df_preopen.iterrows():
         max_pct = r.get("first_1h_max_return_pct")
         close_pct = r.get("first_1h_close_return_pct")
+        # preopen 알림 시점 가격 = entry_price_proxy (alert 시점 close).
+        # 09:00 첫 봉 시가 (first_open) 와 약간 다를 수 있음.
+        entry = r.get("entry_price_proxy")
+        if pd.isna(entry):
+            entry = r.get("first_open")
         rows.append({
             "date": str(r["date"]),
             "channel": "preopen",
             "coin": str(r["coin"]).replace("KRW-", ""),
             "setups": "",
             "btc_regime": str(r.get("btc_regime", "")),
+            "entry_price": _safe_float(entry),
             "p_first15_3": _safe_float(r.get("p_first15_3pct")),
             "p_first15_5": _safe_float(r.get("p_first15_5pct")),
             "p_first1h_3": _safe_float(r.get("p_first1h_3pct")),
@@ -308,6 +319,12 @@ def main():
     parser.add_argument("--paper-ledger-preopen", default="output/paper_ledger_preopen.csv")
     parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR)
     parser.add_argument("--asof", type=str, help="기준 시점 (default=now)")
+    parser.add_argument(
+        "--pin",
+        default=os.environ.get("PRELUDE_DASHBOARD_PIN", DEFAULT_PIN),
+        help="암호화 PIN (default 9963 또는 PRELUDE_DASHBOARD_PIN env). "
+             "빈 값 ('') 으로 주면 평문 출력 (테스트용).",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -316,6 +333,8 @@ def main():
     asof = pd.Timestamp(args.asof) if args.asof else pd.Timestamp.now()
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    pin = args.pin or None
+    log.info(f"encryption: {'PIN ' + ('*' * len(pin)) if pin else 'OFF (plaintext)'}")
 
     df_dist = _load_or_empty(args.paper_ledger)
     df_pre = _load_or_empty(args.paper_ledger_preopen)
@@ -330,7 +349,7 @@ def main():
             "preopen": compute_preopen_summary(df_pre),
         },
     }
-    _write_json(out_dir / "summary.json", summary)
+    _write_json(out_dir / "summary.json", summary, passphrase=pin)
     log.info(f"saved summary.json")
 
     # 2) history.json
@@ -338,7 +357,7 @@ def main():
         "asof": asof.isoformat(),
         "rows": history_rows(df_dist, df_pre),
     }
-    _write_json(out_dir / "history.json", history)
+    _write_json(out_dir / "history.json", history, passphrase=pin)
     log.info(f"saved history.json ({len(history['rows'])} rows)")
 
     # 3) accuracy.json (rolling + cum pnl 둘 다)
@@ -364,7 +383,7 @@ def main():
             ),
         },
     }
-    _write_json(out_dir / "accuracy.json", accuracy)
+    _write_json(out_dir / "accuracy.json", accuracy, passphrase=pin)
     log.info(f"saved accuracy.json")
 
     # quick stdout summary
@@ -392,10 +411,59 @@ def _load_or_empty(path: str | Path) -> pd.DataFrame:
     return df
 
 
-def _write_json(path: Path, payload: dict):
+def _write_json(path: Path, payload: dict, passphrase: str | None = None):
     path.parent.mkdir(parents=True, exist_ok=True)
+    if passphrase:
+        payload = _encrypt_payload(payload, passphrase)
     with open(path, "w") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False, default=str)
+
+
+def _encrypt_payload(payload: dict, passphrase: str) -> dict:
+    """PBKDF2-HMAC-SHA256 + AES-256-CBC + HMAC-SHA256(salt||iv||ct).
+
+    Viewer 의 decryptPayload (papers index.html 동일) 와 호환. PIN brute-force
+    완전 차단은 불가능 (4-digit + client-side) — 외부 일반인 차단 수준.
+    """
+    from cryptography.hazmat.primitives import hashes, hmac as crypto_hmac
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+    plaintext = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
+    salt = os.urandom(16)
+    iv = os.urandom(16)
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=64,
+        salt=salt,
+        iterations=PBKDF2_ITERATIONS,
+    )
+    keymat = kdf.derive(passphrase.encode("utf-8"))
+    aes_key, mac_key = keymat[:32], keymat[32:]
+
+    pad_len = 16 - (len(plaintext) % 16)
+    padded = plaintext + bytes([pad_len]) * pad_len
+    cipher = Cipher(algorithms.AES(aes_key), modes.CBC(iv))
+    ct = cipher.encryptor().update(padded) + cipher.encryptor().finalize()
+
+    h = crypto_hmac.HMAC(mac_key, hashes.SHA256())
+    h.update(salt + iv + ct)
+    mac = h.finalize()
+
+    def b64(b: bytes) -> str:
+        return base64.b64encode(b).decode("ascii")
+
+    return {
+        "encrypted": True,
+        "version": 1,
+        "kdf": "PBKDF2-HMAC-SHA256",
+        "cipher": "AES-256-CBC-HMAC-SHA256",
+        "iterations": PBKDF2_ITERATIONS,
+        "salt": b64(salt),
+        "iv": b64(iv),
+        "ct": b64(ct),
+        "mac": b64(mac),
+    }
 
 
 if __name__ == "__main__":
