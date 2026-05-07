@@ -522,6 +522,373 @@ def compute_return_distribution(closed: pd.DataFrame, max_col: str, close_col: s
     ]
 
 
+# ============================================================================
+# A1. Calibration curve — predicted P vs actual hit rate by score decile
+# ============================================================================
+def compute_calibration_curve(closed: pd.DataFrame, prob_col: str, hit_col: str,
+                                n_bins: int = 10) -> list[dict]:
+    """score bin 별 expected (mean predicted P) vs actual (hit rate).
+    diagonal 에 가까울수록 모델이 솔직 (calibrated).
+    """
+    if prob_col not in closed.columns or hit_col not in closed.columns:
+        return []
+    sub = closed[[prob_col, hit_col]].dropna()
+    if len(sub) < n_bins:
+        return []
+    try:
+        sub = sub.copy()
+        sub["_bin"] = pd.qcut(sub[prob_col], q=n_bins,
+                                labels=False, duplicates="drop")
+    except Exception:
+        return []
+    out = []
+    for b, grp in sub.groupby("_bin"):
+        if len(grp) == 0:
+            continue
+        out.append({
+            "bin": int(b),
+            "n": int(len(grp)),
+            "predicted_mean": _maybe_float(float(grp[prob_col].mean())),
+            "actual_hit_rate": _maybe_float(float(grp[hit_col].mean())),
+        })
+    return out
+
+
+# ============================================================================
+# A2. Decay curve — alert 후 시간별 평균 return
+# ============================================================================
+def compute_decay_curve_dist(closed: pd.DataFrame) -> list[dict]:
+    """distribution 의 decay — paper_ledger 의 next_open/high/low/close 활용.
+    t=0 (entry) → t=24h_low → t=24h_close → t=24h_high (ordering for shape).
+    실제 시간 정확치 X, 24h horizon 의 분포 모양만.
+    """
+    if len(closed) == 0:
+        return []
+    sub = closed.dropna(subset=["next_open"]).copy()
+    if len(sub) == 0 or "next_high" not in sub.columns:
+        return []
+    sub = sub[sub["next_open"] > 0]
+    if len(sub) == 0:
+        return []
+    return [
+        {"t_label": "entry",      "avg_return_pct": 0.0, "n": int(len(sub))},
+        {"t_label": "24h close",  "avg_return_pct": _maybe_float(((sub["next_close"] / sub["next_open"] - 1).mean() * 100)), "n": int(len(sub))},
+        {"t_label": "24h max",    "avg_return_pct": _maybe_float(((sub["next_high"]  / sub["next_open"] - 1).mean() * 100)), "n": int(len(sub))},
+        {"t_label": "24h min",    "avg_return_pct": _maybe_float(((sub["next_low"]   / sub["next_open"] - 1).mean() * 100)), "n": int(len(sub))},
+    ]
+
+
+def compute_decay_curve_pre(closed: pd.DataFrame) -> list[dict]:
+    """preopen 은 first 15m / 30m / 1h 의 high/low/close 데이터 풍부."""
+    if len(closed) == 0 or "first_open" not in closed.columns:
+        return []
+    sub = closed.dropna(subset=["first_open"]).copy()
+    sub = sub[sub["first_open"] > 0]
+    if len(sub) == 0:
+        return []
+    op = sub["first_open"]
+
+    def avg(col):
+        if col not in sub.columns:
+            return None
+        return _maybe_float(((sub[col] / op - 1).mean() * 100))
+
+    return [
+        {"t_label": "entry",       "avg_return_pct": 0.0,                "n": int(len(sub))},
+        {"t_label": "15m max",     "avg_return_pct": avg("first_15m_high"), "n": int(len(sub))},
+        {"t_label": "15m low",     "avg_return_pct": avg("first_15m_low"),  "n": int(len(sub))},
+        {"t_label": "30m max",     "avg_return_pct": avg("first_30m_high"), "n": int(len(sub))},
+        {"t_label": "30m low",     "avg_return_pct": avg("first_30m_low"),  "n": int(len(sub))},
+        {"t_label": "1h max",      "avg_return_pct": avg("first_1h_high"),  "n": int(len(sub))},
+        {"t_label": "1h low",      "avg_return_pct": avg("first_1h_low"),   "n": int(len(sub))},
+        {"t_label": "1h close",    "avg_return_pct": avg("first_1h_close"), "n": int(len(sub))},
+    ]
+
+
+# ============================================================================
+# A3. TP rule sweep — TP 룰 다양화별 누적
+# ============================================================================
+def compute_tp_sweep(closed: pd.DataFrame, max_col: str, close_col: str,
+                      tp_list: list[float] = (0.03, 0.05, 0.07, 0.10),
+                      include_no_tp: bool = True,
+                      cost: float | None = None) -> list[dict]:
+    if cost is None:
+        cost = ROUND_TRIP_COST_PCT
+    if len(closed) == 0:
+        return []
+    max_d = pd.to_numeric(closed[max_col], errors="coerce") / 100.0
+    close_d = pd.to_numeric(closed[close_col], errors="coerce") / 100.0
+    n_valid = int(max_d.notna().sum())
+    if n_valid == 0:
+        return []
+    out = []
+    for tp in tp_list:
+        gross = np.where(max_d >= tp, tp, close_d)
+        pnl = pd.Series(gross - cost, index=closed.index).dropna()
+        out.append({
+            "rule": f"{int(tp*100)}% TP",
+            "tp_pct": _maybe_float(tp * 100),
+            "n_trades": int(len(pnl)),
+            "cum_pnl_pct": _maybe_float(float(pnl.sum() * 100)),
+            "tp_hit_rate_pct": _maybe_float(float((max_d.dropna() >= tp).mean() * 100)),
+        })
+    if include_no_tp:
+        pnl = (close_d - cost).dropna()
+        out.append({
+            "rule": "no TP (EOD)",
+            "tp_pct": None,
+            "n_trades": int(len(pnl)),
+            "cum_pnl_pct": _maybe_float(float(pnl.sum() * 100)),
+            "tp_hit_rate_pct": None,
+        })
+    return out
+
+
+# ============================================================================
+# A4. Cost sensitivity sweep
+# ============================================================================
+def compute_cost_sweep(closed: pd.DataFrame, max_col: str, close_col: str,
+                        cost_list: list[float] = (0.0015, 0.003, 0.005, 0.01)) -> list[dict]:
+    if len(closed) == 0:
+        return []
+    max_d = pd.to_numeric(closed[max_col], errors="coerce") / 100.0
+    close_d = pd.to_numeric(closed[close_col], errors="coerce") / 100.0
+    out = []
+    for cost in cost_list:
+        gross = np.where(max_d >= TP_PCT, TP_PCT, close_d)
+        pnl = pd.Series(gross - cost, index=closed.index).dropna()
+        out.append({
+            "cost_pct": _maybe_float(cost * 100),
+            "n_trades": int(len(pnl)),
+            "cum_pnl_pct": _maybe_float(float(pnl.sum() * 100)),
+            "avg_pnl_pct": _maybe_float(float(pnl.mean() * 100)),
+        })
+    return out
+
+
+# ============================================================================
+# A5. PBO simple — K-fold chronological split robustness
+# ============================================================================
+def compute_pbo_simple(closed: pd.DataFrame, max_col: str, close_col: str,
+                        n_splits: int = 5) -> dict:
+    """Lopez de Prado 의 정식 PBO 는 K-comb in/out ranking 통계 (multi-strategy
+    필요). prelude 는 단일 strategy 라 단순 변형: 시간 chronological 5-fold
+    각 fold 의 cum PnL 부호 일관성 + 분산.
+    """
+    pnl = _per_alert_pnl_series(closed, max_col, close_col)
+    n = len(pnl)
+    if n < n_splits * 2:
+        return {"n_trades": int(n), "note": "fold split skipped (n<10)"}
+    # chronological order — closed["date"] 기준
+    sub = closed.copy()
+    sub["pnl"] = sub.apply(
+        lambda r: _virtual_pnl_per_alert(r[max_col], r[close_col]), axis=1
+    )
+    sub = sub.dropna(subset=["pnl"]).sort_values("date").reset_index(drop=True)
+    fold_size = max(1, len(sub) // n_splits)
+    folds = []
+    for i in range(n_splits):
+        start = i * fold_size
+        end = (i + 1) * fold_size if i < n_splits - 1 else len(sub)
+        chunk = sub.iloc[start:end]
+        if len(chunk) == 0:
+            continue
+        folds.append({
+            "fold": int(i + 1),
+            "n": int(len(chunk)),
+            "date_range": [str(chunk["date"].iloc[0]), str(chunk["date"].iloc[-1])],
+            "cum_pnl_pct": _maybe_float(float(chunk["pnl"].sum() * 100)),
+            "win_rate_pct": _maybe_float(float((chunk["pnl"] > 0).mean() * 100)),
+        })
+    pos_folds = sum(1 for f in folds if (f["cum_pnl_pct"] or 0) > 0)
+    return {
+        "n_trades": int(len(sub)),
+        "n_folds": len(folds),
+        "n_positive_folds": int(pos_folds),
+        "consistency_pct": _maybe_float(pos_folds / len(folds) * 100) if folds else None,
+        "folds": folds,
+        "note": "chronological K-fold cum PnL — 정식 PBO 는 multi-strategy 필요, 여기는 단순 robustness check",
+    }
+
+
+# ============================================================================
+# A6. Factor regression — strat_daily = α + β · btc_daily
+# ============================================================================
+def compute_factor_regression(closed: pd.DataFrame, max_col: str, close_col: str,
+                                btc_series: list[dict]) -> dict:
+    if not btc_series or len(btc_series) < 10:
+        return {}
+    daily = _daily_pnl_from_closed(closed, max_col, close_col)
+    if len(daily) == 0:
+        return {}
+    btc_df = pd.DataFrame(btc_series)
+    btc_df["date_dt"] = pd.to_datetime(btc_df["date"])
+    btc_df = btc_df.set_index("date_dt").sort_index()
+    btc_daily = (btc_df["btc_cum_pct"] / 100.0).diff().dropna()
+    if len(btc_daily) < 10:
+        return {}
+    strat_daily = daily.reindex(btc_daily.index, fill_value=0.0)
+
+    # OLS y = a + b*x
+    x = btc_daily.values
+    y = strat_daily.values
+    n = len(x)
+    if n < 10:
+        return {}
+    x_mean, y_mean = x.mean(), y.mean()
+    x_var = ((x - x_mean) ** 2).sum()
+    if x_var == 0:
+        return {}
+    beta = ((x - x_mean) * (y - y_mean)).sum() / x_var
+    alpha = y_mean - beta * x_mean
+    y_pred = alpha + beta * x
+    ss_res = ((y - y_pred) ** 2).sum()
+    ss_tot = ((y - y_mean) ** 2).sum()
+    r2 = 1 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+    se_alpha = float(np.sqrt(ss_res / (n - 2) * (1 / n + x_mean ** 2 / x_var))) if n > 2 else float("nan")
+    t_alpha = float(alpha / se_alpha) if se_alpha and se_alpha > 0 else float("nan")
+    return {
+        "n_days": int(n),
+        "alpha_daily": _maybe_float(alpha),
+        "alpha_ann_pct": _maybe_float(alpha * 252 * 100),
+        "alpha_se": _maybe_float(se_alpha),
+        "alpha_t_stat": _maybe_float(t_alpha),
+        "alpha_significant": (abs(t_alpha) > 1.96) if not np.isnan(t_alpha) else None,
+        "beta": _maybe_float(beta),
+        "r_squared": _maybe_float(r2),
+    }
+
+
+# ============================================================================
+# B7. Per-coin mini tear sheet
+# ============================================================================
+def compute_per_coin(closed: pd.DataFrame, max_col: str, close_col: str,
+                       top_n: int = 10) -> list[dict]:
+    if len(closed) == 0 or "coin" not in closed.columns:
+        return []
+    rows = []
+    for coin, grp in closed.groupby("coin"):
+        n = len(grp)
+        max_d = pd.to_numeric(grp[max_col], errors="coerce") / 100.0
+        close_d = pd.to_numeric(grp[close_col], errors="coerce") / 100.0
+        gross = np.where(max_d >= TP_PCT, TP_PCT, close_d)
+        pnl = pd.Series(gross - ROUND_TRIP_COST_PCT, index=grp.index).dropna()
+        if len(pnl) == 0:
+            continue
+        avg_max = float(grp[max_col].dropna().mean()) if max_col in grp else float("nan")
+        rows.append({
+            "coin": str(coin).replace("KRW-", ""),
+            "n_alerts": int(n),
+            "avg_max_pct": _maybe_float(avg_max),
+            "avg_pnl_pct": _maybe_float(float(pnl.mean() * 100)),
+            "cum_pnl_pct": _maybe_float(float(pnl.sum() * 100)),
+            "win_rate_pct": _maybe_float(float((pnl > 0).mean() * 100)),
+        })
+    rows.sort(key=lambda r: -r["n_alerts"])
+    return rows[:top_n]
+
+
+# ============================================================================
+# B8. NOTES.md vs system — placeholder (NOTES 비어있으면 unavailable)
+# ============================================================================
+def parse_notes_md(notes_path: str = "NOTES.md") -> list[dict]:
+    """NOTES.md 의 '## YYYY-MM-DD' 헤더 + '### 내가 진입' 블록 파싱.
+    템플릿 따른 entry 만 추출. 비어있거나 파일 없으면 빈 list.
+    """
+    p = Path(notes_path)
+    if not p.exists():
+        return []
+    text = p.read_text(encoding="utf-8")
+    entries = []
+    import re
+    blocks = re.split(r"\n## (\d{4}-\d{2}-\d{2})", text)
+    if len(blocks) < 3:
+        return []
+    for i in range(1, len(blocks), 2):
+        date = blocks[i]
+        body = blocks[i + 1] if i + 1 < len(blocks) else ""
+        # '### 내가 진입' 다음 bullet 들
+        m = re.search(r"### 내가 진입\s*\n((?:- .+\n?)+)", body)
+        coins = []
+        if m:
+            for line in m.group(1).splitlines():
+                cm = re.match(r"-\s*(\S+)\s*[:：]\s*(.+)", line)
+                if cm:
+                    coins.append({"coin": cm.group(1), "raw": cm.group(2).strip()})
+        m2 = re.search(r"### 청산 결과.*?\n((?:- .+\n?)+)", body)
+        results = []
+        if m2:
+            for line in m2.group(1).splitlines():
+                rm = re.match(r"-\s*(\S+)\s*[:：]\s*([+-]?\d+\.?\d*)", line)
+                if rm:
+                    results.append({"coin": rm.group(1), "return_pct": float(rm.group(2))})
+        if coins or results:
+            entries.append({"date": date, "entries": coins, "results": results})
+    return entries
+
+
+def compute_notes_vs_system(notes_entries: list[dict], df_dist: pd.DataFrame,
+                              df_pre: pd.DataFrame) -> dict:
+    """user 매매 vs system 매매 비교 — NOTES 비어있으면 placeholder."""
+    if not notes_entries:
+        return {
+            "available": False,
+            "note": "NOTES.md 가 비어있거나 템플릿 미작성. 사용자가 NOTES 채우면 자동 파싱 + 비교 활성.",
+        }
+    # NOTES 의 results 의 cumulative
+    user_pnl = []
+    for e in notes_entries:
+        for r in e.get("results", []):
+            user_pnl.append({"date": e["date"], "coin": r["coin"], "return_pct": r["return_pct"]})
+    return {
+        "available": True,
+        "n_entries": int(len(notes_entries)),
+        "n_results": int(len(user_pnl)),
+        "user_avg_pct": _maybe_float(float(np.mean([r["return_pct"] for r in user_pnl]))) if user_pnl else None,
+        "user_cum_pct": _maybe_float(float(np.sum([r["return_pct"] for r in user_pnl]))) if user_pnl else None,
+        "rows": user_pnl[-20:],
+    }
+
+
+# ============================================================================
+# B9. Time-of-day (preopen) — 첫 N분 hit 분포
+# ============================================================================
+def compute_time_of_day_pre(closed_pre: pd.DataFrame) -> dict:
+    """preopen closed 의 first 15m / 30m / 1h hit 분포 — 첫 몇 분에 hit 가 집중."""
+    if len(closed_pre) == 0:
+        return {}
+    out = {}
+    for col in ["hit_first15_3pct", "hit_first15_5pct",
+                "hit_first30_3pct", "hit_first30_5pct",
+                "hit_first1h_3pct", "hit_first1h_5pct"]:
+        if col in closed_pre.columns:
+            v = closed_pre[col].dropna()
+            out[col] = _maybe_float(float(v.mean() * 100)) if len(v) else None
+    return out
+
+
+# ============================================================================
+# B10. Coin × channel matrix
+# ============================================================================
+def compute_coin_universe_matrix(df_dist: pd.DataFrame, df_pre: pd.DataFrame,
+                                    top_n: int = 15) -> list[dict]:
+    if len(df_dist) == 0 and len(df_pre) == 0:
+        return []
+    counts = {}
+    if "coin" in df_dist.columns:
+        for c, n in df_dist["coin"].value_counts().items():
+            counts.setdefault(str(c), {"dist": 0, "pre": 0})["dist"] = int(n)
+    if "coin" in df_pre.columns:
+        for c, n in df_pre["coin"].value_counts().items():
+            counts.setdefault(str(c), {"dist": 0, "pre": 0})["pre"] = int(n)
+    rows = [
+        {"coin": k.replace("KRW-", ""), "dist": v["dist"], "pre": v["pre"], "total": v["dist"] + v["pre"]}
+        for k, v in counts.items()
+    ]
+    rows.sort(key=lambda r: -r["total"])
+    return rows[:top_n]
+
+
 def compute_breakdown_by(closed: pd.DataFrame, group_col: str,
                           max_col: str, min_col: str, close_col: str,
                           hit_cols: list[tuple[str, str]] | None = None) -> list[dict]:
@@ -763,6 +1130,29 @@ def compute_distribution_summary(df: pd.DataFrame, btc_series: list[dict] | None
         out["return_distribution"] = compute_return_distribution(
             closed, "next_max_return_pct", "next_close_return_pct"
         )
+        # 신규 — 풍성화 6 항목
+        out["calibration"] = {
+            "p_h2_vs_hit": compute_calibration_curve(closed, "p_h2_3pct_4h", "hit_h2"),
+            "p_h6_vs_hit": compute_calibration_curve(closed, "p_h6_5pct_24h", "hit_h6"),
+            "p_h5_vs_hit": compute_calibration_curve(closed, "p_h5_20pct_tail", "hit_h5"),
+        }
+        out["decay"] = compute_decay_curve_dist(closed)
+        out["tp_sweep"] = compute_tp_sweep(
+            closed, "next_max_return_pct", "next_close_return_pct"
+        )
+        out["cost_sweep"] = compute_cost_sweep(
+            closed, "next_max_return_pct", "next_close_return_pct"
+        )
+        out["pbo"] = compute_pbo_simple(
+            closed, "next_max_return_pct", "next_close_return_pct"
+        )
+        if btc_series:
+            out["factor_regression"] = compute_factor_regression(
+                closed, "next_max_return_pct", "next_close_return_pct", btc_series
+            )
+        out["per_coin"] = compute_per_coin(
+            closed, "next_max_return_pct", "next_close_return_pct"
+        )
     return out
 
 
@@ -857,6 +1247,30 @@ def compute_preopen_summary(df: pd.DataFrame, btc_series: list[dict] | None = No
             out["return_distribution"] = compute_return_distribution(
                 closed, "first_1h_max_return_pct", "first_1h_close_return_pct"
             )
+            out["calibration"] = {
+                "p_first15_3_vs_hit": compute_calibration_curve(closed, "p_first15_3pct", "hit_first15_3pct"),
+                "p_first15_5_vs_hit": compute_calibration_curve(closed, "p_first15_5pct", "hit_first15_5pct"),
+                "p_first1h_3_vs_hit": compute_calibration_curve(closed, "p_first1h_3pct", "hit_first1h_3pct"),
+                "p_first1h_5_vs_hit": compute_calibration_curve(closed, "p_first1h_5pct", "hit_first1h_5pct"),
+            }
+            out["decay"] = compute_decay_curve_pre(closed)
+            out["tp_sweep"] = compute_tp_sweep(
+                closed, "first_1h_max_return_pct", "first_1h_close_return_pct"
+            )
+            out["cost_sweep"] = compute_cost_sweep(
+                closed, "first_1h_max_return_pct", "first_1h_close_return_pct"
+            )
+            out["pbo"] = compute_pbo_simple(
+                closed, "first_1h_max_return_pct", "first_1h_close_return_pct"
+            )
+            if btc_series:
+                out["factor_regression"] = compute_factor_regression(
+                    closed, "first_1h_max_return_pct", "first_1h_close_return_pct", btc_series
+                )
+            out["per_coin"] = compute_per_coin(
+                closed, "first_1h_max_return_pct", "first_1h_close_return_pct"
+            )
+            out["time_of_day"] = compute_time_of_day_pre(closed)
     return out
 
 
@@ -1066,6 +1480,10 @@ def main():
     log.info(f"BTC benchmark: {len(btc_bench)} days")
 
     # 1) summary.json
+    notes_entries = parse_notes_md("NOTES.md")
+    notes_vs = compute_notes_vs_system(notes_entries, df_dist, df_pre)
+    coin_matrix = compute_coin_universe_matrix(df_dist, df_pre)
+
     summary = {
         "asof": asof.isoformat(),
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -1073,6 +1491,8 @@ def main():
             "distribution": compute_distribution_summary(df_dist, btc_series=btc_bench),
             "preopen": compute_preopen_summary(df_pre, btc_series=btc_bench),
         },
+        "notes_vs_system": notes_vs,
+        "coin_universe": coin_matrix,
     }
     _write_json(out_dir / "summary.json", summary, passphrase=pin)
     log.info(f"saved summary.json")
