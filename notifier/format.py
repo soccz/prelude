@@ -39,6 +39,38 @@ def _fmt_krw_price(p) -> str:
 
 
 # ============================================================================
+# 공통 디자인 헬퍼 (preopen ↔ distribution 통일용)
+# ============================================================================
+_BTC_REGIME_KR = {
+    "bull_quiet": "🟢 강세 안정",
+    "bull_volatile": "🟢 강세 변동",
+    "bear_quiet": "🔴 약세 안정",
+    "bear_volatile": "🔴 약세 변동",
+}
+
+
+def btc_regime_kr(regime: str) -> str:
+    """BTC regime key → 한글 + 이모지 라벨. 미지정 키는 그대로 반환."""
+    return _BTC_REGIME_KR.get(str(regime), str(regime))
+
+
+def composite_tier(composite: float, fire: float = 1.5, hot: float = 1.0) -> str:
+    """composite score → tier 이모지 (preopen/distribution 공통).
+
+    cutoff 는 placeholder. 두 채널 composite 분포가 다르면 호출부에서 인자 조정.
+    """
+    try:
+        c = float(composite)
+    except (TypeError, ValueError):
+        return "👀"
+    if c >= fire:
+        return "🔥"
+    if c >= hot:
+        return "✨"
+    return "👀"
+
+
+# ============================================================================
 # Tier emoji
 # ============================================================================
 def tier_emoji(p_ge_5: float, p_ge_10: float = None) -> str:
@@ -250,159 +282,132 @@ def format_detector_beta(
 
 
 # ============================================================================
-# Distribution Engine v1 — multi-head + setup library 알림 (사용자 신규 방향)
+# Pre-open trigger (08:55 KST) — 09:00 직후 펌프 후보 알림
 # ============================================================================
-def _bucket_hit(calibrator, head_id: str, score: float) -> tuple[float, int, int] | None:
-    """Return calibrated hit pct + human decile if available."""
-    if calibrator is None or not calibrator.is_loaded(head_id):
-        return None
-    info = calibrator.lookup(head_id, score)
-    if info is None:
-        return None
-    return (
-        float(info["actual_hit_pct"]),
-        int(info["bucket"]) + 1,
-        int(info["n_buckets_total"]),
-    )
-
-
-def _distribution_decision_line(calibrator, h2: float, h6: float, h5: float) -> str:
-    """사용자 판단용 one-line contract.
-
-    Backtest 결과상 distribution beta 는 TP3/TP5 에서 baseline 을 크게 이겼고,
-    TP20 은 tail 정보로만 쓰는 게 더 정직하다. 그래서 알림도 h2/h6 를
-    판단 중심으로 두고 h5 는 rare tail bonus 로 표시한다.
-    """
-    b2 = _bucket_hit(calibrator, "h2", h2)
-    b6 = _bucket_hit(calibrator, "h6", h6)
-    b5 = _bucket_hit(calibrator, "h5", h5)
-    if not (b2 and b6 and b5):
-        return "   판단  calibration unavailable — 판단 tier 숨김"
-
-    tags = []
-    if b2[0] >= 50 or b2[1] >= b2[2] - 1:
-        tags.append("즉발 +3%")
-    if b6[0] >= 50 or b6[1] >= b6[2] - 1:
-        tags.append("24h +5%")
-    if b5[0] >= 10 or b5[1] >= b5[2]:
-        tags.append("+20% tail")
-    if not tags:
-        tags.append("관찰")
-
-    # h5 는 base rate 가 낮아서 실제 hit 이 두 자리여도 rare event 로 취급한다.
-    tail_note = "tail bonus" if "+20% tail" in tags else "tail 낮음"
-    return f"   판단  {' / '.join(tags)}  |  우선: TP3/TP5, {tail_note}"
-
-
-def format_distribution_beta(
+def format_preopen_beta(
     alerts: pd.DataFrame,
-    diagnose: Optional[dict] = None,
     btc_regime: str = "unknown",
-    universe_size: int = 0,
     universe_label: str = "top100",
     asof: Optional[datetime] = None,
     dry_run: bool = False,
-    calibrator=None,  # signals.bucket_calibration.BucketCalibrator
-    show_raw: bool = False,
 ) -> str:
-    """Distribution Engine beta 알림.
+    """Pre-open trigger 알림 (08:55 KST).
 
-    framing: 매수 추천 X. 상승 setup 후보 + 분포 + 실패 위험.
-    구조 (사용자 prototype):
-      - setup IDs (S01/S02/S03)
-      - 확률 분포 (h2/h6/h5)
-      - 위험 (실패 평균 EOD, setup worst5 fail, sustain head 미검증)
-      - 근거 (전일 상승률, ATR, return rank, 유사 사례 수)
+    inputs (alerts row 기대 컬럼):
+      market, p_first15_3pct, p_first15_5pct, p_first1h_3pct,
+      composite, close
     """
     asof = asof or datetime.now()
     date_str = asof.strftime("%Y-%m-%d")
-    header = f"🌅 prelude distribution beta {date_str} (KST 09:05)"
+    header = f"⚡ pre-open trigger {date_str} (KST 08:55)"
     if dry_run:
         header += "  [DRY-RUN]"
 
     lines = [header]
-    lines.append(f"BTC: {btc_regime} | universe: {universe_label} ({universe_size})")
+    lines.append(f"BTC: {btc_regime_kr(btc_regime)} | universe: {universe_label}")
     lines.append("")
 
     if len(alerts) == 0:
         lines.append("━━━ 침묵 ━━━")
-        if btc_regime.startswith("bear"):
+        if str(btc_regime).startswith("bear"):
+            lines.append("(BTC bear regime — pre-open trigger 비활성)")
+        else:
+            lines.append("(09:00 직후 펌프 후보 없음)")
+        return "\n".join(lines)
+
+    lines.append(f"━━━ 09:00 직후 펌프 후보 {len(alerts)}건 ━━━")
+    lines.append("")
+    for _, r in alerts.iterrows():
+        coin = str(r["market"]).replace("KRW-", "")
+        p15_3 = float(r.get("p_first15_3pct", 0)) * 100
+        p15_5 = float(r.get("p_first15_5pct", 0)) * 100
+        p1h_3 = float(r.get("p_first1h_3pct", 0)) * 100
+        price = r.get("close", float("nan"))
+        tier = composite_tier(r.get("composite", 0))
+        lines.append(f"{tier} {coin}  진입가 ≈ {_fmt_krw_price(price)}")
+        lines.append(f"   ▸ 15분 안 +3 raw: {p15_3:.0f}  +5 raw: {p15_5:.0f}")
+        lines.append(f"   ▸ 1시간 안 +3 raw: {p1h_3:.0f}")
+        lines.append("")
+
+    lines.append("━━━ 사용 ━━━")
+    lines.append("• 09:00 직후 진입, 5% 오르면 즉시 매도")
+    lines.append("• 자동 손절 X — 직접 판단")
+    lines.append("• 09:05 distribution 알림과 함께 보세요")
+    lines.append("• raw score 는 실제 확률 아님 — 1주 live 후 calibration 예정")
+    return "\n".join(lines)
+
+
+# ============================================================================
+# Distribution Engine v1 (09:05 KST) — multi-head + setup 후보 알림
+# ============================================================================
+def format_distribution_beta(
+    alerts: pd.DataFrame,
+    btc_regime: str = "unknown",
+    universe_label: str = "top100",
+    universe_size: int = 0,
+    asof: Optional[datetime] = None,
+    dry_run: bool = False,
+) -> str:
+    """Distribution Engine beta 알림 (09:05 KST).
+
+    inputs (alerts row 기대 컬럼):
+      market, primary_setups, btc_context,
+      p_h2_hit_3_4h, p_h6_hit_5_24h, p_h5_tail_20,
+      composite, close
+
+    톤은 pre-open 과 통일: ⚡ 헤더, BTC 한글 라벨, composite tier (🔥/✨/👀),
+    코인당 본문 3줄, 사용 가이드. 진단/Setup library 블록은 텔레그램에서 제거
+    (호출부의 stdout/log JSON 이 동일 정보 보존).
+    """
+    asof = asof or datetime.now()
+    date_str = asof.strftime("%Y-%m-%d")
+    header = f"⚡ distribution {date_str} (KST 09:05)"
+    if dry_run:
+        header += "  [DRY-RUN]"
+
+    lines = [header]
+    lines.append(
+        f"BTC: {btc_regime_kr(btc_regime)} | universe: {universe_label} ({universe_size})"
+    )
+    lines.append("")
+
+    if len(alerts) == 0:
+        lines.append("━━━ 침묵 ━━━")
+        if str(btc_regime).startswith("bear"):
             lines.append("(BTC bear regime — distribution head 약세)")
         else:
             lines.append("(setup S01/S02/S03 fire 한 후보 없음)")
-        if diagnose:
-            lines.append("")
-            lines.append("━━━ 진단 ━━━")
-            sc = diagnose.get("setup_fire_counts", {})
-            lines.append(f"setup fire — S01:{sc.get('S01',0)} S02:{sc.get('S02',0)} "
-                         f"S03:{sc.get('S03',0)} S04:{sc.get('S04',0)}")
-            lines.append(
-                f"p99 — h2:{diagnose.get('p_h2_p99_pct',0):.1f}% "
-                f"h5:{diagnose.get('p_h5_p99_pct',0):.1f}% "
-                f"h6:{diagnose.get('p_h6_p99_pct',0):.1f}%"
-            )
         return "\n".join(lines)
 
-    lines.append(f"━━━ 상승 setup 후보 ({len(alerts)}건) ━━━")
-    lines.append("※ 매수 추천 아님 / 표시 = OOF backfill 기반 historical hit (raw probability X)")
-
-    calib_ready = calibrator is not None and all(calibrator.is_loaded(h) for h in ["h2", "h5", "h6"])
-    if not calib_ready:
-        lines.append("⚠️  calibrator 미로드 — distribution score 숨김 (raw probability 표시 금지)")
-
-    for _, row in alerts.iterrows():
-        coin = row["market"].replace("KRW-", "")
-        primary = row.get("primary_setups", [])
-        ctx = row.get("btc_context", "—")
+    lines.append(f"━━━ 상승 setup 후보 {len(alerts)}건 ━━━")
+    lines.append("")
+    for _, r in alerts.iterrows():
+        coin = str(r["market"]).replace("KRW-", "")
+        primary = r.get("primary_setups") or []
+        if not isinstance(primary, list):
+            primary = list(primary) if primary is not None else []
         setup_str = "+".join(primary) if primary else "—"
-        ctx_suffix = f" / {ctx}" if ctx != "—" else ""
+        ctx = r.get("btc_context", "—")
+        ctx_suffix = f" / {ctx}" if ctx and ctx != "—" else ""
 
-        s_h2 = float(row.get("p_h2_hit_3_4h", 0))
-        s_h5 = float(row.get("p_h5_tail_20", 0))
-        s_h6 = float(row.get("p_h6_hit_5_24h", 0))
+        s_h2 = float(r.get("p_h2_hit_3_4h", 0)) * 100
+        s_h5 = float(r.get("p_h5_tail_20", 0)) * 100
+        s_h6 = float(r.get("p_h6_hit_5_24h", 0)) * 100
+        price = r.get("close", float("nan"))
+        tier = composite_tier(r.get("composite", 0))
 
-        # evidence (raw values)
-        atr = row.get("atr_pct_14", 0) * 100
-        log_ret = row.get("log_return_1d", 0) * 100
-        ret5_rank = row.get("return_5d", 0)
-        ret7_rank = row.get("return_7d", 0)
-        vol5_rank = row.get("vol_5d", 0)
-
-        entry_price = _fmt_krw_price(row.get("close", float("nan")))
-
-        lines.append("")
-        lines.append(f"🔍 {coin}  진입가 ≈ {entry_price}  Setup: {setup_str}{ctx_suffix}")
-        if calib_ready:
-            lines.append(_distribution_decision_line(calibrator, s_h2, s_h6, s_h5))
-            lines.append(f"   +3% in 4h   : {calibrator.format_for_alert('h2', s_h2, show_raw=show_raw)}")
-            lines.append(f"   +5% in 24h  : {calibrator.format_for_alert('h6', s_h6, show_raw=show_raw)}")
-            lines.append(f"   +20% tail   : {calibrator.format_for_alert('h5', s_h5, show_raw=show_raw)}")
-        else:
-            lines.append("   분포  calibration unavailable — raw score hidden")
         lines.append(
-            f"   근거  전일 +{log_ret:.2f}% / ATR14 {atr:.2f}% / "
-            f"vol5 rank {vol5_rank:.2f} / return5 rank {ret5_rank:.2f} / return7 rank {ret7_rank:.2f}"
+            f"{tier} {coin}  진입가 ≈ {_fmt_krw_price(price)}  [{setup_str}]{ctx_suffix}"
         )
-
-    lines.append("")
-    lines.append("━━━ Setup library v1 (참고) ━━━")
-    lines.append("S01 high-vol momentum   — 과거 h2 lift 4.09×, h6 lift 2.63×")
-    lines.append("S02 strong yesterday    — 과거 h5 lift 4.07× (depth=1)")
-    lines.append("S03 vol expansion 5d    — 과거 h5 lift 6.81×")
-    lines.append("S04 BTC bull context    — context only (setup 아님)")
-    lines.append("")
-    lines.append("⚠️  종가 유지 head (h3/h4) 는 daily features 한계로 미검증")
-    lines.append("⚠️  실거래는 사용자 본인 판단. 가상 paper ledger 만 자동 누적")
-
-    if diagnose:
+        lines.append(f"   ▸ 4h 안 +3 raw: {s_h2:.0f}  24h 안 +5 raw: {s_h6:.0f}")
+        lines.append(f"   ▸ +20% tail raw: {s_h5:.0f}")
         lines.append("")
-        lines.append("━━━ 진단 ━━━")
-        sc = diagnose.get("setup_fire_counts", {})
-        lines.append(
-            f"universe {diagnose.get('n_universe_filtered',0)} → "
-            f"setup fire S01:{sc.get('S01',0)} S02:{sc.get('S02',0)} "
-            f"S03:{sc.get('S03',0)} (any primary: {diagnose.get('n_with_any_primary_setup',0)})"
-        )
+
+    lines.append("━━━ 사용 ━━━")
+    lines.append("• 09:00 직후 또는 첫 4h 안 진입")
+    lines.append("• 5% 오르면 즉시 매도, 자동 손절 X")
+    lines.append("• 08:55 pre-open 알림과 함께 보세요")
+    lines.append("• raw score 는 실제 확률 아님 — 1주 live 후 calibration 예정")
     return "\n".join(lines)
 
 

@@ -4,9 +4,8 @@ import sys
 
 import pandas as pd
 
-from notifier.format import format_distribution_beta
+from notifier.format import format_distribution_beta, format_preopen_beta
 from scripts.predict_today_distribution import append_to_paper_ledger, is_decision_window
-from signals.bucket_calibration import BucketCalibrator
 
 
 def _alert_row(market: str = "KRW-AAA") -> pd.DataFrame:
@@ -53,20 +52,64 @@ def test_append_to_paper_ledger_keeps_one_snapshot_per_date(tmp_path):
     assert ledger["coin"].tolist() == ["KRW-AAA"]
 
 
-def test_distribution_format_never_shows_raw_scores_without_calibration():
+def test_distribution_format_uses_unified_design():
     msg = format_distribution_beta(
         alerts=_alert_row(),
-        diagnose={},
         btc_regime="bull_quiet",
+        universe_label="top100",
         universe_size=1,
-        calibrator=BucketCalibrator({}),
-        show_raw=True,
     )
 
-    assert "raw score hidden" in msg
-    assert "91.0%" not in msg
-    assert "82.0%" not in msg
-    assert "77.0%" not in msg
+    # 통일 헤더 + BTC 한글 라벨 + composite tier (composite=5.0 → 🔥)
+    assert msg.startswith("⚡ distribution")
+    assert "🟢 강세 안정" in msg
+    assert "🔥" in msg
+    # raw 점수 (91/82/77) 가 "raw" 라벨과 함께 표시됨
+    assert "raw" in msg
+    assert "91" in msg and "82" in msg and "77" in msg
+    # 사용 가이드 + 진단/Setup library 블록은 제거
+    assert "━━━ 사용 ━━━" in msg
+    assert "Setup library" not in msg
+    assert "━━━ 진단 ━━━" not in msg
+
+
+def test_distribution_silence_uses_unified_design():
+    import pandas as pd
+
+    msg = format_distribution_beta(
+        alerts=pd.DataFrame(),
+        btc_regime="bear_quiet",
+        universe_label="top100",
+        universe_size=100,
+    )
+    assert msg.startswith("⚡ distribution")
+    assert "🔴 약세 안정" in msg
+    assert "━━━ 침묵 ━━━" in msg
+
+
+def test_preopen_format_uses_unified_design():
+    import pandas as pd
+
+    alerts = pd.DataFrame([
+        {
+            "market": "KRW-AAA",
+            "p_first15_3pct": 0.85,
+            "p_first15_5pct": 0.70,
+            "p_first1h_3pct": 0.80,
+            "composite": 1.7,
+            "close": 1234.5,
+        }
+    ])
+    msg = format_preopen_beta(
+        alerts=alerts,
+        btc_regime="bull_quiet",
+        universe_label="top100",
+    )
+    assert msg.startswith("⚡ pre-open trigger")
+    assert "🟢 강세 안정" in msg
+    assert "🔥" in msg  # composite 1.7 → fire
+    assert "AAA" in msg
+    assert "━━━ 사용 ━━━" in msg
 
 
 def test_close_paper_ledger_no_data_notes_do_not_crash(tmp_path, monkeypatch):

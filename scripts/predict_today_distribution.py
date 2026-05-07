@@ -43,7 +43,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
 from notifier.format import format_distribution_beta
-from signals.bucket_calibration import BucketCalibrator
 from signals.distribution_engine import DistributionEngine
 from signals.features import assemble_training_panel
 
@@ -199,15 +198,8 @@ def main():
 
     log.info(f"asof={asof.date()}, dry_run={dry_run}, universe={args.universe}")
 
-    # 1) Engine + Calibrator
+    # 1) Engine
     engine = DistributionEngine.load(args.ckpt_dir)
-    try:
-        calibrator = BucketCalibrator.load("output")
-        n_loaded = sum(1 for h in ["h2", "h5", "h6"] if calibrator.is_loaded(h))
-        log.info(f"calibrator loaded: {n_loaded}/3 heads")
-    except Exception as e:
-        log.warning(f"calibrator load failed: {e}; alert formatter will hide raw scores")
-        calibrator = None
 
     # 2) Panel
     log.info("building panel...")
@@ -265,16 +257,22 @@ def main():
         )
 
     # 7) Format + (optional) telegram
+    # 진단/Setup library 블록은 텔레그램에서 빼고 stdout/log 로만.
+    # log_payload (distribution_log JSON) 에 동일 정보 보존됨.
     msg = format_distribution_beta(
         alerts=alerts,
-        diagnose=diagnose,
         btc_regime=btc_regime,
-        universe_size=diagnose.get("n_universe_filtered", 0),
         universe_label=args.universe,
-        asof=asof.to_pydatetime(),
+        universe_size=diagnose.get("n_universe_filtered", 0),
+        asof=asof,
         dry_run=dry_run,
-        calibrator=calibrator,
-        show_raw=False,  # 사용자 확정: raw 숨김
+    )
+    sc = diagnose.get("setup_fire_counts", {})
+    log.info(
+        f"diag — universe {diagnose.get('n_universe_filtered', 0)} | "
+        f"setup fire S01:{sc.get('S01', 0)} S02:{sc.get('S02', 0)} "
+        f"S03:{sc.get('S03', 0)} S04:{sc.get('S04', 0)} | "
+        f"any primary {diagnose.get('n_with_any_primary_setup', 0)}"
     )
     print()
     print(msg)

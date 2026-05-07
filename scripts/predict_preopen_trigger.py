@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from data.database import list_markets, load_candles
+from notifier.format import format_preopen_beta
 from notifier.telegram import send_telegram
 from signals.features import assemble_training_panel
 from signals.labels_preopen import PREOPEN_HEADS
@@ -64,25 +65,6 @@ PAPER_LEDGER_COLS = [
     "hit_first1h_3pct", "hit_first1h_5pct",
     "status", "notes",
 ]
-
-
-def fmt_krw_price(p: float) -> str:
-    """KRW 가격 포맷 — 가격대에 따라 소수점 자릿수 자동 조정."""
-    if p is None or not np.isfinite(p):
-        return "—"
-    if p >= 10000:
-        return f"{p:,.0f}원"
-    if p >= 1000:
-        return f"{p:,.0f}원"
-    if p >= 100:
-        return f"{p:.1f}원"
-    if p >= 10:
-        return f"{p:.2f}원"
-    if p >= 1:
-        return f"{p:.3f}원"
-    if p >= 0.01:
-        return f"{p:.4f}원"
-    return f"{p:.6f}원"
 
 
 def load_models(ckpt_dir: str = CKPT_DIR):
@@ -328,33 +310,14 @@ def main():
     else:
         log.warning("paper ledger append skipped outside pre-open window")
 
-    # Build telegram message — simple format
-    btc_kr = {"bull_quiet": "🟢 강세 안정", "bull_volatile": "🟢 강세 변동",
-              "bear_quiet": "🔴 약세 안정", "bear_volatile": "🔴 약세 변동"}.get(btc_regime, btc_regime)
-
-    lines = [f"⚡ pre-open trigger {asof.strftime('%Y-%m-%d')} (KST 08:55)"]
-    lines.append(f"BTC: {btc_kr} | universe: {args.universe}")
-    lines.append("")
-    lines.append(f"━━━ 09:00 직후 펌프 후보 {len(alerts)}건 ━━━")
-    lines.append("")
-    for _, r in alerts.iterrows():
-        coin = r["market"].replace("KRW-", "")
-        p15_3 = r["p_first15_3pct"] * 100
-        p15_5 = r["p_first15_5pct"] * 100
-        p1h_3 = r["p_first1h_3pct"] * 100
-        price = float(r.get("close", np.nan))
-        rank = "🔥" if r["composite"] >= 1.5 else "✨" if r["composite"] >= 1.0 else "👀"
-        lines.append(f"{rank} {coin}  진입가 ≈ {fmt_krw_price(price)}")
-        lines.append(f"   ▸ 15분 안 +3 raw: {p15_3:.0f}  +5 raw: {p15_5:.0f}")
-        lines.append(f"   ▸ 1시간 안 +3 raw: {p1h_3:.0f}")
-        lines.append("")
-    lines.append("━━━ 사용 ━━━")
-    lines.append("• 09:00 직후 진입, 5% 오르면 즉시 매도")
-    lines.append("• 자동 손절 X — 직접 판단")
-    lines.append("• 09:05 distribution 알림과 함께 보세요")
-    lines.append("• raw score 는 실제 확률 아님 — 1주 live 후 calibration 예정")
-
-    msg = "\n".join(lines)
+    # Build telegram message — formatter 통일 (notifier/format.py)
+    msg = format_preopen_beta(
+        alerts=alerts,
+        btc_regime=btc_regime,
+        universe_label=args.universe,
+        asof=asof,
+        dry_run=not send_tg,
+    )
     print(msg)
 
     if send_tg:
