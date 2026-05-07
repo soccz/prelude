@@ -56,8 +56,9 @@ PAPER_LEDGER_COLS = [
     "vol_5d_rank", "roc_3d_rank",
     # ranking
     "composite_score", "alert_rank",
-    # realized (closed by post_open_run later)
-    "next_max_return_pct", "next_close_return_pct",
+    # realized OHLC + return (closed by close_paper_ledger.py later)
+    "next_open", "next_high", "next_low", "next_close",
+    "next_max_return_pct", "next_min_return_pct", "next_close_return_pct",
     "hit_h2", "hit_h5", "hit_h6",
     "status",  # entered / closed
     "notes",
@@ -130,7 +131,12 @@ def append_to_paper_ledger(alerts: pd.DataFrame, asof: pd.Timestamp,
             "roc_3d_rank": float(r.get("roc_3d", 0)),
             "composite_score": float(r.get("composite", 0)),
             "alert_rank": rank,
+            "next_open": np.nan,
+            "next_high": np.nan,
+            "next_low": np.nan,
+            "next_close": np.nan,
             "next_max_return_pct": np.nan,
+            "next_min_return_pct": np.nan,
             "next_close_return_pct": np.nan,
             "hit_h2": np.nan,
             "hit_h5": np.nan,

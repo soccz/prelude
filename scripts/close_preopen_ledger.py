@@ -29,6 +29,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import load_candles
+from scripts.predict_preopen_trigger import PAPER_LEDGER_COLS
 
 
 def compute_realized_preopen(coin: str, label_date: pd.Timestamp,
@@ -61,10 +62,16 @@ def compute_realized_preopen(coin: str, label_date: pd.Timestamp,
         return {"status": "pending", "notes": f"only {len(bars)} 15m bars available"}
 
     highs = bars["high"].values.astype(float)
+    lows = bars["low"].values.astype(float)
+    closes = bars["close"].values.astype(float)
 
     h15 = float(highs[0])
     h30 = float(highs[:2].max())
     h1h = float(highs[:4].max())
+    l15 = float(lows[0])
+    l30 = float(lows[:2].min())
+    l1h = float(lows[:4].min())
+    c1h = float(closes[3])
 
     return {
         "status": "closed",
@@ -72,6 +79,13 @@ def compute_realized_preopen(coin: str, label_date: pd.Timestamp,
         "first_15m_high": h15,
         "first_30m_high": h30,
         "first_1h_high": h1h,
+        "first_15m_low": l15,
+        "first_30m_low": l30,
+        "first_1h_low": l1h,
+        "first_1h_close": c1h,
+        "first_1h_max_return_pct": (h1h / opn - 1) * 100,
+        "first_1h_min_return_pct": (l1h / opn - 1) * 100,
+        "first_1h_close_return_pct": (c1h / opn - 1) * 100,
         "hit_first15_3pct": int(h15 >= opn * 1.03),
         "hit_first15_5pct": int(h15 >= opn * 1.05),
         "hit_first30_3pct": int(h30 >= opn * 1.03),
@@ -99,10 +113,9 @@ def main():
         return
 
     ledger = pd.read_csv(p)
-    if "status" not in ledger.columns:
-        ledger["status"] = ""
-    if "notes" not in ledger.columns:
-        ledger["notes"] = ""
+    for col in PAPER_LEDGER_COLS:
+        if col not in ledger.columns:
+            ledger[col] = np.nan
     ledger["status"] = ledger["status"].fillna("").astype(str)
     ledger["notes"] = ledger["notes"].fillna("").astype(str)
     log.info(f"ledger: {len(ledger)} rows total")
@@ -143,8 +156,7 @@ def main():
         for k, v in result.items():
             if k in ("status", "n_bars_available"):
                 continue
-            if k in ledger.columns:
-                ledger.at[idx, k] = v
+            ledger.at[idx, k] = v
         ledger.at[idx, "status"] = "closed"
         n_closed += 1
         rows_summary.append({
@@ -156,6 +168,9 @@ def main():
     log.info(f"  closed: {n_closed}, no_data: {n_no_data}")
 
     if not args.dry_run:
+        ordered = [c for c in PAPER_LEDGER_COLS if c in ledger.columns]
+        extras = [c for c in ledger.columns if c not in ordered]
+        ledger = ledger[ordered + extras]
         ledger.to_csv(p, index=False)
         log.info(f"saved {p}")
 

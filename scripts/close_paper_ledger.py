@@ -34,6 +34,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import load_candles
+from scripts.predict_today_distribution import PAPER_LEDGER_COLS
 
 
 MAX_BARS = 6  # 24h / 4h
@@ -71,7 +72,7 @@ def compute_realized(coin: str, target_date: pd.Timestamp,
 
     next_max_return = high_max / open_t - 1
     next_close_return = close_t / open_t - 1
-    next_max_dd = low_min / open_t - 1
+    next_min_return = low_min / open_t - 1
 
     # head hits (head 정의와 동일)
     # h2: 4h 안 (== first bar) high >= open*1.03
@@ -85,9 +86,13 @@ def compute_realized(coin: str, target_date: pd.Timestamp,
 
     return {
         "status": "closed",
+        "next_open": open_t,
+        "next_high": high_max,
+        "next_low": low_min,
+        "next_close": close_t,
         "next_max_return_pct": next_max_return * 100,
+        "next_min_return_pct": next_min_return * 100,
         "next_close_return_pct": next_close_return * 100,
-        "next_max_dd_pct": next_max_dd * 100,
         "hit_h2": int(hit_h2),
         "hit_h6": int(hit_h6),
         "hit_h5": int(hit_h5),
@@ -111,10 +116,10 @@ def main():
         sys.exit(1)
 
     ledger = pd.read_csv(p)
-    if "status" not in ledger.columns:
-        ledger["status"] = ""
-    if "notes" not in ledger.columns:
-        ledger["notes"] = ""
+    # Ensure all expected columns exist (older ledgers may miss new realized cols).
+    for col in PAPER_LEDGER_COLS:
+        if col not in ledger.columns:
+            ledger[col] = np.nan
     ledger["status"] = ledger["status"].fillna("").astype(str)
     ledger["notes"] = ledger["notes"].fillna("").astype(str)
     log.info(f"ledger: {len(ledger)} rows total")
@@ -156,8 +161,7 @@ def main():
         for k, v in result.items():
             if k == "status":
                 continue
-            if k in ledger.columns:
-                ledger.at[idx, k] = v
+            ledger.at[idx, k] = v
         ledger.at[idx, "status"] = "closed"
         n_closed += 1
         rows_to_update.append({
@@ -170,6 +174,10 @@ def main():
     log.info(f"  closed: {n_closed}, no_data: {n_no_data}")
 
     if not args.dry_run:
+        # reorder to canonical schema (extra cols at the end are preserved)
+        ordered = [c for c in PAPER_LEDGER_COLS if c in ledger.columns]
+        extras = [c for c in ledger.columns if c not in ordered]
+        ledger = ledger[ordered + extras]
         ledger.to_csv(p, index=False)
         log.info(f"saved {p}")
 
