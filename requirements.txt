@@ -15,6 +15,9 @@ pandas-ta
 # DB
 # sqlite3 is stdlib
 
+# Dashboard encryption (PBKDF2 + AES-256-CBC + HMAC-SHA256 — papers viewer 와 동일)
+cryptography
+
 # Crypto exchange
 pyupbit
 ccxt
