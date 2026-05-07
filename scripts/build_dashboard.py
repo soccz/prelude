@@ -170,6 +170,161 @@ def compute_bootstrap_ci(closed: pd.DataFrame, max_col: str, close_col: str,
     }
 
 
+def compute_breakdown_by(closed: pd.DataFrame, group_col: str,
+                          max_col: str, min_col: str, close_col: str,
+                          hit_cols: list[tuple[str, str]] | None = None) -> list[dict]:
+    """그룹 별 (n, avg_max%, avg_min%, avg_pnl%, hit_rate%).
+
+    hit_cols: [(label, col), ...] — 표시할 hit 컬럼.
+    """
+    if len(closed) == 0 or group_col not in closed.columns:
+        return []
+    out = []
+    for key, sub in closed.groupby(group_col):
+        if pd.isna(key) or str(key).lower() in ("nan", "none", "unknown", ""):
+            continue
+        n = len(sub)
+        if n == 0:
+            continue
+        avg_max = sub[max_col].dropna().mean()
+        avg_min = sub[min_col].dropna().mean() if min_col in sub.columns else np.nan
+        pnl = sub.apply(
+            lambda r: _virtual_pnl_per_alert(r[max_col], r[close_col]), axis=1
+        ).dropna()
+        avg_pnl = pnl.mean() * 100 if len(pnl) else np.nan
+        row = {
+            "group": str(key),
+            "n": int(n),
+            "avg_max_pct": _maybe_float(avg_max),
+            "avg_min_pct": _maybe_float(avg_min),
+            "avg_pnl_pct": _maybe_float(avg_pnl),
+        }
+        if hit_cols:
+            for label, col in hit_cols:
+                if col in sub.columns:
+                    vals = sub[col].dropna()
+                    row[f"hit_{label}_pct"] = _maybe_float(vals.mean() * 100) if len(vals) else None
+        out.append(row)
+    out.sort(key=lambda r: -r["n"])
+    return out
+
+
+def compute_setup_breakdown(closed: pd.DataFrame, max_col: str, min_col: str,
+                             close_col: str) -> list[dict]:
+    """setup_ids 가 'S01+S02' 같은 문자열 → 개별 setup 으로 unfold."""
+    if len(closed) == 0 or "setup_ids" not in closed.columns:
+        return []
+    expanded = []
+    for _, r in closed.iterrows():
+        ids = str(r.get("setup_ids", "") or "")
+        for sid in ids.split("+"):
+            sid = sid.strip()
+            if sid:
+                expanded.append((sid, r))
+    if not expanded:
+        return []
+    setups_seen = sorted(set(x[0] for x in expanded))
+    out = []
+    for sid in setups_seen:
+        rows = [r for s, r in expanded if s == sid]
+        sub = pd.DataFrame(rows)
+        n = len(sub)
+        if n == 0:
+            continue
+        avg_max = sub[max_col].dropna().mean()
+        avg_min = sub[min_col].dropna().mean() if min_col in sub.columns else np.nan
+        pnl = sub.apply(
+            lambda r: _virtual_pnl_per_alert(r[max_col], r[close_col]), axis=1
+        ).dropna()
+        avg_pnl = pnl.mean() * 100 if len(pnl) else np.nan
+        out.append({
+            "group": sid,
+            "n": int(n),
+            "avg_max_pct": _maybe_float(avg_max),
+            "avg_min_pct": _maybe_float(avg_min),
+            "avg_pnl_pct": _maybe_float(avg_pnl),
+            "hit_h2_pct": _maybe_float(sub.get("hit_h2", pd.Series(dtype=float)).dropna().mean() * 100) if "hit_h2" in sub.columns else None,
+            "hit_h6_pct": _maybe_float(sub.get("hit_h6", pd.Series(dtype=float)).dropna().mean() * 100) if "hit_h6" in sub.columns else None,
+            "hit_h5_pct": _maybe_float(sub.get("hit_h5", pd.Series(dtype=float)).dropna().mean() * 100) if "hit_h5" in sub.columns else None,
+        })
+    out.sort(key=lambda r: -r["n"])
+    return out
+
+
+def compute_score_breakdown(closed: pd.DataFrame, score_col: str,
+                             max_col: str, min_col: str, close_col: str,
+                             n_buckets: int = 4) -> list[dict]:
+    """composite_score 분위별 break-down (quartile 기본)."""
+    if len(closed) == 0 or score_col not in closed.columns:
+        return []
+    sub = closed.dropna(subset=[score_col]).copy()
+    if len(sub) < n_buckets:
+        return []
+    try:
+        sub["_bucket"] = pd.qcut(
+            sub[score_col], q=n_buckets, labels=[f"Q{i+1}" for i in range(n_buckets)],
+            duplicates="drop",
+        )
+    except Exception:
+        return []
+    out = []
+    for bucket, grp in sub.groupby("_bucket", observed=True):
+        n = len(grp)
+        if n == 0:
+            continue
+        avg_max = grp[max_col].dropna().mean()
+        avg_min = grp[min_col].dropna().mean() if min_col in grp.columns else np.nan
+        pnl = grp.apply(
+            lambda r: _virtual_pnl_per_alert(r[max_col], r[close_col]), axis=1
+        ).dropna()
+        avg_pnl = pnl.mean() * 100 if len(pnl) else np.nan
+        score_lo = float(grp[score_col].min())
+        score_hi = float(grp[score_col].max())
+        out.append({
+            "group": str(bucket),
+            "n": int(n),
+            "score_range": [_maybe_float(score_lo), _maybe_float(score_hi)],
+            "avg_max_pct": _maybe_float(avg_max),
+            "avg_min_pct": _maybe_float(avg_min),
+            "avg_pnl_pct": _maybe_float(avg_pnl),
+        })
+    return out
+
+
+def compute_btc_benchmark(upbit_d1_db: str, start_date: str, end_date: str) -> list[dict]:
+    """같은 기간 KRW-BTC HODL 누적 return — alpha vs beta 비교용.
+
+    start/end 사이 일별 close 기준 close[t]/close[start] - 1 을 % 로.
+    """
+    try:
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from data.database import load_candles
+    except Exception:
+        return []
+    try:
+        df = load_candles(upbit_d1_db, "KRW-BTC")
+    except Exception:
+        return []
+    if df is None or len(df) == 0:
+        return []
+    df = df.copy()
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    df["date"] = df["timestamp"].dt.date.astype(str)
+    start = pd.to_datetime(start_date).date()
+    end = pd.to_datetime(end_date).date()
+    sub = df[(df["timestamp"].dt.date >= start) & (df["timestamp"].dt.date <= end)].sort_values("timestamp")
+    if len(sub) == 0:
+        return []
+    base = float(sub["close"].iloc[0])
+    if base <= 0:
+        return []
+    return [
+        {"date": str(row["date"]), "btc_cum_pct": float(row["close"] / base - 1) * 100}
+        for _, row in sub.iterrows()
+    ]
+
+
 def compute_distribution_summary(df: pd.DataFrame) -> dict:
     """distribution paper_ledger → KPI dict."""
     closed = df[df["status"].astype(str) == "closed"].copy()
@@ -222,6 +377,20 @@ def compute_distribution_summary(df: pd.DataFrame) -> dict:
         out["bootstrap"] = compute_bootstrap_ci(
             closed, "next_max_return_pct", "next_close_return_pct"
         )
+        out["stratification"] = {
+            "regime": compute_breakdown_by(
+                closed, "btc_regime",
+                "next_max_return_pct", "next_min_return_pct", "next_close_return_pct",
+                hit_cols=[("h2", "hit_h2"), ("h6", "hit_h6"), ("h5", "hit_h5")],
+            ),
+            "setup": compute_setup_breakdown(
+                closed, "next_max_return_pct", "next_min_return_pct", "next_close_return_pct",
+            ),
+            "score": compute_score_breakdown(
+                closed, "composite_score",
+                "next_max_return_pct", "next_min_return_pct", "next_close_return_pct",
+            ),
+        }
     return out
 
 
@@ -279,6 +448,24 @@ def compute_preopen_summary(df: pd.DataFrame) -> dict:
             out["bootstrap"] = compute_bootstrap_ci(
                 closed, "first_1h_max_return_pct", "first_1h_close_return_pct"
             )
+            out["stratification"] = {
+                "regime": compute_breakdown_by(
+                    closed, "btc_regime",
+                    "first_1h_max_return_pct", "first_1h_min_return_pct",
+                    "first_1h_close_return_pct",
+                    hit_cols=[
+                        ("first15_3", "hit_first15_3pct"),
+                        ("first15_5", "hit_first15_5pct"),
+                        ("first1h_3", "hit_first1h_3pct"),
+                        ("first1h_5", "hit_first1h_5pct"),
+                    ],
+                ),
+                "score": compute_score_breakdown(
+                    closed, "composite_score",
+                    "first_1h_max_return_pct", "first_1h_min_return_pct",
+                    "first_1h_close_return_pct",
+                ),
+            }
     return out
 
 
@@ -482,7 +669,18 @@ def main():
     _write_json(out_dir / "history.json", history, passphrase=pin)
     log.info(f"saved history.json ({len(history['rows'])} rows)")
 
-    # 3) accuracy.json (rolling + cum pnl 둘 다)
+    # 3) accuracy.json (rolling + cum pnl + BTC benchmark)
+    # BTC HODL 같은 기간 누적 — alpha vs beta 비교용.
+    all_dates = []
+    for ledger in [df_dist, df_pre]:
+        if "date" in ledger.columns and len(ledger) > 0:
+            all_dates += pd.to_datetime(ledger["date"]).dt.strftime("%Y-%m-%d").tolist()
+    btc_bench = []
+    if all_dates:
+        btc_bench = compute_btc_benchmark(
+            "data/upbit_d1.db", min(all_dates), max(all_dates)
+        )
+
     accuracy = {
         "asof": asof.isoformat(),
         "window_days": ROLLING_WINDOW_DAYS,
@@ -504,9 +702,10 @@ def main():
                 df_pre, "first_1h_max_return_pct", "first_1h_close_return_pct"
             ),
         },
+        "btc_benchmark": btc_bench,
     }
     _write_json(out_dir / "accuracy.json", accuracy, passphrase=pin)
-    log.info(f"saved accuracy.json")
+    log.info(f"saved accuracy.json (btc benchmark: {len(btc_bench)} days)")
 
     # quick stdout summary
     print()
