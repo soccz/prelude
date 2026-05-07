@@ -170,6 +170,337 @@ def compute_bootstrap_ci(closed: pd.DataFrame, max_col: str, close_col: str,
     }
 
 
+def _daily_pnl_from_closed(closed: pd.DataFrame, max_col: str, close_col: str) -> pd.Series:
+    """closed 행 → 일별 net PnL series (TP rule + cost). 같은 날 N알림이면 sum."""
+    if len(closed) == 0:
+        return pd.Series(dtype=float)
+    sub = closed.copy()
+    sub["pnl"] = sub.apply(
+        lambda r: _virtual_pnl_per_alert(r[max_col], r[close_col]), axis=1
+    )
+    sub = sub.dropna(subset=["pnl"])
+    sub["date_dt"] = pd.to_datetime(sub["date"])
+    daily = sub.groupby(sub["date_dt"].dt.date)["pnl"].sum().sort_index()
+    daily.index = pd.to_datetime(daily.index)
+    return daily
+
+
+def compute_distribution_stats(closed: pd.DataFrame, max_col: str, close_col: str) -> dict:
+    """업계 표준 — Vol(ann) / Skew / Kurt / VaR / CVaR / Tail Ratio /
+    Recovery Factor / Ulcer Index / Common Sense Ratio / Win-Loss streak."""
+    pnl = _per_alert_pnl_series(closed, max_col, close_col)
+    if len(pnl) == 0:
+        return {}
+    daily = _daily_pnl_from_closed(closed, max_col, close_col)
+
+    out = {}
+    if len(daily) > 1:
+        std_d = float(daily.std(ddof=1))
+        out["volatility_ann_pct"] = _maybe_float(std_d * np.sqrt(252) * 100)
+    out["skewness"] = _maybe_float(float(pnl.skew()) if len(pnl) > 2 else float("nan"))
+    out["kurtosis_excess"] = _maybe_float(float(pnl.kurtosis()) if len(pnl) > 3 else float("nan"))
+
+    # VaR / CVaR (95%) on per-trade returns
+    if len(pnl) >= 5:
+        var95 = float(pnl.quantile(0.05))
+        tail = pnl[pnl <= var95]
+        cvar95 = float(tail.mean()) if len(tail) else float("nan")
+        out["var_95_pct"] = _maybe_float(var95 * 100)
+        out["cvar_95_pct"] = _maybe_float(cvar95 * 100)
+        # Tail Ratio (right / left tail abs ratio)
+        right = abs(float(pnl.quantile(0.95)))
+        left = abs(float(pnl.quantile(0.05)))
+        out["tail_ratio"] = _maybe_float(right / left if left > 0 else float("nan"))
+
+    # Recovery Factor + Ulcer + Common Sense
+    cum = pnl.cumsum()
+    if len(cum) and cum.cummax().abs().max() > 0:
+        mdd = float((cum - cum.cummax()).min())
+        out["recovery_factor"] = _maybe_float(float(cum.iloc[-1]) / abs(mdd) if mdd < 0 else float("nan"))
+    # Ulcer index over per-trade equity curve
+    if len(cum) > 0:
+        dd_pct = (cum - cum.cummax())
+        ulcer = float(np.sqrt(np.mean(dd_pct ** 2)))
+        out["ulcer_index"] = _maybe_float(ulcer * 100)
+
+    # Common Sense Ratio = profit factor × tail ratio
+    wins = pnl[pnl > 0]
+    losses = pnl[pnl < 0]
+    pf = (float(wins.sum() / abs(losses.sum())) if len(losses) and losses.sum() < 0 else float("nan"))
+    out["common_sense_ratio"] = _maybe_float(pf * out.get("tail_ratio", float("nan"))) if not np.isnan(pf) and out.get("tail_ratio") else None
+
+    # Win/Loss streak
+    sign_seq = np.sign(pnl.values)
+    max_win, max_loss = 0, 0
+    cur_w = cur_l = 0
+    for s in sign_seq:
+        if s > 0:
+            cur_w += 1; cur_l = 0
+            max_win = max(max_win, cur_w)
+        elif s < 0:
+            cur_l += 1; cur_w = 0
+            max_loss = max(max_loss, cur_l)
+        else:
+            cur_w = cur_l = 0
+    out["max_win_streak"] = int(max_win)
+    out["max_loss_streak"] = int(max_loss)
+
+    return out
+
+
+def compute_psr_dsr(closed: pd.DataFrame, max_col: str, close_col: str,
+                     n_trials: int = 50) -> dict:
+    """Lopez de Prado 의 PSR / DSR / MinTRL.
+
+    - PSR(SR*=0): "이 Sharpe 가 0 보다 클 확률".
+    - DSR(SR_threshold from N trials): selection bias 보정.
+    - MinTRL(α=0.95): 신뢰 95% 위해 필요한 표본 길이.
+
+    공식 (per-period, non-annualized SR. wikipedia/Bailey 2014 동일):
+      PSR = Φ((SR - SR*) × √(T-1) / √(1 - γ3·SR + (γ4-1)/4·SR²))
+      γ3 = skew, γ4 = (excess kurt) + 3
+    """
+    from scipy.stats import norm
+    pnl = _per_alert_pnl_series(closed, max_col, close_col)
+    T = len(pnl)
+    if T < 5:
+        return {"n_trades": int(T), "note": "T<5: PSR/DSR skipped"}
+
+    mu = float(pnl.mean())
+    sd = float(pnl.std(ddof=1))
+    if sd <= 0:
+        return {"n_trades": int(T), "note": "zero variance"}
+    sr = mu / sd  # per-trade Sharpe (non-annualized)
+
+    skew = float(pnl.skew()) if T > 2 else 0.0
+    kurt_excess = float(pnl.kurtosis()) if T > 3 else 0.0
+    kurt = kurt_excess + 3.0
+    denom_var = 1.0 - skew * sr + (kurt - 1.0) / 4.0 * sr * sr
+    denom_var = max(denom_var, 1e-9)
+    psr_z = (sr - 0.0) * np.sqrt(T - 1) / np.sqrt(denom_var)
+    psr = float(norm.cdf(psr_z))
+
+    # SR_threshold from N trials (simplified estimate of var of trial SRs)
+    # Conservative: assume V[SR̂_n] ≈ (1/T) (independent trial assumption)
+    # 그래서 SR_threshold ≈ √(1/T) × ((1-γ)·Φ⁻¹(1-1/N) + γ·Φ⁻¹(1-1/Ne))
+    EULER = 0.5772156649
+    if n_trials > 1:
+        v_sr = 1.0 / T
+        z1 = norm.ppf(1.0 - 1.0 / n_trials)
+        z2 = norm.ppf(1.0 - 1.0 / (n_trials * np.e))
+        sr_threshold = np.sqrt(v_sr) * ((1 - EULER) * z1 + EULER * z2)
+    else:
+        sr_threshold = 0.0
+
+    dsr_z = (sr - sr_threshold) * np.sqrt(T - 1) / np.sqrt(denom_var)
+    dsr = float(norm.cdf(dsr_z))
+
+    # MinTRL @ alpha=0.95
+    alpha = 0.95
+    z_alpha = norm.ppf(alpha)
+    sr_diff = sr - sr_threshold
+    if sr_diff > 0:
+        mintrl = 1.0 + denom_var * (z_alpha / sr_diff) ** 2
+    else:
+        mintrl = float("inf")  # 절대 도달 불가 (현재 SR < threshold)
+
+    return {
+        "n_trades": int(T),
+        "sr_per_trade": _maybe_float(sr),
+        "skew": _maybe_float(skew),
+        "kurt_excess": _maybe_float(kurt_excess),
+        "psr": _maybe_float(psr),
+        "psr_pct": _maybe_float(psr * 100),
+        "n_trials_assumed": int(n_trials),
+        "sr_threshold": _maybe_float(sr_threshold),
+        "dsr": _maybe_float(dsr),
+        "dsr_pct": _maybe_float(dsr * 100),
+        "min_trl_trades": _maybe_float(mintrl) if np.isfinite(mintrl) else None,
+    }
+
+
+def compute_benchmark_metrics(closed: pd.DataFrame, max_col: str, close_col: str,
+                                btc_series: list[dict]) -> dict:
+    """IR / Beta / Tracking Error vs BTC HODL daily returns."""
+    if not btc_series or len(btc_series) < 5:
+        return {}
+    daily = _daily_pnl_from_closed(closed, max_col, close_col)
+    if len(daily) < 3:
+        return {}
+    btc_df = pd.DataFrame(btc_series)
+    btc_df["date_dt"] = pd.to_datetime(btc_df["date"])
+    btc_df = btc_df.set_index("date_dt").sort_index()
+    btc_pct = btc_df["btc_cum_pct"] / 100.0
+    btc_daily = btc_pct.diff().dropna()
+
+    aligned = pd.concat([daily.rename("strat"), btc_daily.rename("btc")], axis=1).dropna()
+    if len(aligned) < 3:
+        return {}
+
+    excess = aligned["strat"] - aligned["btc"]
+    te = float(excess.std(ddof=1))
+    ir = float(excess.mean() / te * np.sqrt(252)) if te > 0 else float("nan")
+
+    var_b = float(aligned["btc"].var(ddof=1))
+    cov_sb = float(aligned[["strat", "btc"]].cov().iloc[0, 1])
+    beta = (cov_sb / var_b) if var_b > 0 else float("nan")
+    corr = float(aligned["strat"].corr(aligned["btc"]))
+
+    return {
+        "n_days_aligned": int(len(aligned)),
+        "information_ratio": _maybe_float(ir),
+        "tracking_error_ann_pct": _maybe_float(te * np.sqrt(252) * 100),
+        "beta_vs_btc": _maybe_float(beta),
+        "correlation_btc": _maybe_float(corr),
+    }
+
+
+def compute_top_drawdowns(closed: pd.DataFrame, max_col: str, close_col: str,
+                            top_n: int = 5) -> list[dict]:
+    """누적 PnL 시계열의 top-N drawdown (peak/valley/recovery/depth/length)."""
+    daily = _daily_pnl_from_closed(closed, max_col, close_col)
+    if len(daily) == 0:
+        return []
+    cum = daily.cumsum()
+    peak = cum.cummax()
+    underwater = cum - peak  # ≤ 0
+    drawdowns = []
+    in_dd = False
+    peak_date = peak_val = valley_date = valley_val = None
+    for date, c, p in zip(cum.index, cum, peak):
+        if c < p and not in_dd:
+            in_dd = True
+            peak_date = date - pd.Timedelta(days=1) if date > cum.index[0] else date
+            peak_val = float(p)
+            valley_date = date
+            valley_val = float(c)
+        elif in_dd:
+            if c < valley_val:
+                valley_date = date
+                valley_val = float(c)
+            if c >= p:
+                drawdowns.append({
+                    "peak_date": str(peak_date.date()) if peak_date else None,
+                    "valley_date": str(valley_date.date()),
+                    "recovery_date": str(date.date()),
+                    "depth_pct": _maybe_float((valley_val - peak_val) * 100),
+                    "length_days": int((date - peak_date).days) if peak_date else None,
+                })
+                in_dd = False
+                peak_date = peak_val = valley_date = valley_val = None
+    if in_dd:
+        drawdowns.append({
+            "peak_date": str(peak_date.date()) if peak_date else None,
+            "valley_date": str(valley_date.date()),
+            "recovery_date": None,
+            "depth_pct": _maybe_float((valley_val - peak_val) * 100),
+            "length_days": int((cum.index[-1] - peak_date).days) if peak_date else None,
+        })
+    drawdowns.sort(key=lambda x: x["depth_pct"] or 0)
+    return drawdowns[:top_n]
+
+
+def compute_underwater_series(closed: pd.DataFrame, max_col: str, close_col: str) -> list[dict]:
+    """일별 underwater % (cum / peak - 1)."""
+    daily = _daily_pnl_from_closed(closed, max_col, close_col)
+    if len(daily) == 0:
+        return []
+    cum = daily.cumsum()
+    peak = cum.cummax()
+    return [
+        {"date": str(d.date()), "underwater_pct": float(c - p) * 100}
+        for d, c, p in zip(cum.index, cum, peak)
+    ]
+
+
+def compute_rolling_sharpe(closed: pd.DataFrame, max_col: str, close_col: str,
+                            window: int = 30) -> list[dict]:
+    """일별 rolling annualized Sharpe."""
+    daily = _daily_pnl_from_closed(closed, max_col, close_col)
+    if len(daily) < 5:
+        return []
+    rolling_mean = daily.rolling(window, min_periods=5).mean()
+    rolling_std = daily.rolling(window, min_periods=5).std(ddof=1)
+    rs = (rolling_mean / rolling_std) * np.sqrt(252)
+    return [
+        {"date": str(d.date()), "rolling_sharpe": _maybe_float(float(v))}
+        for d, v in zip(rs.index, rs.values) if pd.notna(v)
+    ]
+
+
+def compute_monthly_returns(closed: pd.DataFrame, max_col: str, close_col: str) -> list[dict]:
+    """year-month 누적 return — heatmap 용."""
+    daily = _daily_pnl_from_closed(closed, max_col, close_col)
+    if len(daily) == 0:
+        return []
+    monthly = daily.resample("ME").sum() * 100  # %
+    return [
+        {
+            "year": int(d.year),
+            "month": int(d.month),
+            "return_pct": _maybe_float(float(v)),
+        }
+        for d, v in zip(monthly.index, monthly.values)
+    ]
+
+
+def compute_best_worst_trades(closed: pd.DataFrame, max_col: str, close_col: str,
+                                top_n: int = 3) -> dict:
+    """가상 PnL 기준 top/bottom N 알림."""
+    if len(closed) == 0:
+        return {"best": [], "worst": []}
+    sub = closed.copy()
+    sub["pnl"] = sub.apply(
+        lambda r: _virtual_pnl_per_alert(r[max_col], r[close_col]), axis=1
+    )
+    sub = sub.dropna(subset=["pnl"])
+    if len(sub) == 0:
+        return {"best": [], "worst": []}
+
+    def to_card(row, kind):
+        return {
+            "date": str(row.get("date")),
+            "coin": str(row.get("coin", "")).replace("KRW-", ""),
+            "setup": str(row.get("setup_ids", "") or ""),
+            "regime": str(row.get("btc_regime", "")),
+            "entry_price": _maybe_float(row.get("next_open") if "next_open" in row else row.get("entry_price_proxy")),
+            "max_pct": _maybe_float(row.get(max_col)),
+            "min_pct": _maybe_float(row.get("next_min_return_pct" if "next_min_return_pct" in row else "first_1h_min_return_pct")),
+            "close_pct": _maybe_float(row.get(close_col)),
+            "pnl_pct": _maybe_float(float(row["pnl"]) * 100),
+            "kind": kind,
+        }
+
+    best = sub.nlargest(top_n, "pnl")
+    worst = sub.nsmallest(top_n, "pnl")
+    return {
+        "best": [to_card(r, "best") for _, r in best.iterrows()],
+        "worst": [to_card(r, "worst") for _, r in worst.iterrows()],
+    }
+
+
+def compute_return_distribution(closed: pd.DataFrame, max_col: str, close_col: str,
+                                  bin_pct: float = 1.0) -> list[dict]:
+    """per-trade return histogram bins (default 1%pt 너비)."""
+    pnl = _per_alert_pnl_series(closed, max_col, close_col) * 100  # %
+    if len(pnl) == 0:
+        return []
+    lo = np.floor(pnl.min() / bin_pct) * bin_pct
+    hi = np.ceil(pnl.max() / bin_pct) * bin_pct
+    edges = np.arange(lo, hi + bin_pct, bin_pct)
+    if len(edges) < 2:
+        return []
+    counts, _ = np.histogram(pnl, bins=edges)
+    return [
+        {
+            "bin_low": _maybe_float(float(edges[i])),
+            "bin_high": _maybe_float(float(edges[i + 1])),
+            "count": int(counts[i]),
+        }
+        for i in range(len(counts))
+    ]
+
+
 def compute_breakdown_by(closed: pd.DataFrame, group_col: str,
                           max_col: str, min_col: str, close_col: str,
                           hit_cols: list[tuple[str, str]] | None = None) -> list[dict]:
@@ -325,7 +656,7 @@ def compute_btc_benchmark(upbit_d1_db: str, start_date: str, end_date: str) -> l
     ]
 
 
-def compute_distribution_summary(df: pd.DataFrame) -> dict:
+def compute_distribution_summary(df: pd.DataFrame, btc_series: list[dict] | None = None) -> dict:
     """distribution paper_ledger → KPI dict."""
     closed = df[df["status"].astype(str) == "closed"].copy()
     out = {
@@ -391,10 +722,30 @@ def compute_distribution_summary(df: pd.DataFrame) -> dict:
                 "next_max_return_pct", "next_min_return_pct", "next_close_return_pct",
             ),
         }
+        # 신규 — 업계 표준 + Lopez de Prado
+        out["stats"] = compute_distribution_stats(
+            closed, "next_max_return_pct", "next_close_return_pct"
+        )
+        out["confidence"] = compute_psr_dsr(
+            closed, "next_max_return_pct", "next_close_return_pct"
+        )
+        if btc_series:
+            out["vs_benchmark"] = compute_benchmark_metrics(
+                closed, "next_max_return_pct", "next_close_return_pct", btc_series
+            )
+        out["top_drawdowns"] = compute_top_drawdowns(
+            closed, "next_max_return_pct", "next_close_return_pct"
+        )
+        out["best_worst"] = compute_best_worst_trades(
+            closed, "next_max_return_pct", "next_close_return_pct"
+        )
+        out["return_distribution"] = compute_return_distribution(
+            closed, "next_max_return_pct", "next_close_return_pct"
+        )
     return out
 
 
-def compute_preopen_summary(df: pd.DataFrame) -> dict:
+def compute_preopen_summary(df: pd.DataFrame, btc_series: list[dict] | None = None) -> dict:
     """preopen paper_ledger → KPI dict (1h horizon)."""
     closed = df[df["status"].astype(str) == "closed"].copy()
     out = {
@@ -466,6 +817,25 @@ def compute_preopen_summary(df: pd.DataFrame) -> dict:
                     "first_1h_close_return_pct",
                 ),
             }
+            out["stats"] = compute_distribution_stats(
+                closed, "first_1h_max_return_pct", "first_1h_close_return_pct"
+            )
+            out["confidence"] = compute_psr_dsr(
+                closed, "first_1h_max_return_pct", "first_1h_close_return_pct"
+            )
+            if btc_series:
+                out["vs_benchmark"] = compute_benchmark_metrics(
+                    closed, "first_1h_max_return_pct", "first_1h_close_return_pct", btc_series
+                )
+            out["top_drawdowns"] = compute_top_drawdowns(
+                closed, "first_1h_max_return_pct", "first_1h_close_return_pct"
+            )
+            out["best_worst"] = compute_best_worst_trades(
+                closed, "first_1h_max_return_pct", "first_1h_close_return_pct"
+            )
+            out["return_distribution"] = compute_return_distribution(
+                closed, "first_1h_max_return_pct", "first_1h_close_return_pct"
+            )
     return out
 
 
@@ -649,13 +1019,25 @@ def main():
     df_pre = _load_or_empty(args.paper_ledger_preopen)
     log.info(f"loaded: distribution {len(df_dist)} rows, preopen {len(df_pre)} rows")
 
+    # 0) BTC benchmark (summary + accuracy 둘 다 사용)
+    all_dates = []
+    for ledger in [df_dist, df_pre]:
+        if "date" in ledger.columns and len(ledger) > 0:
+            all_dates += pd.to_datetime(ledger["date"]).dt.strftime("%Y-%m-%d").tolist()
+    btc_bench = []
+    if all_dates:
+        btc_bench = compute_btc_benchmark(
+            "data/upbit_d1.db", min(all_dates), max(all_dates)
+        )
+    log.info(f"BTC benchmark: {len(btc_bench)} days")
+
     # 1) summary.json
     summary = {
         "asof": asof.isoformat(),
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "channels": {
-            "distribution": compute_distribution_summary(df_dist),
-            "preopen": compute_preopen_summary(df_pre),
+            "distribution": compute_distribution_summary(df_dist, btc_series=btc_bench),
+            "preopen": compute_preopen_summary(df_pre, btc_series=btc_bench),
         },
     }
     _write_json(out_dir / "summary.json", summary, passphrase=pin)
@@ -669,17 +1051,9 @@ def main():
     _write_json(out_dir / "history.json", history, passphrase=pin)
     log.info(f"saved history.json ({len(history['rows'])} rows)")
 
-    # 3) accuracy.json (rolling + cum pnl + BTC benchmark)
-    # BTC HODL 같은 기간 누적 — alpha vs beta 비교용.
-    all_dates = []
-    for ledger in [df_dist, df_pre]:
-        if "date" in ledger.columns and len(ledger) > 0:
-            all_dates += pd.to_datetime(ledger["date"]).dt.strftime("%Y-%m-%d").tolist()
-    btc_bench = []
-    if all_dates:
-        btc_bench = compute_btc_benchmark(
-            "data/upbit_d1.db", min(all_dates), max(all_dates)
-        )
+    # 3) accuracy.json — 시계열 (rolling + cum_pnl + underwater + rolling_sharpe + monthly)
+    closed_dist = df_dist[df_dist["status"].astype(str) == "closed"].copy() if "status" in df_dist.columns else df_dist.iloc[0:0]
+    closed_pre = df_pre[df_pre["status"].astype(str) == "closed"].copy() if "status" in df_pre.columns else df_pre.iloc[0:0]
 
     accuracy = {
         "asof": asof.isoformat(),
@@ -691,6 +1065,15 @@ def main():
             "cum_pnl": cumulative_pnl_series(
                 df_dist, "next_max_return_pct", "next_close_return_pct"
             ),
+            "rolling_sharpe": compute_rolling_sharpe(
+                closed_dist, "next_max_return_pct", "next_close_return_pct"
+            ),
+            "underwater": compute_underwater_series(
+                closed_dist, "next_max_return_pct", "next_close_return_pct"
+            ),
+            "monthly_returns": compute_monthly_returns(
+                closed_dist, "next_max_return_pct", "next_close_return_pct"
+            ),
         },
         "preopen": {
             "rolling": rolling_accuracy(
@@ -700,6 +1083,15 @@ def main():
             ),
             "cum_pnl": cumulative_pnl_series(
                 df_pre, "first_1h_max_return_pct", "first_1h_close_return_pct"
+            ),
+            "rolling_sharpe": compute_rolling_sharpe(
+                closed_pre, "first_1h_max_return_pct", "first_1h_close_return_pct"
+            ),
+            "underwater": compute_underwater_series(
+                closed_pre, "first_1h_max_return_pct", "first_1h_close_return_pct"
+            ),
+            "monthly_returns": compute_monthly_returns(
+                closed_pre, "first_1h_max_return_pct", "first_1h_close_return_pct"
             ),
         },
         "btc_benchmark": btc_bench,
