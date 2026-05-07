@@ -61,11 +61,20 @@ def _virtual_pnl_per_alert(max_ret_pct: float, close_ret_pct: float) -> float:
 
 
 def _per_alert_pnl_series(closed: pd.DataFrame, max_col: str, close_col: str) -> pd.Series:
-    """알림별 net PnL (TP rule 적용, 비용 차감) — 단일 시리즈."""
-    pnl = closed.apply(
-        lambda r: _virtual_pnl_per_alert(r[max_col], r[close_col]), axis=1
-    ).dropna()
-    return pnl
+    """알림별 net PnL (TP rule + 비용) — vectorized.
+
+    gross = max_d >= TP_PCT ? TP_PCT : close_d
+    net = gross - ROUND_TRIP_COST_PCT
+    NaN max → drop.
+    """
+    if len(closed) == 0 or max_col not in closed.columns:
+        return pd.Series(dtype=float)
+    max_d = pd.to_numeric(closed[max_col], errors="coerce") / 100.0
+    close_d = pd.to_numeric(closed.get(close_col, np.nan), errors="coerce") / 100.0
+    valid = max_d.notna()
+    gross = np.where(max_d >= TP_PCT, TP_PCT, close_d)
+    pnl = pd.Series(gross - ROUND_TRIP_COST_PCT, index=closed.index)
+    return pnl[valid].dropna()
 
 
 def compute_quant_metrics(closed: pd.DataFrame, max_col: str, close_col: str) -> dict:
@@ -171,16 +180,17 @@ def compute_bootstrap_ci(closed: pd.DataFrame, max_col: str, close_col: str,
 
 
 def _daily_pnl_from_closed(closed: pd.DataFrame, max_col: str, close_col: str) -> pd.Series:
-    """closed 행 → 일별 net PnL series (TP rule + cost). 같은 날 N알림이면 sum."""
+    """closed 행 → 일별 net PnL series (TP rule + cost, vectorized).
+    같은 날 N알림이면 sum.
+    """
     if len(closed) == 0:
         return pd.Series(dtype=float)
-    sub = closed.copy()
-    sub["pnl"] = sub.apply(
-        lambda r: _virtual_pnl_per_alert(r[max_col], r[close_col]), axis=1
-    )
-    sub = sub.dropna(subset=["pnl"])
-    sub["date_dt"] = pd.to_datetime(sub["date"])
-    daily = sub.groupby(sub["date_dt"].dt.date)["pnl"].sum().sort_index()
+    pnl = _per_alert_pnl_series(closed, max_col, close_col)
+    if len(pnl) == 0:
+        return pd.Series(dtype=float)
+    dates = pd.to_datetime(closed.loc[pnl.index, "date"])
+    sub = pd.DataFrame({"pnl": pnl.values, "date_d": dates.dt.date.values})
+    daily = sub.groupby("date_d")["pnl"].sum().sort_index()
     daily.index = pd.to_datetime(daily.index)
     return daily
 
@@ -275,14 +285,14 @@ def compute_psr_dsr(closed: pd.DataFrame, max_col: str, close_col: str,
     skew = float(pnl.skew()) if T > 2 else 0.0
     kurt_excess = float(pnl.kurtosis()) if T > 3 else 0.0
     kurt = kurt_excess + 3.0
-    denom_var = 1.0 - skew * sr + (kurt - 1.0) / 4.0 * sr * sr
-    denom_var = max(denom_var, 1e-9)
-    psr_z = (sr - 0.0) * np.sqrt(T - 1) / np.sqrt(denom_var)
+    # PSR variance term — Bailey 2014 (SR_obs 기반)
+    psr_var = 1.0 - skew * sr + (kurt - 1.0) / 4.0 * sr * sr
+    psr_var = max(psr_var, 1e-9)
+    psr_z = (sr - 0.0) * np.sqrt(T - 1) / np.sqrt(psr_var)
     psr = float(norm.cdf(psr_z))
 
-    # SR_threshold from N trials (simplified estimate of var of trial SRs)
-    # Conservative: assume V[SR̂_n] ≈ (1/T) (independent trial assumption)
-    # 그래서 SR_threshold ≈ √(1/T) × ((1-γ)·Φ⁻¹(1-1/N) + γ·Φ⁻¹(1-1/Ne))
+    # SR_threshold from N trials (False Strategy Theorem)
+    # V[SR̂_n] ≈ (1/T) (independent trial assumption, Bailey 2014 §4.2)
     EULER = 0.5772156649
     if n_trials > 1:
         v_sr = 1.0 / T
@@ -292,17 +302,22 @@ def compute_psr_dsr(closed: pd.DataFrame, max_col: str, close_col: str,
     else:
         sr_threshold = 0.0
 
-    dsr_z = (sr - sr_threshold) * np.sqrt(T - 1) / np.sqrt(denom_var)
+    # DSR — same denominator as PSR (SR_obs based variance)
+    dsr_z = (sr - sr_threshold) * np.sqrt(T - 1) / np.sqrt(psr_var)
     dsr = float(norm.cdf(dsr_z))
 
-    # MinTRL @ alpha=0.95
+    # MinTRL @ alpha=0.95 — Wikipedia/Bailey 의 정확한 공식은
+    # SR_threshold 기반 variance term:
+    #   MinTRL = 1 + (1 − γ3·SR₀ + (γ4−1)/4·SR₀²) × (Φ⁻¹(α) / (SR_obs − SR₀))²
     alpha = 0.95
     z_alpha = norm.ppf(alpha)
     sr_diff = sr - sr_threshold
     if sr_diff > 0:
-        mintrl = 1.0 + denom_var * (z_alpha / sr_diff) ** 2
+        var_threshold = 1.0 - skew * sr_threshold + (kurt - 1.0) / 4.0 * sr_threshold ** 2
+        var_threshold = max(var_threshold, 1e-9)
+        mintrl = 1.0 + var_threshold * (z_alpha / sr_diff) ** 2
     else:
-        mintrl = float("inf")  # 절대 도달 불가 (현재 SR < threshold)
+        mintrl = float("inf")  # 현재 SR < threshold — 절대 도달 불가
 
     return {
         "n_trades": int(T),
@@ -321,33 +336,39 @@ def compute_psr_dsr(closed: pd.DataFrame, max_col: str, close_col: str,
 
 def compute_benchmark_metrics(closed: pd.DataFrame, max_col: str, close_col: str,
                                 btc_series: list[dict]) -> dict:
-    """IR / Beta / Tracking Error vs BTC HODL daily returns."""
+    """IR / Beta / Tracking Error vs BTC HODL daily returns.
+
+    alert 없는 날의 strat daily PnL = 0 (cash) 가정 후 BTC 모든 날에 align.
+    이래야 sparse alert 도 BTC 의 daily series 와 비교 가능.
+    """
     if not btc_series or len(btc_series) < 5:
         return {}
     daily = _daily_pnl_from_closed(closed, max_col, close_col)
-    if len(daily) < 3:
+    if len(daily) == 0:
         return {}
     btc_df = pd.DataFrame(btc_series)
     btc_df["date_dt"] = pd.to_datetime(btc_df["date"])
     btc_df = btc_df.set_index("date_dt").sort_index()
     btc_pct = btc_df["btc_cum_pct"] / 100.0
     btc_daily = btc_pct.diff().dropna()
-
-    aligned = pd.concat([daily.rename("strat"), btc_daily.rename("btc")], axis=1).dropna()
-    if len(aligned) < 3:
+    if len(btc_daily) < 5:
         return {}
 
-    excess = aligned["strat"] - aligned["btc"]
+    # Reindex strat daily to BTC's date index — alert 없는 날 = 0 PnL
+    strat_daily = daily.reindex(btc_daily.index, fill_value=0.0)
+
+    excess = strat_daily - btc_daily
     te = float(excess.std(ddof=1))
     ir = float(excess.mean() / te * np.sqrt(252)) if te > 0 else float("nan")
 
-    var_b = float(aligned["btc"].var(ddof=1))
-    cov_sb = float(aligned[["strat", "btc"]].cov().iloc[0, 1])
+    var_b = float(btc_daily.var(ddof=1))
+    cov_sb = float(strat_daily.cov(btc_daily))
     beta = (cov_sb / var_b) if var_b > 0 else float("nan")
-    corr = float(aligned["strat"].corr(aligned["btc"]))
+    corr = float(strat_daily.corr(btc_daily))
 
     return {
-        "n_days_aligned": int(len(aligned)),
+        "n_days_aligned": int(len(strat_daily)),
+        "n_days_alert": int((strat_daily != 0).sum()),
         "information_ratio": _maybe_float(ir),
         "tracking_error_ann_pct": _maybe_float(te * np.sqrt(252) * 100),
         "beta_vs_btc": _maybe_float(beta),
