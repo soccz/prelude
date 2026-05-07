@@ -23,6 +23,12 @@ PATH=/usr/local/bin:/usr/bin:/bin:/home/soccz/.pyenv/shims
 30 9 * * * cd /home/soccz/22tb/prelude && bash scripts/post_open_run.sh >> output/cron_post_open.log 2>&1
 
 # ============================================================================
+# 매일 KST 10:10 — dashboard JSON 빌드 + soccz.github.io push
+# (close cron 두 개 끝난 후 publish)
+# ============================================================================
+10 10 * * * cd /home/soccz/22tb/prelude && bash scripts/publish_dashboard.sh >> output/cron_publish.log 2>&1
+
+# ============================================================================
 # 주간 재학습 — 일요일 KST 06:00
 # ============================================================================
 0 6 * * 0 cd /home/soccz/22tb/prelude && bash scripts/retrain_run.sh >> output/cron_retrain.log 2>&1

@@ -28,12 +28,16 @@ cp "$REPO/deploy/prelude-preopen.service"        "$UNIT_DIR/prelude-preopen.serv
 cp "$REPO/deploy/prelude-preopen.timer"          "$UNIT_DIR/prelude-preopen.timer"
 cp "$REPO/deploy/prelude-preopen-close.service"  "$UNIT_DIR/prelude-preopen-close.service"
 cp "$REPO/deploy/prelude-preopen-close.timer"    "$UNIT_DIR/prelude-preopen-close.timer"
+# Dashboard publish (10:10 KST — close cron 둘 다 끝난 후)
+cp "$REPO/deploy/prelude-publish-dashboard.service" "$UNIT_DIR/prelude-publish-dashboard.service"
+cp "$REPO/deploy/prelude-publish-dashboard.timer"   "$UNIT_DIR/prelude-publish-dashboard.timer"
 
 systemctl daemon-reload
 systemctl enable --now prelude-distribution.timer
 systemctl enable --now prelude-close.timer
 systemctl enable --now prelude-preopen.timer
 systemctl enable --now prelude-preopen-close.timer
+systemctl enable --now prelude-publish-dashboard.timer
 
 echo ""
 echo "=== Installed timers ==="

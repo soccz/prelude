@@ -1,0 +1,12 @@
+[Unit]
+Description=prelude dashboard publish (build JSON + git push to soccz.github.io)
+After=network.target prelude-close.service prelude-preopen-close.service
+
+[Service]
+Type=oneshot
+User=soccz
+WorkingDirectory=/home/soccz/22tb/prelude
+ExecStart=/bin/bash /home/soccz/22tb/prelude/scripts/publish_dashboard.sh
+TimeoutStartSec=600
+StandardOutput=append:/home/soccz/22tb/prelude/output/cron_publish.log
+StandardError=append:/home/soccz/22tb/prelude/output/cron_publish.log
