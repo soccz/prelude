@@ -98,6 +98,7 @@ prelude/
 | **가상 ledger 보고 싶은 사용자** | LEDGER.md → `output/ledger.csv` |
 | **매일 cron 디버깅** | OPS.md → `output/drift_state.json` |
 | **실제 매매 일지 적기** | NOTES.md (사용자 직접 적는 곳) |
+| **누적 회고 / 시각화** | [soccz.github.io/projects/prelude/dashboard](https://soccz.github.io/projects/prelude/dashboard/) (매일 KST 10:10 자동 갱신) |
 
 ---
 
@@ -126,6 +127,7 @@ prelude/
 - [x] Phase X-2-D Fold/Year stability v1/v2/v3 → **C3 채택** (bull_all p99.95 cap2)
 - [x] detector_v1 artifact (`signals/models/ckpt/detector_v1.json` + `output/detector_threshold.json`)
 - [x] production path (`signals/detector.py`, `scripts/predict_today.py`, `notifier/format.py::format_detector_beta`)
+- [x] Phase X+2: dashboard publish 파이프 — `scripts/build_dashboard.py` + `scripts/publish_dashboard.sh` → [soccz.github.io/projects/prelude/dashboard](https://soccz.github.io/projects/prelude/dashboard/)
 - [ ] Stage 1: cron dry-run 등록 (사용자 수동 — `deploy/crontab.txt`)
 - [ ] Stage 2: telegram 발송 활성화 (Stage 1 1~2주 데이터 본 후)
 - [ ] Research: Downside guard, 4h confirmation tier (병렬)

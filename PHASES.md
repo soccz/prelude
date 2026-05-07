@@ -14,12 +14,30 @@
 - [x] Phase 0 — 8 MD 설계 완료
 - [x] Phase 1 — 데이터 수집 / 6-class 모델 / 인프라 (legacy)
 - [x] Phase X — leak 발견 → detector 재정의 → C3 채택 → detector_v1 artifact (이번 세션)
+- [x] **Phase X+2** — dashboard publish 파이프 (paper_ledger → soccz.github.io 정적 회고) 2026-05-07
 - [ ] **Stage 1** (cron dry-run, telegram off) — 사용자 cron 등록 후 1~2주
 - [ ] **Stage 2** (telegram beta, 자동매매 X) — Stage 1 결과 보고 결정
 - [ ] **Stage 3** (NOTES 기반 threshold/tier 조정) — Stage 2 후
 - [ ] **Phase X+1** — Distribution head (multi-target) + label space discovery (사용자 신규 방향, §"향후 방향" 참조)
 - [ ] [Research] Downside guard / 4h confirmation tier (병렬)
 - [ ] [Later] MTF features / regime split / Optuna
+
+### Phase X+2 — Dashboard publish 파이프 (2026-05-07)
+
+**의도**: 텔레그램은 오늘 판단용. github.io 의 dashboard 는 회고용 — "어제 샀으면 어땠나, 시스템이 잘 맞추고 있나, 누적이 어떤 흐름인가" 본인 모니터링.
+
+**구조**:
+- 데이터 보강: `paper_ledger.csv` 두 개에 OHLC + min_return_pct 컬럼 추가. close 스크립트가 누락 컬럼 자동 보강 + canonical 순서로 reorder. historical 28+24 row backfill 완료.
+- 빌더: `scripts/build_dashboard.py` → JSON 3종 (summary/history/accuracy) 산출. 가상 PnL 룰은 텔레그램 가이드와 동일 (5% TP / EOD close, 비용 0.15% 차감, equal weight).
+- 정적 페이지: `soccz.github.io/projects/prelude/dashboard/index.html` (chart.js CDN, vanilla JS) — KPI 카드 + 누적 PnL 곡선 + rolling hit rate + 정렬/필터 가능 알림 표.
+- 자동 publish: `scripts/publish_dashboard.sh` 가 build → site repo add/commit/push. 실패 시 텔레그램 alert.
+- systemd: `prelude-publish-dashboard.{service,timer}` (KST 10:10, close cron 두 개 끝나고 5분 여유).
+
+**라이브 첫 결과 (28 closed dist + 24 closed preopen)**: 누적 가상 PnL 둘 다 음수 (dist -12.97%, preopen -13.47%). avg_max +6.82% / avg_min -5.94% (dist) — 변동성은 크지만 5% TP 룰 + 비용으로 누적은 깎임. 라이브 paper 데이터 더 쌓이면서 calibration 트랙 (사용자 NOTES + dashboard) 으로 룰 조정.
+
+**주의**: 첫 site repo commit + push 는 사용자 수동 (라이브 반영 confirmation). 그 후부터 자동.
+
+---
 
 ### Algorithm audit update (2026-05-05)
 
