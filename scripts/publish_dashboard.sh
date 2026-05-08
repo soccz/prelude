@@ -74,11 +74,26 @@ if [ $COMMIT_RC -ne 0 ]; then
     exit $COMMIT_RC
 fi
 
+# pull --rebase before push — 같은 site repo 를 다른 project (xsec-alpha 등) 가
+# 동시 publish 시 rejected 방지. local commit 은 rebase 후 origin top 에 push.
+git pull --rebase origin main >> "$LOG" 2>&1
+PULL_RC=$?
+if [ $PULL_RC -ne 0 ]; then
+    echo "[fail] git pull --rebase exit=$PULL_RC (충돌 가능)" >> "$LOG"
+    notify_fail "rebase" "git pull --rebase exit=$PULL_RC (수동 해결 필요)"
+    exit $PULL_RC
+fi
+
 git push >> "$LOG" 2>&1
 PUSH_RC=$?
 if [ $PUSH_RC -ne 0 ]; then
+    # rebase 후에도 push 실패 시 (인증 만료 등 더 심각한 문제)
+    git pull --rebase origin main >> "$LOG" 2>&1 && git push >> "$LOG" 2>&1
+    PUSH_RC=$?
+fi
+if [ $PUSH_RC -ne 0 ]; then
     echo "[fail] git push exit=$PUSH_RC" >> "$LOG"
-    notify_fail "push" "git push exit=$PUSH_RC (commit 은 local 에 남음)"
+    notify_fail "push" "git push exit=$PUSH_RC (commit 은 local 에 남음, 수동 push 필요)"
     exit $PUSH_RC
 fi
 
