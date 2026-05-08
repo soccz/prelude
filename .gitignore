@@ -49,6 +49,11 @@ output/paper_ledger.csv
 output/paper_ledger_backfill.csv
 output/paper_ledger_preopen.csv
 
+# Daily run logs (cron 산출물 — git 추적 X)
+output/distribution_log_*.json
+output/preopen_log_*.json
+output/detector_log_*.json
+
 # OS
 .DS_Store
 Thumbs.db
