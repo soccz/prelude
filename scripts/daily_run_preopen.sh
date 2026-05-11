@@ -25,9 +25,11 @@ LOG="$LOG_DIR/cron_preopen_$TODAY.log"
 echo "=== prelude pre-open trigger KST $(date +%Y-%m-%d\ %H:%M:%S) ===" >> "$LOG"
 
 # 1) Data update (d1 + 15m incremental). 15m 가 핵심 — 08:30 snapshot 포함되어야 함.
-echo "[1/3] data update — d1 + 15m all 2 days" >> "$LOG"
+# 255 coin × ~1s ≈ 4분이라 5분 timeout 시 predict 못 도달 — --days 1 + service
+# TimeoutStartSec=600 로 강화.
+echo "[1/3] data update — d1 + 15m all 1 day" >> "$LOG"
 python -m data.collector_d1 --update >> "$LOG" 2>&1 || echo "  d1 update warn" >> "$LOG"
-python -m data.collector_15m_upbit --all --days 2 >> "$LOG" 2>&1 || echo "  15m update warn" >> "$LOG"
+python -m data.collector_15m_upbit --all --days 1 >> "$LOG" 2>&1 || echo "  15m update warn" >> "$LOG"
 
 # 2) Health check
 echo "[2/3] health_check gate" >> "$LOG"
