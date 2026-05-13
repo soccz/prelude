@@ -1,9 +1,12 @@
 [Unit]
-Description=prelude pre-open trigger daily 08:55 KST timer
+Description=prelude pre-open trigger daily 08:50 KST timer
 
 [Timer]
-# 08:55 KST = 23:55 UTC (previous day)
-OnCalendar=*-*-* 23:55:00 UTC
+# 08:50 KST = 23:50 UTC (previous day)
+# 08:55 fire 시 collector (255 coin × ~1s) + panel build 가 5분 넘어
+# decision window (08:45-08:59) 닫힘 → telegram skip 사고 (2026-05-13 관측).
+# 5분 일찍 fire 로 panel 까지 08:59 안에 완료, predict 가 window 안에 들어옴.
+OnCalendar=*-*-* 23:50:00 UTC
 # Pre-open is timing-critical; do not catch up missed runs
 Persistent=false
 RandomizedDelaySec=30
