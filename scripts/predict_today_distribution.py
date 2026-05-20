@@ -225,6 +225,13 @@ def main():
     btc_row = panel[panel["market"] == "KRW-BTC"]
     btc_regime = str(btc_row["btc_regime"].iloc[0]) if len(btc_row) else "unknown"
 
+    # 4a) Bear regime silence — detector_v1 패턴 일관성 (2026-05-20 추가).
+    # 5/8~5/20 라이브 결과 89% alert 이 bear regime 에서 발사되어 학습 분포 밖.
+    # cum PnL -52% 확인 후 학습 가정 (BTC bull conditional) 과 운영 align.
+    if btc_regime.startswith("bear"):
+        log.warning(f"bear regime ({btc_regime}) — alerts silence (학습 분포 밖)")
+        alerts = alerts.iloc[0:0]  # empty
+
     # 5) Save distribution log JSON
     log_payload = {
         "asof": asof.isoformat(),
