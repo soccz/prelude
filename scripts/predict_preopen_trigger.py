@@ -91,7 +91,14 @@ def is_preopen_window(asof: pd.Timestamp) -> bool:
     Protects against manual late runs and systemd catch-up creating entries
     hours after the pre-open decision point.
     """
-    return asof.hour == 8 and 45 <= asof.minute <= 59
+    # window: 08:45 ~ 09:10 — collector 점진적 slowdown 마진 (2026-05 관측).
+    # 08:50 timer fire → collector 5~7분 → predict 가 09:00~09:05 도달 가능.
+    # paper ledger 무결성 위해 09:10 까지만 허용 (manual run 차단).
+    if asof.hour == 8 and asof.minute >= 45:
+        return True
+    if asof.hour == 9 and asof.minute <= 10:
+        return True
+    return False
 
 
 def build_panel_for_asof(upbit_d1: str, upbit_15m: str, binance_d1: str,
