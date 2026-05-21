@@ -315,7 +315,7 @@ def main():
             "hit_first1h_3pct": np.nan, "hit_first1h_5pct": np.nan,
             "status": "entered", "notes": "",
         })
-    if in_window or args.allow_late_run:
+    if (in_window or args.allow_late_run) and rows:
         new_df = pd.DataFrame(rows)[PAPER_LEDGER_COLS]
         p = Path(args.paper_ledger)
         if p.exists():
