@@ -76,7 +76,9 @@ fi
 
 # pull --rebase before push — 같은 site repo 를 다른 project (xsec-alpha 등) 가
 # 동시 publish 시 rejected 방지. local commit 은 rebase 후 origin top 에 push.
-git pull --rebase origin main >> "$LOG" 2>&1
+# --autostash: working tree 에 unstaged 변경 있어도 안전 (auto stash → rebase → pop).
+# (2026-05-21 사고: 사용자 papers 작업 unstaged → publish rebase fail)
+git pull --rebase --autostash origin main >> "$LOG" 2>&1
 PULL_RC=$?
 if [ $PULL_RC -ne 0 ]; then
     echo "[fail] git pull --rebase exit=$PULL_RC (충돌 가능)" >> "$LOG"
