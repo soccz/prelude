@@ -1,0 +1,11 @@
+[Unit]
+Description=prelude DB backup daily 04:00 KST timer
+
+[Timer]
+# 04:00 KST = 19:00 UTC (previous day). cron / publish 가 안 도는 새벽.
+OnCalendar=*-*-* 19:00:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

@@ -18,6 +18,7 @@
 - [x] Phase 1 — 데이터 수집 / 6-class 모델 / 인프라 (legacy)
 - [x] Phase X — leak 발견 → detector 재정의 → C3 채택 → detector_v1 artifact (이번 세션)
 - [x] **Phase X+2** — dashboard publish 파이프 (paper_ledger → soccz.github.io 정적 회고) 2026-05-07
+- [x] **Phase X+3** — 운영 안전 (DB 백업 + heartbeat 모니터링) 2026-05-26
 - [x] **Stage 1 구조 전환** — shadow/paper ledger + ACTIVE-only Telegram + idea validation dashboard
 - [x] **Stage 1+ AI quant layer** — recommendation-quality meta-filter + model card/report
 - [ ] **Stage 2 live paper 축적** — systemd/cron 운영 후 live shadow 표본 확보
@@ -25,6 +26,26 @@
 - [x] **Phase X+1 초안** — Distribution head (multi-target) + pre-open trigger 운영 후보
 - [ ] [Research] Downside guard / 4h confirmation tier (병렬)
 - [ ] [Later] MTF features / regime split / Optuna
+
+### Phase X+3 — 운영 안전 (2026-05-26)
+
+**의도**: 20 루프 진단으로 발견된 운영 약점 P0 두 개 fix.
+- DB 백업 0 → sqlite 깨지면 1년치 데이터 손실 (re-collect 며칠 + 상폐 코인 영구 손실)
+- 모니터링 silent fail → collector / predict / disk full / lock 다 silent
+
+**구조**:
+- `scripts/backup_db.sh` — sqlite `.backup` (atomic, lock 없이 안전) + `PRAGMA integrity_check` + 14일 보관. `/home/soccz/22tb/backup/prelude_db/` 위치.
+- `scripts/heartbeat.sh` — paper_ledger 어제 row 0 (7일 연속 0 시 alert) + DB integrity + disk 90% + publish.log 최근 fail 검사. 이상 시 텔레그램 alert, 정상 시 silent.
+- systemd timer 2 추가:
+  - `prelude-backup.timer` — 매일 04:00 KST (cron 안 도는 새벽)
+  - `prelude-heartbeat.timer` — 매일 10:30 KST (publish 후 20분, 모든 cron 확인)
+- `deploy/install_systemd.sh` 에 등록 (5 → 7 timer)
+
+**검증**: 6/6 DB backup (총 2.9GB) + integrity 다 통과. heartbeat smoke OK.
+
+**사용자 sudo 1번**: `sudo bash deploy/install_systemd.sh` — 2 신규 timer 등록.
+
+---
 
 ### Phase X+2 — Dashboard publish 파이프 (2026-05-07)
 
