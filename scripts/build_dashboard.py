@@ -1305,6 +1305,13 @@ def history_rows(df_dist: pd.DataFrame, df_preopen: pd.DataFrame) -> list[dict]:
             "hit_h5": _safe_int(r.get("hit_h5")),
             "virtual_pnl_pct": _maybe_pct(_virtual_pnl_per_alert(max_pct, close_pct)),
             "status": str(r.get("status", "")),
+            # 정책 layer (2026-05-25 추가) — graceful fallback for legacy rows
+            "decision": str(r.get("decision", "")) or "—",
+            "idea_id": str(r.get("idea_id", "")) or "—",
+            "setup_quality": str(r.get("setup_quality", "")) or "—",
+            "calibrated_hit_pct": _safe_float(r.get("calibrated_hit_pct")),
+            "expected_edge_pct": _safe_float(r.get("expected_edge_pct")),
+            "decision_reason": str(r.get("decision_reason", "")) or "",
         })
 
     for _, r in df_preopen.iterrows():
@@ -1334,6 +1341,13 @@ def history_rows(df_dist: pd.DataFrame, df_preopen: pd.DataFrame) -> list[dict]:
             "hit_h5": None,
             "virtual_pnl_pct": _maybe_pct(_virtual_pnl_per_alert(max_pct, close_pct)),
             "status": str(r.get("status", "")),
+            # 정책 layer
+            "decision": str(r.get("decision", "")) or "—",
+            "idea_id": str(r.get("idea_id", "")) or "—",
+            "setup_quality": str(r.get("setup_quality", "")) or "—",
+            "calibrated_hit_pct": _safe_float(r.get("calibrated_hit_pct")),
+            "expected_edge_pct": _safe_float(r.get("expected_edge_pct")),
+            "decision_reason": str(r.get("decision_reason", "")) or "",
         })
 
     rows.sort(key=lambda x: (x["date"], x["channel"], x["coin"]), reverse=True)
@@ -1490,6 +1504,18 @@ def main():
     notes_vs = compute_notes_vs_system(notes_entries, df_dist, df_pre)
     coin_matrix = compute_coin_universe_matrix(df_dist, df_pre)
 
+    # 신규 (5/25 정책 layer 추가 후) — idea_validation + meta model card 통합.
+    # 산출물 파일이 없을 수도 (legacy/fresh 환경) → graceful fallback.
+    def _load_optional_json(path: str) -> dict | None:
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except Exception:
+            return None
+
+    idea_validation = _load_optional_json("output/idea_validation_summary.json")
+    meta_model = _load_optional_json("output/recommendation_meta_validation.json")
+
     summary = {
         "asof": asof.isoformat(),
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -1499,9 +1525,30 @@ def main():
         },
         "notes_vs_system": notes_vs,
         "coin_universe": coin_matrix,
+        # 정책 layer (2026-05-25 추가) — narrative + 결과
+        "policy_evolution": {
+            "version": "2026-05-25.1",
+            "policy_id": "setup_quality_policy_v1",
+            "summary": (
+                "5/8 → 5/20 라이브 결과: bear regime 89% / cum -52% / "
+                "Sharpe -2.67 (dist), -5.04 (pre). 학습 분포 (BTC bull conditional) "
+                "위반 + 룰 EV 음수. 5/25 정책 layer 추가: ACTIVE/WATCH/SILENCE "
+                "분류, shadow ledger 누적, meta-label 학습 (배포 보수적), "
+                "daily heartbeat telegram."
+            ),
+            "rule_set": [
+                {"channel": "distribution", "regime": "bear_volatile", "decision": "SILENCE"},
+                {"channel": "distribution", "regime": "bear_quiet", "decision": "WATCH_ONLY (A_TRIPLE 만 ACTIVE)"},
+                {"channel": "distribution", "regime": "bull*", "decision": "ACTIVE if S03-quality + h6 edge ≥ 0"},
+                {"channel": "preopen", "regime": "bear*", "decision": "WATCH/SILENCE"},
+                {"channel": "preopen", "regime": "bull*", "decision": "ACTIVE if composite ≥ 1.5 + p_1h_5 ≥ 0.35"},
+            ],
+        },
+        "idea_validation": idea_validation,  # full summary (model_card / quality / replay / gate)
+        "meta_model": meta_model,  # recommendation_quality_meta_label_v1 학습 결과
     }
     _write_json(out_dir / "summary.json", summary, passphrase=pin)
-    log.info(f"saved summary.json")
+    log.info(f"saved summary.json (idea_validation={bool(idea_validation)}, meta_model={bool(meta_model)})")
 
     # 2) history.json
     history = {
