@@ -38,6 +38,7 @@ from scripts.predict_today_distribution import PAPER_LEDGER_COLS
 
 
 MAX_BARS = 6  # 24h / 4h
+DEFAULT_SHADOW_LEDGER = "output/shadow_ledger_distribution.csv"
 
 
 def compute_realized(coin: str, target_date: pd.Timestamp,
@@ -99,21 +100,23 @@ def compute_realized(coin: str, target_date: pd.Timestamp,
     }
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--paper-ledger", default="output/paper_ledger.csv")
-    parser.add_argument("--upbit-4h", default="data/upbit_4h.db")
-    parser.add_argument("--asof", type=str, help="기준 시점 (default=now); entered 중 date < asof - 1day 만 close")
-    parser.add_argument("--dry-run", action="store_true", help="저장 X, 변경 미리보기만")
-    args = parser.parse_args()
-
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-    log = logging.getLogger("close")
-
-    p = Path(args.paper_ledger)
+def close_ledger_file(
+    ledger_path: str,
+    candles_4h_db: str,
+    asof: pd.Timestamp,
+    dry_run: bool,
+    log: logging.Logger,
+    *,
+    required: bool = True,
+) -> None:
+    p = Path(ledger_path)
     if not p.exists():
-        log.error(f"ledger missing: {p}")
-        sys.exit(1)
+        msg = f"ledger missing: {p}"
+        if required:
+            log.error(msg)
+            sys.exit(1)
+        log.info(msg)
+        return
 
     ledger = pd.read_csv(p)
     # Ensure all expected columns exist (older ledgers may miss new realized cols).
@@ -124,7 +127,6 @@ def main():
     ledger["notes"] = ledger["notes"].fillna("").astype(str)
     log.info(f"ledger: {len(ledger)} rows total")
 
-    asof = pd.Timestamp(args.asof) if args.asof else pd.Timestamp.now()
     cutoff_date = (asof - pd.Timedelta(days=1)).date()
 
     # no_data rows are retried because a failed/late 4h update should not
@@ -149,7 +151,7 @@ def main():
         if target_date.date() > cutoff_date:
             continue
 
-        result = compute_realized(r["coin"], target_date, args.upbit_4h)
+        result = compute_realized(r["coin"], target_date, candles_4h_db)
         if result["status"] == "no_data":
             ledger.at[idx, "status"] = "no_data"
             ledger.at[idx, "notes"] = f"no 4h data for {target_date.date()}"
@@ -173,7 +175,7 @@ def main():
 
     log.info(f"  closed: {n_closed}, no_data: {n_no_data}")
 
-    if not args.dry_run:
+    if not dry_run:
         # reorder to canonical schema (extra cols at the end are preserved)
         ordered = [c for c in PAPER_LEDGER_COLS if c in ledger.columns]
         extras = [c for c in ledger.columns if c not in ordered]
@@ -211,6 +213,26 @@ def main():
             h6_pct = float(sub["h6"].mean()) * 100
             h5_pct = float(sub["h5"].mean()) * 100
             print(f"  {s_id} (n={n}): hit_h2 {h2_pct:.1f}%, hit_h6 {h6_pct:.1f}%, hit_h5 {h5_pct:.1f}%")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--paper-ledger", default="output/paper_ledger.csv")
+    parser.add_argument("--shadow-ledger", default=DEFAULT_SHADOW_LEDGER)
+    parser.add_argument("--skip-shadow-ledger", action="store_true")
+    parser.add_argument("--upbit-4h", default="data/upbit_4h.db")
+    parser.add_argument("--asof", type=str, help="기준 시점 (default=now); entered 중 date < asof - 1day 만 close")
+    parser.add_argument("--dry-run", action="store_true", help="저장 X, 변경 미리보기만")
+    args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    log = logging.getLogger("close")
+
+    asof = pd.Timestamp(args.asof) if args.asof else pd.Timestamp.now()
+    close_ledger_file(args.paper_ledger, args.upbit_4h, asof, args.dry_run, log, required=True)
+
+    if not args.skip_shadow_ledger and Path(args.shadow_ledger) != Path(args.paper_ledger):
+        close_ledger_file(args.shadow_ledger, args.upbit_4h, asof, args.dry_run, log, required=False)
 
 
 if __name__ == "__main__":

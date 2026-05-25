@@ -29,6 +29,40 @@ def check_db_freshness(db_path: str, market: str = "KRW-BTC", max_lag_hours: int
     return True, f"DB {db_path}: latest {latest} (lag {lag.total_seconds()/3600:.1f}h)"
 
 
+def db_checks_for_channel(channel: str) -> list[tuple[str, int]]:
+    """Return required DB freshness checks for the operating channel."""
+    if channel == "preopen":
+        return [
+            ("data/upbit_d1.db", 48),
+            ("data/upbit_15m.db", 2),
+        ]
+    if channel == "distribution":
+        return [
+            ("data/upbit_d1.db", 30),
+            ("data/upbit_4h.db", 8),
+        ]
+    if channel == "all":
+        return [
+            ("data/upbit_d1.db", 30),
+            ("data/upbit_4h.db", 8),
+            ("data/upbit_15m.db", 2),
+        ]
+    raise ValueError(f"unknown channel: {channel}")
+
+
+def log_names_for_channel(channel: str, today: str) -> list[str]:
+    if channel == "preopen":
+        return [f"output/cron_preopen_{today}.log"]
+    if channel == "distribution":
+        return [f"output/cron_dist_{today}.log"]
+    if channel == "all":
+        return [
+            f"output/cron_preopen_{today}.log",
+            f"output/cron_dist_{today}.log",
+        ]
+    raise ValueError(f"unknown channel: {channel}")
+
+
 def check_log_age(log_path: str, max_age_hours: int = 26) -> tuple[bool, str]:
     p = Path(log_path)
     if not p.exists():
@@ -65,23 +99,26 @@ def check_drift_state() -> tuple[bool, str]:
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--channel", default="distribution",
+                        choices=["distribution", "preopen", "all"],
+                        help="Operating channel to validate")
     parser.add_argument("--no-telegram", action="store_true",
                         help="Do not send Telegram on failure; exit nonzero only")
     args = parser.parse_args()
 
-    print(f"=== prelude health {datetime.now()} ===")
+    print(f"=== prelude health {datetime.now()} channel={args.channel} ===")
     issues = []
 
     # DB freshness
-    for db in ["data/upbit_d1.db", "data/upbit_4h.db"]:
-        ok, msg = check_db_freshness(db)
+    for db, max_lag in db_checks_for_channel(args.channel):
+        ok, msg = check_db_freshness(db, max_lag_hours=max_lag)
         print(f"  {'OK' if ok else 'FAIL'}: {msg}")
         if not ok:
             issues.append(msg)
 
     # Log age
     today = datetime.now().strftime("%Y%m%d")
-    for log_name in [f"output/cron_daily_{today}.log"]:
+    for log_name in log_names_for_channel(args.channel, today):
         if Path(log_name).exists():
             ok, msg = check_log_age(log_name)
             print(f"  {'OK' if ok else 'FAIL'}: {msg}")

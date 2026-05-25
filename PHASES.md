@@ -4,21 +4,25 @@
 
 ---
 
-## 현재 상태 (요약, 2026-05-03)
+## 현재 상태 (요약, 2026-05-25)
 
-- **현재 운영**: detector_v1 Stage 1 dry-run (cron 등록 직전)
-- **백테스트 채택**: C3 (bull_all p99.95 cap2), EV +7.40% / 2024 -0.89% / 3 active fold 양수
-- **아카이브**: Phase 0/1 (6-class 분포 + 일반 펌프 detector) — legacy 보존, 미운영
+- **현재 운영 후보**: pre-open + distribution beta. decision policy 가 ACTIVE / WATCH_ONLY / SILENCE 로 분리
+- **텔레그램 원칙**: 매일 발송. ACTIVE 가 있으면 추천, 없으면 침묵/상태 메시지. WATCH/SILENCE 후보는 shadow ledger + dashboard 검증용으로 기록
+- **검증 방향**: 포트폴리오용 아이디어 검증 우선. net PnL / Max DD / hit rate / forward paper 결과로 policy 조정
+- **AI quant 포트폴리오 강화**: historical recommendation-quality meta-filter + model card + idea attribution scorecard 추가
+- **학습 결과**: `recommendation_quality_meta_label_v1` 학습 완료. holdout 는 손실 축소/정밀도 개선 신호가 있으나 selected n=1 이라 자동 배포는 보류(shadow scoring)
+- **아카이브**: detector_v1 / legacy 6-class 모델은 보존, 현재 메인 운영 문맥에서는 후순위
 
 진행 트랙:
 - [x] Phase 0 — 8 MD 설계 완료
 - [x] Phase 1 — 데이터 수집 / 6-class 모델 / 인프라 (legacy)
 - [x] Phase X — leak 발견 → detector 재정의 → C3 채택 → detector_v1 artifact (이번 세션)
 - [x] **Phase X+2** — dashboard publish 파이프 (paper_ledger → soccz.github.io 정적 회고) 2026-05-07
-- [ ] **Stage 1** (cron dry-run, telegram off) — 사용자 cron 등록 후 1~2주
-- [ ] **Stage 2** (telegram beta, 자동매매 X) — Stage 1 결과 보고 결정
-- [ ] **Stage 3** (NOTES 기반 threshold/tier 조정) — Stage 2 후
-- [ ] **Phase X+1** — Distribution head (multi-target) + label space discovery (사용자 신규 방향, §"향후 방향" 참조)
+- [x] **Stage 1 구조 전환** — shadow/paper ledger + ACTIVE-only Telegram + idea validation dashboard
+- [x] **Stage 1+ AI quant layer** — recommendation-quality meta-filter + model card/report
+- [ ] **Stage 2 live paper 축적** — systemd/cron 운영 후 live shadow 표본 확보
+- [ ] **Stage 3** (NOTES 기반 사용자 실제 매매 vs system 추천 비교)
+- [x] **Phase X+1 초안** — Distribution head (multi-target) + pre-open trigger 운영 후보
 - [ ] [Research] Downside guard / 4h confirmation tier (병렬)
 - [ ] [Later] MTF features / regime split / Optuna
 
@@ -58,7 +62,7 @@
 - SL 룰: 4h SL-first 와 15m path 양쪽 모두 음수. 자동 SL 룰은 운영 채택 X, 사용자 수동 판단.
 - 09:05 timer audit: 전체 시장 첫 15m hit 비중은 9~12% 수준이지만, distribution alerts 는 +3% hit 의 33%, +5% hit 의 25% 가 첫 15m candle 에 발생. 09:05 는 데이터 위생상 유지하되, 실제 즉발 진입용 08:55 pre-open trigger 는 별도 모델/검증 트랙으로 분리.
 - Pre-open first15 model audit: 08:55 as-of 를 엄격히 맞춰 `D-2 closed daily + D-1 08:30 precursor` 로 검증. `preopen_15m` 단독이 first15_t3 top1% precision 38.2% (base 5.1%, lift 7.6), first15_t5 top1% precision 22.4% (base 2.8%, lift 8.1). 08:55 전용 모델은 연구/운영 후보로 충분히 정당화됨. 단 v1 09:05 distribution timer 는 유지.
-- Pre-open code audit: live 모델을 15m precursor-only 19 features 로 재빌드해 daily partial mismatch 제거. late manual run guard 추가(08:45~08:59 밖에서는 telegram/ledger skip), raw score 문구로 표시, 15m recent-window 로 predict runtime 4m48s → 21s. close-out 은 15m DB update wrapper 필요(`scripts/daily_close_preopen.sh`).
+- Pre-open code audit: live 모델을 15m precursor-only 19 features 로 재빌드해 daily partial mismatch 제거. late manual run guard 추가(08:45~08:59 밖에서는 telegram/ledger skip), 이후 ACTIVE-only policy/edge 포맷으로 raw score 노출 제거. 15m recent-window 로 predict runtime 4m48s → 21s. close-out 은 15m DB update wrapper 사용(`scripts/daily_close_preopen.sh`).
 - Survivorship bias 는 여전히 미처리 caveat.
 
 ---
@@ -204,9 +208,9 @@ Distribution head (multiple binary XGBoost):
 - [ ] `notifier/format.py` — 메시지 포맷 (OPS §3.1)
 - [ ] **별도 텔레그램 봇 발급 + 채팅 ID** (gan_t 와 분리)
   - **사용자 컨펌**: 봇 토큰 / 채팅 ID 환경변수 셋업 (`.env`, .gitignore)
-- [ ] `scripts/predict_today.py` — 수동 dry-run
-- [ ] `scripts/daily_run.sh` — KST 09:05 cron entry
-- [ ] `scripts/post_open_run.sh` — KST 09:30 청산 + verify
+- [x] `scripts/predict_today_distribution.py` / `scripts/predict_preopen_trigger.py` — 수동 dry-run + 운영 후보
+- [x] `scripts/daily_run_distribution.sh` / `scripts/daily_run_preopen.sh` — cron/systemd entry
+- [x] `scripts/daily_close_distribution.sh` / `scripts/daily_close_preopen.sh` — paper/shadow ledger close
 - [ ] `deploy/crontab.txt` — cron 등록 명령 + README
 - [ ] `scripts/health_check.py` — 일일 헬스
 - [ ] `scripts/verify_telegram.py` — ledger ↔ telegram 일관성

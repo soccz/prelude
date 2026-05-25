@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Pre-open paper ledger close-out entry.
+# Distribution paper/shadow ledger close-out entry.
 #
-# The 08:55 pre-open run updates 15m data before the 09:00 candle starts.
-# Close-out runs after 10:00 so first15/first30/first1h realized fields are
-# all final, not partial.
+# Runs after KST 09:00 daily candle boundary so yesterday's target day has
+# final 4h bars. This keeps distribution paper ledger and shadow ledger aligned
+# before the dashboard/idea-validation publish step.
 
 set -euo pipefail
 
@@ -22,15 +22,16 @@ fi
 LOG_DIR="output"
 mkdir -p "$LOG_DIR"
 TODAY=$(date +%Y%m%d)
-LOG="$LOG_DIR/cron_preopen_close_$TODAY.log"
+LOG="$LOG_DIR/cron_close_$TODAY.log"
 
-echo "=== prelude pre-open close KST $(date +%Y-%m-%d\ %H:%M:%S) ===" >> "$LOG"
+echo "=== prelude distribution close KST $(date +%Y-%m-%d\ %H:%M:%S) ===" >> "$LOG"
 
-echo "[1/2] data update — 15m all 1 day" >> "$LOG"
-python -m data.collector_15m_upbit --all --days 1 >> "$LOG" 2>&1 || echo "  15m update warn" >> "$LOG"
+echo "[1/3] data update — d1 + 4h all 2 days" >> "$LOG"
+python -m data.collector_d1 --update >> "$LOG" 2>&1 || echo "  d1 update warn" >> "$LOG"
+python -m data.collector_4h --all --days 2 >> "$LOG" 2>&1 || echo "  4h update warn" >> "$LOG"
 
-echo "[2/3] close_preopen_ledger" >> "$LOG"
-python scripts/close_preopen_ledger.py >> "$LOG" 2>&1
+echo "[2/3] close_paper_ledger" >> "$LOG"
+python scripts/close_paper_ledger.py >> "$LOG" 2>&1
 EXIT=$?
 
 echo "[3/4] train_recommendation_meta (shadow-gated)" >> "$LOG"

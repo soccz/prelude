@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Pre-open trigger cron entry — KST 08:55.
-# Stage 2 (telegram ON, 사용자 명시 활성화).
+# Telegram sends every day: ACTIVE recommendation or concise silence/status.
 
 set -euo pipefail
 
@@ -32,14 +32,15 @@ python -m data.collector_d1 --update >> "$LOG" 2>&1 || echo "  d1 update warn" >
 python -m data.collector_15m_upbit --all --days 1 >> "$LOG" 2>&1 || echo "  15m update warn" >> "$LOG"
 
 # 2) Health check
-echo "[2/3] health_check gate" >> "$LOG"
-python scripts/health_check.py --no-telegram >> "$LOG" 2>&1 || echo "  health gate warn" >> "$LOG"
+echo "[2/3] health_check gate (preopen: d1 + 15m)" >> "$LOG"
+python scripts/health_check.py --channel preopen --no-telegram >> "$LOG" 2>&1 || echo "  health gate warn" >> "$LOG"
 
 # 3) Pre-open trigger predict + telegram
-echo "[3/3] predict_preopen_trigger (Stage 2 — telegram ON)" >> "$LOG"
+echo "[3/3] predict_preopen_trigger (telegram daily heartbeat ON)" >> "$LOG"
 python scripts/predict_preopen_trigger.py \
     --top-k 8 \
     --universe top100 \
+    --send-silence-telegram \
     >> "$LOG" 2>&1
 EXIT=$?
 

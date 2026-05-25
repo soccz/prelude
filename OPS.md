@@ -1,40 +1,59 @@
 # OPS.md — 매일 자동 운영 인프라
 
-> **현재 운영: detector_v1 Stage 1 dry-run (cron 미등록).**
-> 매일 KST 09:05 후보 탐지 (≥20% tail), silence-heavy. Stage 2 진입 시 텔레그램 발송.
+> **현재 운영: pre-open + distribution policy-gated beta (2026-05-25).**
+> 텔레그램은 매일 보낸다. ACTIVE 가 있으면 추천, 없으면 짧은 침묵/상태 메시지.
+> WATCH_ONLY/SILENCE 후보와 수수료 차감 검증 결과는 shadow/paper ledger,
+> log JSON, dashboard 에 남긴다.
 
 ---
 
-## 0. 한 줄 결론 (현재 운영, detector_v1)
+## 0. 한 줄 결론 (현재 운영)
 
 ```
-KST 09:05 cron 발사
+KST 08:50 pre-open timer
    ↓
-scripts/daily_run.sh
-   ├─ data update (어제 일봉 incremental)
-   └─ python scripts/predict_today.py    ← Stage 1: --send-telegram 없음 (dry-run default)
-       ↓
-   DetectorV1.load() — 고정 threshold 0.8815 + regime gate + cap 2
-       ↓
-   panel build (until=asof) — 미래 데이터 차단
-       ↓
-   detect → alerts (0~2건)
-       ↓
-   ├─ output/predictions_YYYYMMDD.csv      (전체 KRW score 분포)
-   ├─ output/detector_log_YYYYMMDD.json    (alerts + diagnose)
-   └─ stdout 메시지 (Stage 1) | telegram 발송 (Stage 2)
+scripts/daily_run_preopen.sh
+   ├─ d1 + 15m update
+   ├─ health_check --channel preopen
+   └─ predict_preopen_trigger.py
+       ├─ decision_policy → ACTIVE / WATCH_ONLY / SILENCE
+       ├─ recommendation_quality meta-filter → weak historical groups downranked
+       ├─ ACTIVE만 paper_ledger_preopen
+       ├─ Telegram daily: ACTIVE 추천 또는 침묵/상태
+       └─ 전체 후보 shadow_ledger_preopen + preopen_log JSON
+
+KST 09:05 distribution timer
+   ↓
+scripts/daily_run_distribution.sh
+   ├─ d1 + 4h update
+   ├─ health_check --channel distribution
+   └─ predict_today_distribution.py
+       ├─ decision_policy → ACTIVE / WATCH_ONLY / SILENCE
+       ├─ recommendation_quality meta-filter → weak historical groups downranked
+       ├─ ACTIVE만 paper_ledger
+       ├─ Telegram daily: ACTIVE 추천 또는 침묵/상태
+       └─ 전체 후보 shadow_ledger_distribution + distribution_log JSON
+
+KST 09:30 / 10:05 close timers
+   ↓
+distribution/preopen paper + shadow ledger close
+   ↓
+idea_validation_summary.{csv,json} + idea_validation_report.html
+   ↓
+KST 10:10 dashboard publish
 ```
 
 **Stage 진행**:
-- Stage 1: cron dry-run, telegram OFF — 라이브 분포 1~2주 관찰
-- Stage 2: telegram 발송, 자동매매 X — 사용자 NOTES 평가
-- Stage 3: NOTES 기반 threshold/tier 조정
+- Stage 1: shadow/paper live validation — 텔레그램은 ACTIVE만
+- Stage 2: policy gate 가 충분한 live shadow 표본을 확보하면 promotion/demotion 조정
+- Stage 3: NOTES 기반 사용자 실제 매매와 system 추천 비교
 
 **원칙 (양보 X)**:
-- threshold = artifact 고정값. 라이브 quantile 재계산 금지
-- BTC bear regime → 침묵
-- alert framing = "≥20% tail 후보, 매수 추천 X"
-- Stage 변경 = 사용자 명시 컨펌 후
+- 자동 실거래 주문 없음. 추천과 기록만 수행
+- 텔레그램은 의미 있는 ACTIVE 추천만. 침묵/관찰 후보는 dashboard·ledger 기록
+- look-ahead 방어: 입력은 as-of 이전 데이터만
+- 거래비용 0.15% round-trip 차감 후 평가
+- policy 숫자는 placeholder. live net PnL/Max DD/hit rate 로 조정
 
 ---
 
@@ -44,35 +63,41 @@ scripts/daily_run.sh
 
 | 시각 (KST) | UTC | task | 스크립트 |
 |---|---|---|---|
-| **09:05 매일** | 00:05 | 일일 추론 + 알림 (어제 일봉 100% 마감 후 — leak-free) | `scripts/daily_run.sh` |
-| **09:30 매일** | 00:30 | 어제 가상 포지션 청산 + ledger 갱신 + verify | `scripts/post_open_run.sh` |
-| **00:00 매일** | 15:00 | 어제 holdout IC + drift 측정 | `scripts/measure_run.sh` |
+| **08:50 매일** | 23:50 전일 | pre-open 추론 + 매일 Telegram | `scripts/daily_run_preopen.sh` |
+| **09:05 매일** | 00:05 | distribution 추론 + 매일 Telegram | `scripts/daily_run_distribution.sh` |
+| **09:30 매일** | 00:30 | distribution paper/shadow ledger 청산 | `scripts/daily_close_distribution.sh` |
+| **10:05 매일** | 01:05 | pre-open paper/shadow ledger 청산 | `scripts/daily_close_preopen.sh` |
+| **10:10 매일** | 01:10 | dashboard JSON 빌드 + publish | `scripts/publish_dashboard.sh` |
 | **일 06:00 주간** | 토 21:00 | 주간 재학습 + promotion gate | `scripts/retrain_run.sh` |
-| **매시 정각** | — | 데이터 수집 (1h 봉 + 일봉 갱신) | `scripts/collect_run.sh` |
 
 ### 1.2 cron 표현 (deploy/crontab.txt)
 ```
 # CRON_TZ 가능하면 사용 (시스템이 지원하면)
 CRON_TZ=Asia/Seoul
 
-# 데이터 수집 (매시 정각)
-0 * * * * cd /home/soccz/22tb/prelude && bash scripts/collect_run.sh >> output/cron_collect.log 2>&1
+# pre-open 추론 + 매일 Telegram (KST 08:50)
+50 8 * * * cd /home/soccz/22tb/prelude && bash scripts/daily_run_preopen.sh >> output/cron_preopen.log 2>&1
 
-# 일일 추론 + 알림 (KST 09:05)
-5 9 * * * cd /home/soccz/22tb/prelude && bash scripts/daily_run.sh >> output/cron_daily.log 2>&1
+# distribution 추론 + 매일 Telegram (KST 09:05)
+5 9 * * * cd /home/soccz/22tb/prelude && bash scripts/daily_run_distribution.sh >> output/cron_dist.log 2>&1
 
-# 어제 ledger 청산 + 검증 (KST 09:30, 어제 일봉 100% 마감 후)
-30 9 * * * cd /home/soccz/22tb/prelude && bash scripts/post_open_run.sh >> output/cron_post_open.log 2>&1
+# distribution ledger close (KST 09:30)
+30 9 * * * cd /home/soccz/22tb/prelude && bash scripts/daily_close_distribution.sh >> output/cron_close.log 2>&1
 
-# IC + drift 측정 (KST 00:00)
-0 0 * * * cd /home/soccz/22tb/prelude && bash scripts/measure_run.sh >> output/cron_measure.log 2>&1
+# pre-open ledger close (KST 10:05)
+5 10 * * * cd /home/soccz/22tb/prelude && bash scripts/daily_close_preopen.sh >> output/cron_preopen_close.log 2>&1
+
+# dashboard publish (KST 10:10)
+10 10 * * * cd /home/soccz/22tb/prelude && bash scripts/publish_dashboard.sh >> output/cron_publish.log 2>&1
 
 # 주간 재학습 (일요일 KST 06:00)
 0 6 * * 0 cd /home/soccz/22tb/prelude && bash scripts/retrain_run.sh >> output/cron_retrain.log 2>&1
 ```
 
-### 1.3 systemd 대안 (deploy/systemd/)
-cron 대신 systemd timer 사용 시 `td-pump-daily.timer` / `td-pump-measure.timer` / `td-pump-retrain.timer`. cron 문제 시 fallback.
+### 1.3 systemd 대안 (deploy/)
+cron 대신 systemd timer 사용 시 `deploy/prelude-*.service` / `deploy/prelude-*.timer`.
+설치는 `sudo bash deploy/install_systemd.sh`. signal timer 는 timing-critical 이라
+catch-up 실행을 막기 위해 `Persistent=false`.
 
 ---
 
@@ -98,84 +123,58 @@ cron 대신 systemd timer 사용 시 `td-pump-daily.timer` / `td-pump-measure.ti
 
 ## 3. 텔레그램 알림 포맷 (notifier/format.py)
 
-### 3.1 detector beta 알림 (현재 운영, `format_detector_beta`)
+### 3.1 현재 운영 포맷
 
-silence-heavy. 알림은 0~2건. bear regime 전체 침묵.
+텔레그램은 ACTIVE 추천만 발송한다. 모델 raw score 는 텔레그램에서 제거하고,
+사용자가 바로 판단할 수 있는 policy/edge 중심으로 표시한다.
 
-**alert 발생 시**:
+**distribution 예시**:
 ```
-🌅 prelude detector v1 2025-11-05 (KST 09:05)
-BTC regime: bull_volatile | universe: 215
-threshold: 0.8815 (OOF p99.95, 고정)
+⚡ distribution 2026-05-25 (KST 09:05)
+BTC: 🟢 강세 안정 | universe: top100 (100)
 
-━━━ ≥20% tail 후보 (2건) ━━━
-※ 매수 추천 아님 / 실패 시 큰 손실 가능
-🔍 XYZ      score 0.9123  (threshold +3.08pp)  rank #1
-🔍 ABC      score 0.8932  (threshold +1.17pp)  rank #2
+━━━ 상승 setup 후보 1건 ━━━
 
-━━━ 진단 ━━━
-in_regime  215 / above_thr   4 / both 4
-score max 0.9123 | p99 0.7821 | p99.5 0.8534
+🔥 AAA  진입가 ≈ 1,234원  [B_S03 | rank #2]
+   ▸ edge +2.31%p | 검증 hit 62.4% | setup S02+S03 / S04
+   ▸ policy: S03-quality setup with positive h6 edge proxy
 
-📎 framing: BTC bull regime 에서 ≥20% tail pump 가능성이
-   과거 OOF 기준 최상위 0.05% 후보. 사용자 본인 판단.
-```
-
-**침묵 (bear regime)**:
-```
-━━━ 침묵 ━━━
-(BTC bear regime — 알림 비활성)
+━━━ 사용 ━━━
+• 09:00 직후 또는 첫 4h 안 진입
+• 5% 오르면 즉시 매도, 자동 실거래 주문 없음
+• 텔레그램은 ACTIVE만 발송, WATCH/SILENCE는 dashboard·ledger에 기록
 ```
 
-**침묵 (threshold 미통과)**:
+**pre-open 예시**:
 ```
-━━━ 침묵 ━━━
-(threshold 통과 후보 없음 — 오늘은 강한 tail 신호 X)
+⚡ pre-open trigger 2026-05-25 (KST 08:55)
+BTC: 🟢 강세 안정 | universe: top100
+
+━━━ 09:00 직후 펌프 후보 1건 ━━━
+
+🔥 BBB  진입가 ≈ 987.6원  [PREOPEN | rank #1]
+   ▸ edge +1.20%p | 1h +5 signal 46.0%
+   ▸ policy: bull regime with strong first1h_5 and composite
 ```
 
-### 3.2 출력 필드 정의 (detector beta)
+### 3.2 출력 필드 정의
 | 필드 | 의미 |
 |---|---|
-| 🔍 | tail 후보 마커 (매수 추천 아님 — 사용자 판단 보조) |
-| score | binary detector raw score (0~1) |
-| threshold +N pp | 고정 threshold 0.8815 대비 마진 |
-| rank #N | 그날 cap 안 순위 (cap=2) |
-| 진단 in_regime / above_thr / both | 게이트 통과 단계별 카운트 (모니터링) |
+| ACTIVE | 텔레그램 + paper ledger 에 들어가는 실제 추천 후보 |
+| WATCH_ONLY | 텔레그램 미발송. shadow ledger 에 기록해서 정책 실험 |
+| SILENCE | 텔레그램 미발송. risk-off 또는 setup 부재 |
+| edge | 거래비용 차감 전후를 반영한 단순 EV proxy. 최종 성과 판단은 live ledger 기준 |
+| 검증 hit / signal | bucket calibration 이 있으면 검증 hit, 없으면 raw fallback signal 로 표기 |
+| policy | 왜 ACTIVE 로 승격됐는지 또는 왜 관찰 후보인지 설명 |
 
 ### 3.3 톤 원칙
-- "**후보**" framing — "매수 추천" 표현 절대 X
-- silence-heavy 정직: 0건이면 0건이라고 침묵 메시지
-- 실패 가능성 명시: "실패 시 큰 손실 가능"
-- 거짓 자신감 금지: score 가 threshold 막 넘은 건 margin 표기로 사용자에게 그대로 노출
+- 텔레그램은 매일 상태를 보낸다. ACTIVE가 있으면 추천, 없으면 침묵/상태
+- 자동 실거래 주문 없음. 사용자가 직접 판단
+- raw 확률처럼 오해될 수 있는 모델 점수는 알림에서 제거
+- 운영 스크립트는 `--send-silence-telegram` 을 켜서 cron 생존 여부도 확인
 
-### 3.4 침묵 조건 (현재 운영)
-- BTC regime ∈ {bear_quiet, bear_volatile}
-- threshold 0.8815 통과 후보 0개
-- preflight 실패 (드물게)
-
-### 3.5 (legacy) 6-class 분포 알림 포맷 — `format_daily_alert`
-아래 §3.5x 는 **legacy multi-class 모델용** (`scripts/predict_today_legacy.py` 가 호출). 현재 운영 X.
-
-#### 3.5.1 legacy 메인 알림 예시
-```
-🌅 prelude 2026-05-03 (KST 09:05)
-BTC regime: bull_quiet | universe: 100 코인
-
-━━━ 오늘 장중 펌프 분포 (top 3) ━━━
-
-🔥 KAITO  P(≥+5/10/15/20%) = 70/45/20/8%
-         기대 max +7.2% | CI [+1, +14] | ⭐⭐
-✅ ETH    P(≥+5/10/15/20%) = 62/35/15/4%
-✅ SOL    P(≥+5/10/15/20%) = 58/30/12/3%
-```
-
-#### 3.5.2 legacy 출력 필드
-| 필드 | 의미 |
-|---|---|
-| 🔥/✅/▫/· | σ-tier (SIGNAL §5) |
-| **P(≥+X%)** | 장중 max(high) 가 시가 대비 X% 도달할 확률 (multi-class cumulative) |
-| 기대 max | bin 중간값 × 확률의 가중 평균 |
-| CI [a, b] | 95% confidence interval |
+### 3.4 legacy 포맷
+`format_detector_beta`, `format_daily_alert` 는 보존하지만 현재 메인 운영 X.
 
 ### 3.5 텔레그램 봇 — 기존 MAE 봇 공유
 
@@ -196,7 +195,8 @@ TELEGRAM_CHAT_ID=...     # 동일
 python -c "from notifier.telegram import send_telegram; send_telegram('test')"
 ```
 
-침묵해도 매일 짧은 "prelude alive" ping 은 보냄 (cron 죽었는지 사용자가 알 수 있게).
+CLI 기본값은 ACTIVE 가 없으면 발송하지 않는다. 운영 스크립트는 매일 확인을
+위해 `--send-silence-telegram` 을 명시적으로 붙인다.
 
 ---
 
@@ -299,17 +299,18 @@ LEDGER §8 참조. 매일 KST 09:30 cron 자동:
 ## 9. 로그 / 헬스 체크 (output/cron_*.log)
 
 ### 9.1 로그 파일
-- `output/cron_daily.log` — 매일 추론 로그
-- `output/cron_post_open.log` — ledger 청산
-- `output/cron_measure.log` — IC / drift
+- `output/cron_preopen*.log` — pre-open 추론 / close 로그
+- `output/cron_dist*.log` — distribution 추론 로그
+- `output/cron_close*.log` — distribution ledger 청산
+- `output/cron_preopen_close*.log` — pre-open ledger 청산
+- `output/cron_publish.log` — dashboard publish
 - `output/cron_retrain.log` — 주간 재학습
-- `output/cron_collect.log` — 데이터 수집
 
 매일 자동 회전 (1 주 보관, 그 후 압축).
 
 ### 9.2 헬스 체크
-- `scripts/health_check.py` — 매일 KST 09:30 실행
-- 어제 cron 다 돌았는지 + log 에 ERROR 없는지 + DB freshness 확인
+- `scripts/health_check.py --channel preopen` — d1 + 15m freshness 확인
+- `scripts/health_check.py --channel distribution` — d1 + 4h freshness 확인
 - 문제 시 텔레그램 alert
 
 ---
@@ -332,14 +333,19 @@ LEDGER §8 참조. 매일 KST 09:30 cron 자동:
 | 파일 | 역할 |
 |---|---|
 | `deploy/crontab.txt` | cron 정의 |
-| `deploy/systemd/*.{service,timer}` | systemd fallback |
-| `scripts/daily_run.sh` | KST 09:05 메인 |
-| `scripts/post_open_run.sh` | KST 09:30 청산 / 검증 |
-| `scripts/measure_run.sh` | KST 00:00 IC / drift |
+| `deploy/prelude-*.{service,timer}` | systemd timers |
+| `scripts/daily_run_preopen.sh` | KST 08:50 pre-open |
+| `scripts/daily_run_distribution.sh` | KST 09:05 distribution |
+| `scripts/daily_close_distribution.sh` | KST 09:30 distribution close |
+| `scripts/daily_close_preopen.sh` | KST 10:05 pre-open close |
+| `scripts/publish_dashboard.sh` | KST 10:10 dashboard publish |
+| `scripts/train_recommendation_meta.py` | closed ledger 기반 meta-label 학습 |
 | `scripts/retrain_run.sh` | 일 06:00 재학습 |
-| `scripts/collect_run.sh` | 매시 데이터 수집 |
 | `scripts/health_check.py` | 일일 헬스 체크 |
 | `ops/preflight.py` | 추론 전 게이트 |
+| `ops/decision_policy.py` | ACTIVE / WATCH_ONLY / SILENCE 정책 |
+| `ops/recommendation_quality.py` | historical evidence 기반 추천 confidence / demotion |
+| `ops/policy_gate.py` | live/replay policy promotion 판단 |
 | `ops/drift_detector.py` | drift 감지 |
 | `ops/ic_gate.py` | IC 사후 보고 |
 | `ops/retrain_pipeline.py` | 주간 재학습 자동 |

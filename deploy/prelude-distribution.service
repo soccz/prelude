@@ -1,5 +1,5 @@
 [Unit]
-Description=prelude distribution beta daily 09:05 KST (Stage 1 dry-run, telegram OFF)
+Description=prelude distribution daily 09:05 KST (ACTIVE-only telegram)
 After=network.target
 
 [Service]

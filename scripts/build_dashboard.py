@@ -35,6 +35,10 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from ledger.config import ROUND_TRIP_COST_PCT
+from scripts.idea_validation_report import (
+    build_report as build_idea_validation_report,
+    load_candidate_ledger as load_idea_candidate_ledger,
+)
 
 
 DEFAULT_OUT_DIR = "/home/soccz/22tb/soccz.github.io/projects/prelude/dashboard/data"
@@ -1431,6 +1435,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--paper-ledger", default="output/paper_ledger.csv")
     parser.add_argument("--paper-ledger-preopen", default="output/paper_ledger_preopen.csv")
+    parser.add_argument("--shadow-ledger-distribution", default="output/shadow_ledger_distribution.csv")
+    parser.add_argument("--shadow-ledger-preopen", default="output/shadow_ledger_preopen.csv")
     parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR)
     parser.add_argument("--asof", type=str, help="기준 시점 (default=now)")
     parser.add_argument(
@@ -1552,6 +1558,13 @@ def main():
     }
     _write_json(out_dir / "accuracy.json", accuracy, passphrase=pin)
     log.info(f"saved accuracy.json (btc benchmark: {len(btc_bench)} days)")
+
+    # 4) idea_validation.json — ACTIVE/WATCH_ONLY/SILENCE attribution.
+    idea_candidates = load_idea_candidate_ledger(args)
+    _, idea_payload = build_idea_validation_report(idea_candidates)
+    idea_payload["asof"] = asof.isoformat()
+    _write_json(out_dir / "idea_validation.json", idea_payload, passphrase=pin)
+    log.info(f"saved idea_validation.json ({idea_payload.get('n_candidates', 0)} candidates)")
 
     # quick stdout summary
     print()

@@ -40,6 +40,13 @@ def get_chat_id() -> Optional[str]:
     return os.environ.get("TELEGRAM_CHAT_ID")
 
 
+def _safe_error(e: Exception, token: Optional[str]) -> str:
+    text = str(e)
+    if token:
+        text = text.replace(token, "<telegram-token>")
+    return text
+
+
 # ============================================================================
 # 전송
 # ============================================================================
@@ -91,7 +98,7 @@ def send_telegram(
                 res.raise_for_status()
                 break
             except Exception as e:
-                logger.warning(f"telegram attempt {attempt} fail: {e}")
+                logger.warning("telegram attempt %s fail: %s", attempt, _safe_error(e, token))
                 if attempt < retries:
                     time.sleep(backoff ** attempt)
                 else:

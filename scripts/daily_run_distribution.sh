@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Distribution beta cron entry — KST 09:05.
-# Stage 1 = dry-run (telegram OFF, log only).
+# Telegram sends every day: ACTIVE recommendation or concise silence/status.
 # 사용: '5 9 * * * cd /home/soccz/22tb/prelude && bash scripts/daily_run_distribution.sh'
 
 set -euo pipefail
@@ -35,15 +35,16 @@ python -m data.collector_d1 --update >> "$LOG" 2>&1 || echo "  d1 update warn" >
 python -m data.collector_4h --all --days 2 >> "$LOG" 2>&1 || echo "  4h update warn" >> "$LOG"
 
 # 2) Health gate — stale DB 로 paper entry 만들지 않음
-echo "[2/3] health_check gate" >> "$LOG"
-python scripts/health_check.py --no-telegram >> "$LOG" 2>&1
+echo "[2/3] health_check gate (distribution: d1 + 4h)" >> "$LOG"
+python scripts/health_check.py --channel distribution --no-telegram >> "$LOG" 2>&1
 
-# 3) Distribution beta — Stage 2 (telegram ON, 사용자 명시 활성화)
-echo "[3/3] predict_today_distribution (Stage 2 — telegram ON)" >> "$LOG"
+# 3) Distribution beta — telegram ON every day
+echo "[3/3] predict_today_distribution (telegram daily heartbeat ON)" >> "$LOG"
 python scripts/predict_today_distribution.py \
     --universe top100 \
     --top-k 10 \
     --send-telegram \
+    --send-silence-telegram \
     >> "$LOG" 2>&1
 EXIT=$?
 

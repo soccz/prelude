@@ -1,0 +1,1315 @@
+{
+  "generated_at": "2026-05-25T23:25:21",
+  "round_trip_cost_pct": 0.15,
+  "n_candidates": 220,
+  "n_closed": 220,
+  "model_card": {
+    "name": "prelude AI quant recommendation assistant",
+    "version": "policy-gated-beta-2026-05-25",
+    "intended_use": "Personal KRW crypto trading recommendations; no automatic real-money orders.",
+    "prediction_target": "Intraday TP5-style upside candidates from pre-open and distribution heads.",
+    "decision_layers": [
+      "XGBoost candidate generation",
+      "setup/regime decision policy",
+      "historical recommendation-quality meta-filter",
+      "paper/shadow ledger validation",
+      "policy gate for promotion/demotion"
+    ],
+    "risk_controls": [
+      "look-ahead guard by as-of data cut",
+      "ACTIVE-only Telegram; WATCH/SILENCE retained for dashboard evidence",
+      "0.15% round-trip transaction cost in reports",
+      "paper/shadow close-out before dashboard publication",
+      "no automatic exchange order path"
+    ],
+    "current_evidence": {
+      "n_candidates": 220,
+      "n_closed": 220,
+      "net_pnl_sum_pct": -85.8704,
+      "tp5_hit_rate_pct": 28.6364,
+      "policy_replay_rows": [
+        {
+          "channel": "all",
+          "policy_id": "setup_quality_policy_v1",
+          "observed_active": {
+            "n_candidates": 220,
+            "n_closed": 220,
+            "net_pnl_sum_pct": -85.8704,
+            "avg_net_pnl_pct": -0.3903,
+            "tp5_hit_rate_pct": 28.6364,
+            "win_rate_pct": 44.5455,
+            "max_drawdown_pct": -150.4954,
+            "daily_sharpe_ann": -3.4046,
+            "bootstrap": {
+              "n": 220,
+              "n_iter": 1000,
+              "sum_pnl_ci95_pct": [
+                -213.078,
+                43.3151
+              ],
+              "avg_pnl_ci95_pct": [
+                -0.9685,
+                0.1969
+              ]
+            }
+          },
+          "replay_active": {
+            "n_candidates": 32,
+            "n_closed": 32,
+            "net_pnl_sum_pct": 71.7472,
+            "avg_net_pnl_pct": 2.2421,
+            "tp5_hit_rate_pct": 65.625,
+            "win_rate_pct": 71.875,
+            "max_drawdown_pct": -2.8992,
+            "daily_sharpe_ann": 13.8834,
+            "bootstrap": {
+              "n": 32,
+              "n_iter": 1000,
+              "sum_pnl_ci95_pct": [
+                28.4634,
+                115.0868
+              ],
+              "avg_pnl_ci95_pct": [
+                0.8895,
+                3.5965
+              ]
+            }
+          },
+          "replay_period_stability": [
+            {
+              "period": "early",
+              "start_date": "2025-11-06",
+              "end_date": "2026-05-10",
+              "n_candidates": 17,
+              "n_closed": 17,
+              "net_pnl_sum_pct": 55.2821,
+              "avg_net_pnl_pct": 3.2519,
+              "tp5_hit_rate_pct": 76.4706,
+              "win_rate_pct": 82.3529,
+              "max_drawdown_pct": -0.7936,
+              "daily_sharpe_ann": 20.9494,
+              "bootstrap": {
+                "n": 17,
+                "n_iter": 1000,
+                "sum_pnl_ci95_pct": [
+                  30.9058,
+                  75.07
+                ],
+                "avg_pnl_ci95_pct": [
+                  1.818,
+                  4.4159
+                ]
+              }
+            },
+            {
+              "period": "late",
+              "start_date": "2026-05-11",
+              "end_date": "2026-05-20",
+              "n_candidates": 15,
+              "n_closed": 15,
+              "net_pnl_sum_pct": 16.4652,
+              "avg_net_pnl_pct": 1.0977,
+              "tp5_hit_rate_pct": 53.3333,
+              "win_rate_pct": 60.0,
+              "max_drawdown_pct": -2.8992,
+              "daily_sharpe_ann": 8.2174,
+              "bootstrap": {
+                "n": 15,
+                "n_iter": 1000,
+                "sum_pnl_ci95_pct": [
+                  -17.3505,
+                  49.8171
+                ],
+                "avg_pnl_ci95_pct": [
+                  -1.1567,
+                  3.3211
+                ]
+              }
+            }
+          ],
+          "delta_n_closed": -188,
+          "delta_net_pnl_sum_pct": 157.6176,
+          "notes": "Replay uses setup_quality/BTC regime only; it is an audit view, not a claim of out-of-sample performance."
+        },
+        {
+          "channel": "distribution",
+          "policy_id": "setup_quality_policy_v1",
+          "observed_active": {
+            "n_candidates": 132,
+            "n_closed": 132,
+            "net_pnl_sum_pct": -45.0268,
+            "avg_net_pnl_pct": -0.3411,
+            "tp5_hit_rate_pct": 37.8788,
+            "win_rate_pct": 48.4848,
+            "max_drawdown_pct": -111.8559,
+            "daily_sharpe_ann": -2.2494,
+            "bootstrap": {
+              "n": 132,
+              "n_iter": 1000,
+              "sum_pnl_ci95_pct": [
+                -165.7241,
+                62.7277
+              ],
+              "avg_pnl_ci95_pct": [
+                -1.2555,
+                0.4752
+              ]
+            }
+          },
+          "replay_active": {
+            "n_candidates": 32,
+            "n_closed": 32,
+            "net_pnl_sum_pct": 71.7472,
+            "avg_net_pnl_pct": 2.2421,
+            "tp5_hit_rate_pct": 65.625,
+            "win_rate_pct": 71.875,
+            "max_drawdown_pct": -2.8992,
+            "daily_sharpe_ann": 13.8834,
+            "bootstrap": {
+              "n": 32,
+              "n_iter": 1000,
+              "sum_pnl_ci95_pct": [
+                28.4634,
+                115.0868
+              ],
+              "avg_pnl_ci95_pct": [
+                0.8895,
+                3.5965
+              ]
+            }
+          },
+          "replay_period_stability": [
+            {
+              "period": "early",
+              "start_date": "2025-11-06",
+              "end_date": "2026-05-10",
+              "n_candidates": 17,
+              "n_closed": 17,
+              "net_pnl_sum_pct": 55.2821,
+              "avg_net_pnl_pct": 3.2519,
+              "tp5_hit_rate_pct": 76.4706,
+              "win_rate_pct": 82.3529,
+              "max_drawdown_pct": -0.7936,
+              "daily_sharpe_ann": 20.9494,
+              "bootstrap": {
+                "n": 17,
+                "n_iter": 1000,
+                "sum_pnl_ci95_pct": [
+                  30.9058,
+                  75.07
+                ],
+                "avg_pnl_ci95_pct": [
+                  1.818,
+                  4.4159
+                ]
+              }
+            },
+            {
+              "period": "late",
+              "start_date": "2026-05-11",
+              "end_date": "2026-05-20",
+              "n_candidates": 15,
+              "n_closed": 15,
+              "net_pnl_sum_pct": 16.4652,
+              "avg_net_pnl_pct": 1.0977,
+              "tp5_hit_rate_pct": 53.3333,
+              "win_rate_pct": 60.0,
+              "max_drawdown_pct": -2.8992,
+              "daily_sharpe_ann": 8.2174,
+              "bootstrap": {
+                "n": 15,
+                "n_iter": 1000,
+                "sum_pnl_ci95_pct": [
+                  -17.3505,
+                  49.8171
+                ],
+                "avg_pnl_ci95_pct": [
+                  -1.1567,
+                  3.3211
+                ]
+              }
+            }
+          ],
+          "delta_n_closed": -100,
+          "delta_net_pnl_sum_pct": 116.774,
+          "notes": "Replay uses setup_quality/BTC regime only; it is an audit view, not a claim of out-of-sample performance."
+        },
+        {
+          "channel": "preopen",
+          "policy_id": "setup_quality_policy_v1",
+          "observed_active": {
+            "n_candidates": 88,
+            "n_closed": 88,
+            "net_pnl_sum_pct": -40.8437,
+            "avg_net_pnl_pct": -0.4641,
+            "tp5_hit_rate_pct": 14.7727,
+            "win_rate_pct": 38.6364,
+            "max_drawdown_pct": -39.1079,
+            "daily_sharpe_ann": -5.8176,
+            "bootstrap": {
+              "n": 88,
+              "n_iter": 1000,
+              "sum_pnl_ci95_pct": [
+                -94.1872,
+                15.5867
+              ],
+              "avg_pnl_ci95_pct": [
+                -1.0703,
+                0.1771
+              ]
+            }
+          },
+          "replay_active": {
+            "n_candidates": 0,
+            "n_closed": 0,
+            "net_pnl_sum_pct": null,
+            "avg_net_pnl_pct": null,
+            "tp5_hit_rate_pct": null,
+            "win_rate_pct": null,
+            "max_drawdown_pct": null,
+            "daily_sharpe_ann": null,
+            "bootstrap": {
+              "n": 0,
+              "note": "empty"
+            }
+          },
+          "replay_period_stability": [],
+          "delta_n_closed": -88,
+          "delta_net_pnl_sum_pct": 40.8437,
+          "notes": "Replay uses setup_quality/BTC regime only; it is an audit view, not a claim of out-of-sample performance."
+        }
+      ]
+    },
+    "trained_meta_model": {
+      "available": true,
+      "model_id": "recommendation_quality_meta_label_v1",
+      "model_version": "2026-05-25.1",
+      "deployable": false,
+      "reason": "selected holdout too small: 1 < 5",
+      "target": "net_win",
+      "threshold": 0.74,
+      "n_samples": 220,
+      "n_holdout": 41,
+      "holdout_metrics": {
+        "n": 41,
+        "positive_rate_pct": 24.390244,
+        "brier": 0.227971,
+        "auc": 0.516129,
+        "average_precision": 0.36517,
+        "net_pnl_sum_pct": -59.195875,
+        "avg_net_pnl_pct": -1.443802
+      },
+      "holdout_threshold_stats": {
+        "threshold": 0.74,
+        "n_selected": 1,
+        "selected_rate_pct": 2.439024,
+        "precision_pct": 100.0,
+        "net_pnl_sum_pct": 4.85,
+        "avg_net_pnl_pct": 4.85
+      },
+      "top_coefficients": [
+        {
+          "feature": "cat__setup_quality_A_TRIPLE",
+          "coef": 0.801492
+        },
+        {
+          "feature": "num__alert_rank",
+          "coef": 0.710883
+        },
+        {
+          "feature": "num__p_h6_5pct_24h",
+          "coef": -0.464457
+        },
+        {
+          "feature": "num__return5_rank",
+          "coef": -0.463985
+        },
+        {
+          "feature": "num__p_h2_3pct_4h",
+          "coef": 0.447787
+        },
+        {
+          "feature": "cat__setup_quality_C_PRIMARY",
+          "coef": -0.394152
+        },
+        {
+          "feature": "num__p_first30_3pct",
+          "coef": 0.367814
+        },
+        {
+          "feature": "num__p_h5_20pct_tail",
+          "coef": 0.320323
+        },
+        {
+          "feature": "num__composite_score",
+          "coef": 0.30412
+        },
+        {
+          "feature": "cat__setup_quality_B_S03",
+          "coef": -0.294413
+        }
+      ]
+    },
+    "limitations": [
+      "Crypto regimes can shift abruptly; live paper evidence outranks replay evidence.",
+      "Small shadow-ledger groups remain COLLECT until enough closed samples exist.",
+      "Meta-filter can reduce bad recommendations but cannot guarantee profit."
+    ],
+    "methodology_references": [
+      {
+        "label": "Bailey & Lopez de Prado - Deflated Sharpe Ratio / backtest overfitting",
+        "url": "https://www.davidhbailey.com/dhbpapers/deflated-sharpe.pdf"
+      },
+      {
+        "label": "Lopez de Prado publications - financial ML validation methods",
+        "url": "https://www.quantresearch.org/Publications.htm"
+      },
+      {
+        "label": "Tree SHAP documentation - explainable tree model attribution",
+        "url": "https://shap-community.readthedocs.io/en/latest/generated/shap.explainers.Tree.html"
+      }
+    ]
+  },
+  "recommendation_quality": {
+    "available": false,
+    "note": "confidence_tier is not populated yet; next prediction run will add meta-filter evidence.",
+    "trained_meta_model": {
+      "available": true,
+      "model_id": "recommendation_quality_meta_label_v1",
+      "model_version": "2026-05-25.1",
+      "deployable": false,
+      "reason": "selected holdout too small: 1 < 5",
+      "target": "net_win",
+      "threshold": 0.74,
+      "n_samples": 220,
+      "n_holdout": 41,
+      "holdout_metrics": {
+        "n": 41,
+        "positive_rate_pct": 24.390244,
+        "brier": 0.227971,
+        "auc": 0.516129,
+        "average_precision": 0.36517,
+        "net_pnl_sum_pct": -59.195875,
+        "avg_net_pnl_pct": -1.443802
+      },
+      "holdout_threshold_stats": {
+        "threshold": 0.74,
+        "n_selected": 1,
+        "selected_rate_pct": 2.439024,
+        "precision_pct": 100.0,
+        "net_pnl_sum_pct": 4.85,
+        "avg_net_pnl_pct": 4.85
+      },
+      "top_coefficients": [
+        {
+          "feature": "cat__setup_quality_A_TRIPLE",
+          "coef": 0.801492
+        },
+        {
+          "feature": "num__alert_rank",
+          "coef": 0.710883
+        },
+        {
+          "feature": "num__p_h6_5pct_24h",
+          "coef": -0.464457
+        },
+        {
+          "feature": "num__return5_rank",
+          "coef": -0.463985
+        },
+        {
+          "feature": "num__p_h2_3pct_4h",
+          "coef": 0.447787
+        },
+        {
+          "feature": "cat__setup_quality_C_PRIMARY",
+          "coef": -0.394152
+        },
+        {
+          "feature": "num__p_first30_3pct",
+          "coef": 0.367814
+        },
+        {
+          "feature": "num__p_h5_20pct_tail",
+          "coef": 0.320323
+        },
+        {
+          "feature": "num__composite_score",
+          "coef": 0.30412
+        },
+        {
+          "feature": "cat__setup_quality_B_S03",
+          "coef": -0.294413
+        }
+      ]
+    },
+    "rows": []
+  },
+  "policy_replay": {
+    "rows": [
+      {
+        "channel": "all",
+        "policy_id": "setup_quality_policy_v1",
+        "observed_active": {
+          "n_candidates": 220,
+          "n_closed": 220,
+          "net_pnl_sum_pct": -85.8704,
+          "avg_net_pnl_pct": -0.3903,
+          "tp5_hit_rate_pct": 28.6364,
+          "win_rate_pct": 44.5455,
+          "max_drawdown_pct": -150.4954,
+          "daily_sharpe_ann": -3.4046,
+          "bootstrap": {
+            "n": 220,
+            "n_iter": 1000,
+            "sum_pnl_ci95_pct": [
+              -213.078,
+              43.3151
+            ],
+            "avg_pnl_ci95_pct": [
+              -0.9685,
+              0.1969
+            ]
+          }
+        },
+        "replay_active": {
+          "n_candidates": 32,
+          "n_closed": 32,
+          "net_pnl_sum_pct": 71.7472,
+          "avg_net_pnl_pct": 2.2421,
+          "tp5_hit_rate_pct": 65.625,
+          "win_rate_pct": 71.875,
+          "max_drawdown_pct": -2.8992,
+          "daily_sharpe_ann": 13.8834,
+          "bootstrap": {
+            "n": 32,
+            "n_iter": 1000,
+            "sum_pnl_ci95_pct": [
+              28.4634,
+              115.0868
+            ],
+            "avg_pnl_ci95_pct": [
+              0.8895,
+              3.5965
+            ]
+          }
+        },
+        "replay_period_stability": [
+          {
+            "period": "early",
+            "start_date": "2025-11-06",
+            "end_date": "2026-05-10",
+            "n_candidates": 17,
+            "n_closed": 17,
+            "net_pnl_sum_pct": 55.2821,
+            "avg_net_pnl_pct": 3.2519,
+            "tp5_hit_rate_pct": 76.4706,
+            "win_rate_pct": 82.3529,
+            "max_drawdown_pct": -0.7936,
+            "daily_sharpe_ann": 20.9494,
+            "bootstrap": {
+              "n": 17,
+              "n_iter": 1000,
+              "sum_pnl_ci95_pct": [
+                30.9058,
+                75.07
+              ],
+              "avg_pnl_ci95_pct": [
+                1.818,
+                4.4159
+              ]
+            }
+          },
+          {
+            "period": "late",
+            "start_date": "2026-05-11",
+            "end_date": "2026-05-20",
+            "n_candidates": 15,
+            "n_closed": 15,
+            "net_pnl_sum_pct": 16.4652,
+            "avg_net_pnl_pct": 1.0977,
+            "tp5_hit_rate_pct": 53.3333,
+            "win_rate_pct": 60.0,
+            "max_drawdown_pct": -2.8992,
+            "daily_sharpe_ann": 8.2174,
+            "bootstrap": {
+              "n": 15,
+              "n_iter": 1000,
+              "sum_pnl_ci95_pct": [
+                -17.3505,
+                49.8171
+              ],
+              "avg_pnl_ci95_pct": [
+                -1.1567,
+                3.3211
+              ]
+            }
+          }
+        ],
+        "delta_n_closed": -188,
+        "delta_net_pnl_sum_pct": 157.6176,
+        "notes": "Replay uses setup_quality/BTC regime only; it is an audit view, not a claim of out-of-sample performance."
+      },
+      {
+        "channel": "distribution",
+        "policy_id": "setup_quality_policy_v1",
+        "observed_active": {
+          "n_candidates": 132,
+          "n_closed": 132,
+          "net_pnl_sum_pct": -45.0268,
+          "avg_net_pnl_pct": -0.3411,
+          "tp5_hit_rate_pct": 37.8788,
+          "win_rate_pct": 48.4848,
+          "max_drawdown_pct": -111.8559,
+          "daily_sharpe_ann": -2.2494,
+          "bootstrap": {
+            "n": 132,
+            "n_iter": 1000,
+            "sum_pnl_ci95_pct": [
+              -165.7241,
+              62.7277
+            ],
+            "avg_pnl_ci95_pct": [
+              -1.2555,
+              0.4752
+            ]
+          }
+        },
+        "replay_active": {
+          "n_candidates": 32,
+          "n_closed": 32,
+          "net_pnl_sum_pct": 71.7472,
+          "avg_net_pnl_pct": 2.2421,
+          "tp5_hit_rate_pct": 65.625,
+          "win_rate_pct": 71.875,
+          "max_drawdown_pct": -2.8992,
+          "daily_sharpe_ann": 13.8834,
+          "bootstrap": {
+            "n": 32,
+            "n_iter": 1000,
+            "sum_pnl_ci95_pct": [
+              28.4634,
+              115.0868
+            ],
+            "avg_pnl_ci95_pct": [
+              0.8895,
+              3.5965
+            ]
+          }
+        },
+        "replay_period_stability": [
+          {
+            "period": "early",
+            "start_date": "2025-11-06",
+            "end_date": "2026-05-10",
+            "n_candidates": 17,
+            "n_closed": 17,
+            "net_pnl_sum_pct": 55.2821,
+            "avg_net_pnl_pct": 3.2519,
+            "tp5_hit_rate_pct": 76.4706,
+            "win_rate_pct": 82.3529,
+            "max_drawdown_pct": -0.7936,
+            "daily_sharpe_ann": 20.9494,
+            "bootstrap": {
+              "n": 17,
+              "n_iter": 1000,
+              "sum_pnl_ci95_pct": [
+                30.9058,
+                75.07
+              ],
+              "avg_pnl_ci95_pct": [
+                1.818,
+                4.4159
+              ]
+            }
+          },
+          {
+            "period": "late",
+            "start_date": "2026-05-11",
+            "end_date": "2026-05-20",
+            "n_candidates": 15,
+            "n_closed": 15,
+            "net_pnl_sum_pct": 16.4652,
+            "avg_net_pnl_pct": 1.0977,
+            "tp5_hit_rate_pct": 53.3333,
+            "win_rate_pct": 60.0,
+            "max_drawdown_pct": -2.8992,
+            "daily_sharpe_ann": 8.2174,
+            "bootstrap": {
+              "n": 15,
+              "n_iter": 1000,
+              "sum_pnl_ci95_pct": [
+                -17.3505,
+                49.8171
+              ],
+              "avg_pnl_ci95_pct": [
+                -1.1567,
+                3.3211
+              ]
+            }
+          }
+        ],
+        "delta_n_closed": -100,
+        "delta_net_pnl_sum_pct": 116.774,
+        "notes": "Replay uses setup_quality/BTC regime only; it is an audit view, not a claim of out-of-sample performance."
+      },
+      {
+        "channel": "preopen",
+        "policy_id": "setup_quality_policy_v1",
+        "observed_active": {
+          "n_candidates": 88,
+          "n_closed": 88,
+          "net_pnl_sum_pct": -40.8437,
+          "avg_net_pnl_pct": -0.4641,
+          "tp5_hit_rate_pct": 14.7727,
+          "win_rate_pct": 38.6364,
+          "max_drawdown_pct": -39.1079,
+          "daily_sharpe_ann": -5.8176,
+          "bootstrap": {
+            "n": 88,
+            "n_iter": 1000,
+            "sum_pnl_ci95_pct": [
+              -94.1872,
+              15.5867
+            ],
+            "avg_pnl_ci95_pct": [
+              -1.0703,
+              0.1771
+            ]
+          }
+        },
+        "replay_active": {
+          "n_candidates": 0,
+          "n_closed": 0,
+          "net_pnl_sum_pct": null,
+          "avg_net_pnl_pct": null,
+          "tp5_hit_rate_pct": null,
+          "win_rate_pct": null,
+          "max_drawdown_pct": null,
+          "daily_sharpe_ann": null,
+          "bootstrap": {
+            "n": 0,
+            "note": "empty"
+          }
+        },
+        "replay_period_stability": [],
+        "delta_n_closed": -88,
+        "delta_net_pnl_sum_pct": 40.8437,
+        "notes": "Replay uses setup_quality/BTC regime only; it is an audit view, not a claim of out-of-sample performance."
+      }
+    ]
+  },
+  "policy_recommendations": [
+    {
+      "channel": "distribution",
+      "action": "ADOPT_REPLAY_ACTIVE_FILTER",
+      "reason": "replay active filter improves net PnL with enough closed samples and positive late-period average",
+      "observed_net_pnl_sum_pct": -45.0268,
+      "replay_net_pnl_sum_pct": 71.7472,
+      "delta_net_pnl_sum_pct": 116.774,
+      "n_closed": 32
+    },
+    {
+      "channel": "preopen",
+      "action": "DEMOTE_TO_WATCH_ONLY",
+      "reason": "observed active book is negative and replay policy has no active candidates",
+      "observed_net_pnl_sum_pct": -40.8437,
+      "avoided_loss_pct": 40.8437,
+      "n_closed": 88
+    }
+  ],
+  "tables": {
+    "summary": [
+      {
+        "channel": "distribution",
+        "dimension": "btc_regime",
+        "n_candidates": 8,
+        "n_closed": 8,
+        "start_date": "2025-11-06",
+        "end_date": "2025-11-06",
+        "tp5_hit_rate_pct": 50.0,
+        "win_rate_pct": 62.5,
+        "net_pnl_sum_pct": -12.7774,
+        "avg_net_pnl_pct": -1.5972,
+        "median_net_pnl_pct": 3.4736,
+        "avg_max_return_pct": 7.8632,
+        "worst_min_return_pct": -17.7243,
+        "avg_close_return_pct": -4.4099,
+        "daily_sharpe_ann": NaN,
+        "max_drawdown_pct": 0.0,
+        "hit_h6_rate_pct": 50.0,
+        "hit_first1h_5pct_rate_pct": NaN,
+        "evidence_tier": "COLLECT",
+        "decision": NaN,
+        "policy_decision_v1": NaN,
+        "setup_quality": NaN,
+        "btc_regime": "bull_volatile",
+        "idea_id": NaN
+      },
+      {
+        "channel": "distribution",
+        "dimension": "btc_regime",
+        "n_candidates": 124,
+        "n_closed": 124,
+        "start_date": "2026-05-05",
+        "end_date": "2026-05-20",
+        "tp5_hit_rate_pct": 37.0968,
+        "win_rate_pct": 47.5806,
+        "net_pnl_sum_pct": -32.2494,
+        "avg_net_pnl_pct": -0.2601,
+        "median_net_pnl_pct": -0.15,
+        "avg_max_return_pct": 6.9578,
+        "worst_min_return_pct": -14.6805,
+        "avg_close_return_pct": 0.1255,
+        "daily_sharpe_ann": -1.6738,
+        "max_drawdown_pct": -111.8559,
+        "hit_h6_rate_pct": 37.0968,
+        "hit_first1h_5pct_rate_pct": NaN,
+        "evidence_tier": "DEMOTE_CANDIDATE",
+        "decision": NaN,
+        "policy_decision_v1": NaN,
+        "setup_quality": NaN,
+        "btc_regime": "bear_quiet",
+        "idea_id": NaN
+      },
+      {
+        "channel": "preopen",
+        "dimension": "btc_regime",
+        "n_candidates": 88,
+        "n_closed": 88,
+        "start_date": "2026-05-05",
+        "end_date": "2026-05-18",
+        "tp5_hit_rate_pct": 14.7727,
+        "win_rate_pct": 38.6364,
+        "net_pnl_sum_pct": -40.8437,
+        "avg_net_pnl_pct": -0.4641,
+        "median_net_pnl_pct": -0.8888,
+        "avg_max_return_pct": 2.7297,
+        "worst_min_return_pct": -8.5366,
+        "avg_close_return_pct": -0.2053,
+        "daily_sharpe_ann": -5.8176,
+        "max_drawdown_pct": -39.1079,
+        "hit_h6_rate_pct": NaN,
+        "hit_first1h_5pct_rate_pct": 14.7727,
+        "evidence_tier": "DEMOTE_CANDIDATE",
+        "decision": NaN,
+        "policy_decision_v1": NaN,
+        "setup_quality": NaN,
+        "btc_regime": "bear_quiet",
+        "idea_id": NaN
+      },
+      {
+        "channel": "distribution",
+        "dimension": "channel",
+        "n_candidates": 132,
+        "n_closed": 132,
+        "start_date": "2025-11-06",
+        "end_date": "2026-05-20",
+        "tp5_hit_rate_pct": 37.8788,
+        "win_rate_pct": 48.4848,
+        "net_pnl_sum_pct": -45.0268,
+        "avg_net_pnl_pct": -0.3411,
+        "median_net_pnl_pct": -0.15,
+        "avg_max_return_pct": 7.0127,
+        "worst_min_return_pct": -17.7243,
+        "avg_close_return_pct": -0.1494,
+        "daily_sharpe_ann": -2.2494,
+        "max_drawdown_pct": -111.8559,
+        "hit_h6_rate_pct": 37.8788,
+        "hit_first1h_5pct_rate_pct": NaN,
+        "evidence_tier": "DEMOTE_CANDIDATE",
+        "decision": NaN,
+        "policy_decision_v1": NaN,
+        "setup_quality": NaN,
+        "btc_regime": NaN,
+        "idea_id": NaN
+      },
+      {
+        "channel": "preopen",
+        "dimension": "channel",
+        "n_candidates": 88,
+        "n_closed": 88,
+        "start_date": "2026-05-05",
+        "end_date": "2026-05-18",
+        "tp5_hit_rate_pct": 14.7727,
+        "win_rate_pct": 38.6364,
+        "net_pnl_sum_pct": -40.8437,
+        "avg_net_pnl_pct": -0.4641,
+        "median_net_pnl_pct": -0.8888,
+        "avg_max_return_pct": 2.7297,
+        "worst_min_return_pct": -8.5366,
+        "avg_close_return_pct": -0.2053,
+        "daily_sharpe_ann": -5.8176,
+        "max_drawdown_pct": -39.1079,
+        "hit_h6_rate_pct": NaN,
+        "hit_first1h_5pct_rate_pct": 14.7727,
+        "evidence_tier": "DEMOTE_CANDIDATE",
+        "decision": NaN,
+        "policy_decision_v1": NaN,
+        "setup_quality": NaN,
+        "btc_regime": NaN,
+        "idea_id": NaN
+      },
+      {
+        "channel": "distribution",
+        "dimension": "decision",
+        "n_candidates": 132,
+        "n_closed": 132,
+        "start_date": "2025-11-06",
+        "end_date": "2026-05-20",
+        "tp5_hit_rate_pct": 37.8788,
+        "win_rate_pct": 48.4848,
+        "net_pnl_sum_pct": -45.0268,
+        "avg_net_pnl_pct": -0.3411,
+        "median_net_pnl_pct": -0.15,
+        "avg_max_return_pct": 7.0127,
+        "worst_min_return_pct": -17.7243,
+        "avg_close_return_pct": -0.1494,
+        "daily_sharpe_ann": -2.2494,
+        "max_drawdown_pct": -111.8559,
+        "hit_h6_rate_pct": 37.8788,
+        "hit_first1h_5pct_rate_pct": NaN,
+        "evidence_tier": "DEMOTE_CANDIDATE",
+        "decision": "ACTIVE",
+        "policy_decision_v1": NaN,
+        "setup_quality": NaN,
+        "btc_regime": NaN,
+        "idea_id": NaN
+      },
+      {
+        "channel": "preopen",
+        "dimension": "decision",
+        "n_candidates": 88,
+        "n_closed": 88,
+        "start_date": "2026-05-05",
+        "end_date": "2026-05-18",
+        "tp5_hit_rate_pct": 14.7727,
+        "win_rate_pct": 38.6364,
+        "net_pnl_sum_pct": -40.8437,
+        "avg_net_pnl_pct": -0.4641,
+        "median_net_pnl_pct": -0.8888,
+        "avg_max_return_pct": 2.7297,
+        "worst_min_return_pct": -8.5366,
+        "avg_close_return_pct": -0.2053,
+        "daily_sharpe_ann": -5.8176,
+        "max_drawdown_pct": -39.1079,
+        "hit_h6_rate_pct": NaN,
+        "hit_first1h_5pct_rate_pct": 14.7727,
+        "evidence_tier": "DEMOTE_CANDIDATE",
+        "decision": "ACTIVE",
+        "policy_decision_v1": NaN,
+        "setup_quality": NaN,
+        "btc_regime": NaN,
+        "idea_id": NaN
+      },
+      {
+        "channel": "distribution",
+        "dimension": "idea",
+        "n_candidates": 30,
+        "n_closed": 30,
+        "start_date": "2026-05-05",
+        "end_date": "2026-05-20",
+        "tp5_hit_rate_pct": 63.3333,
+        "win_rate_pct": 70.0,
+        "net_pnl_sum_pct": 62.0472,
+        "avg_net_pnl_pct": 2.0682,
+        "median_net_pnl_pct": 4.85,
+        "avg_max_return_pct": 8.3727,
+        "worst_min_return_pct": -11.1675,
+        "avg_close_return_pct": 0.6594,
+        "daily_sharpe_ann": 12.7488,
+        "max_drawdown_pct": -2.8992,
+        "hit_h6_rate_pct": 63.3333,
+        "hit_first1h_5pct_rate_pct": NaN,
+        "evidence_tier": "PROMOTE_CANDIDATE",
+        "decision": "ACTIVE",
+        "policy_decision_v1": NaN,
+        "setup_quality": "A_TRIPLE",
+        "btc_regime": "bear_quiet",
+        "idea_id": "legacy_distribution_a_triple_bear_quiet_v1"
+      },
+      {
+        "channel": "distribution",
+        "dimension": "idea",
+        "n_candidates": 2,
+        "n_closed": 2,
+        "start_date": "2025-11-06",
+        "end_date": "2025-11-06",
+        "tp5_hit_rate_pct": 100.0,
+        "win_rate_pct": 100.0,
+        "net_pnl_sum_pct": 9.7,
+        "avg_net_pnl_pct": 4.85,
+        "median_net_pnl_pct": 4.85,
+        "avg_max_return_pct": 21.6609,
+        "worst_min_return_pct": -10.1045,
+        "avg_close_return_pct": 2.0748,
+        "daily_sharpe_ann": NaN,
+        "max_drawdown_pct": 0.0,
+        "hit_h6_rate_pct": 100.0,
+        "hit_first1h_5pct_rate_pct": NaN,
+        "evidence_tier": "COLLECT",
+        "decision": "ACTIVE",
+        "policy_decision_v1": NaN,
+        "setup_quality": "A_TRIPLE",
+        "btc_regime": "bull_volatile",
+        "idea_id": "legacy_distribution_a_triple_bull_volatile_v1"
+      },
+      {
+        "channel": "distribution",
+        "dimension": "idea",
+        "n_candidates": 24,
+        "n_closed": 24,
+        "start_date": "2026-05-05",
+        "end_date": "2026-05-20",
+        "tp5_hit_rate_pct": 45.8333,
+        "win_rate_pct": 54.1667,
+        "net_pnl_sum_pct": -12.5908,
+        "avg_net_pnl_pct": -0.5246,
+        "median_net_pnl_pct": 1.4074,
+        "avg_max_return_pct": 9.7544,
+        "worst_min_return_pct": -11.9048,
+        "avg_close_return_pct": 1.7117,
+        "daily_sharpe_ann": -1.8358,
+        "max_drawdown_pct": -38.9113,
+        "hit_h6_rate_pct": 45.8333,
+        "hit_first1h_5pct_rate_pct": NaN,
+        "evidence_tier": "DEMOTE_CANDIDATE",
+        "decision": "ACTIVE",
+        "policy_decision_v1": NaN,
+        "setup_quality": "B_S03",
+        "btc_regime": "bear_quiet",
+        "idea_id": "legacy_distribution_b_s03_bear_quiet_v1"
+      },
+      {
+        "channel": "distribution",
+        "dimension": "idea",
+        "n_candidates": 6,
+        "n_closed": 6,
+        "start_date": "2025-11-06",
+        "end_date": "2025-11-06",
+        "tp5_hit_rate_pct": 33.3333,
+        "win_rate_pct": 50.0,
+        "net_pnl_sum_pct": -22.4774,
+        "avg_net_pnl_pct": -3.7462,
+        "median_net_pnl_pct": -3.1631,
+        "avg_max_return_pct": 3.2639,
+        "worst_min_return_pct": -17.7243,
+        "avg_close_return_pct": -6.5715,
+        "daily_sharpe_ann": NaN,
+        "max_drawdown_pct": 0.0,
+        "hit_h6_rate_pct": 33.3333,
+        "hit_first1h_5pct_rate_pct": NaN,
+        "evidence_tier": "COLLECT",
+        "decision": "ACTIVE",
+        "policy_decision_v1": NaN,
+        "setup_quality": "C_PRIMARY",
+        "btc_regime": "bull_volatile",
+        "idea_id": "legacy_distribution_c_primary_bull_volatile_v1"
+      },
+      {
+        "channel": "distribution",
+        "dimension": "idea",
+        "n_candidates": 70,
+        "n_closed": 70,
+        "start_date": "2026-05-05",
+        "end_date": "2026-05-20",
+        "tp5_hit_rate_pct": 22.8571,
+        "win_rate_pct": 35.7143,
+        "net_pnl_sum_pct": -81.7058,
+        "avg_net_pnl_pct": -1.1672,
+        "median_net_pnl_pct": -1.0859,
+        "avg_max_return_pct": 5.3926,
+        "worst_min_return_pct": -14.6805,
+        "avg_close_return_pct": -0.6471,
+        "daily_sharpe_ann": -6.4916,
+        "max_drawdown_pct": -96.5072,
+        "hit_h6_rate_pct": 22.8571,
+        "hit_first1h_5pct_rate_pct": NaN,
+        "evidence_tier": "DEMOTE_CANDIDATE",
+        "decision": "ACTIVE",
+        "policy_decision_v1": NaN,
+        "setup_quality": "C_PRIMARY",
+        "btc_regime": "bear_quiet",
+        "idea_id": "legacy_distribution_c_primary_bear_quiet_v1"
+      },
+      {
+        "channel": "preopen",
+        "dimension": "idea",
+        "n_candidates": 88,
+        "n_closed": 88,
+        "start_date": "2026-05-05",
+        "end_date": "2026-05-18",
+        "tp5_hit_rate_pct": 14.7727,
+        "win_rate_pct": 38.6364,
+        "net_pnl_sum_pct": -40.8437,
+        "avg_net_pnl_pct": -0.4641,
+        "median_net_pnl_pct": -0.8888,
+        "avg_max_return_pct": 2.7297,
+        "worst_min_return_pct": -8.5366,
+        "avg_close_return_pct": -0.2053,
+        "daily_sharpe_ann": -5.8176,
+        "max_drawdown_pct": -39.1079,
+        "hit_h6_rate_pct": NaN,
+        "hit_first1h_5pct_rate_pct": 14.7727,
+        "evidence_tier": "DEMOTE_CANDIDATE",
+        "decision": "ACTIVE",
+        "policy_decision_v1": NaN,
+        "setup_quality": "PREOPEN",
+        "btc_regime": "bear_quiet",
+        "idea_id": "legacy_preopen_bear_quiet_v1"
+      },
+      {
+        "channel": "distribution",
+        "dimension": "policy_replay_active",
+        "n_candidates": 32,
+        "n_closed": 32,
+        "start_date": "2025-11-06",
+        "end_date": "2026-05-20",
+        "tp5_hit_rate_pct": 65.625,
+        "win_rate_pct": 71.875,
+        "net_pnl_sum_pct": 71.7472,
+        "avg_net_pnl_pct": 2.2421,
+        "median_net_pnl_pct": 4.85,
+        "avg_max_return_pct": 9.2032,
+        "worst_min_return_pct": -11.1675,
+        "avg_close_return_pct": 0.7479,
+        "daily_sharpe_ann": 13.8834,
+        "max_drawdown_pct": -2.8992,
+        "hit_h6_rate_pct": 65.625,
+        "hit_first1h_5pct_rate_pct": NaN,
+        "evidence_tier": "PROMOTE_CANDIDATE",
+        "decision": NaN,
+        "policy_decision_v1": NaN,
+        "setup_quality": NaN,
+        "btc_regime": NaN,
+        "idea_id": NaN
+      },
+      {
+        "channel": "distribution",
+        "dimension": "policy_replay_decision",
+        "n_candidates": 32,
+        "n_closed": 32,
+        "start_date": "2025-11-06",
+        "end_date": "2026-05-20",
+        "tp5_hit_rate_pct": 65.625,
+        "win_rate_pct": 71.875,
+        "net_pnl_sum_pct": 71.7472,
+        "avg_net_pnl_pct": 2.2421,
+        "median_net_pnl_pct": 4.85,
+        "avg_max_return_pct": 9.2032,
+        "worst_min_return_pct": -11.1675,
+        "avg_close_return_pct": 0.7479,
+        "daily_sharpe_ann": 13.8834,
+        "max_drawdown_pct": -2.8992,
+        "hit_h6_rate_pct": 65.625,
+        "hit_first1h_5pct_rate_pct": NaN,
+        "evidence_tier": "PROMOTE_CANDIDATE",
+        "decision": NaN,
+        "policy_decision_v1": "ACTIVE",
+        "setup_quality": NaN,
+        "btc_regime": NaN,
+        "idea_id": NaN
+      },
+      {
+        "channel": "distribution",
+        "dimension": "policy_replay_decision",
+        "n_candidates": 100,
+        "n_closed": 100,
+        "start_date": "2025-11-06",
+        "end_date": "2026-05-20",
+        "tp5_hit_rate_pct": 29.0,
+        "win_rate_pct": 41.0,
+        "net_pnl_sum_pct": -116.774,
+        "avg_net_pnl_pct": -1.1677,
+        "median_net_pnl_pct": -1.0242,
+        "avg_max_return_pct": 6.3117,
+        "worst_min_return_pct": -17.7243,
+        "avg_close_return_pct": -0.4365,
+        "daily_sharpe_ann": -6.6393,
+        "max_drawdown_pct": -131.7666,
+        "hit_h6_rate_pct": 29.0,
+        "hit_first1h_5pct_rate_pct": NaN,
+        "evidence_tier": "DEMOTE_CANDIDATE",
+        "decision": NaN,
+        "policy_decision_v1": "WATCH_ONLY",
+        "setup_quality": NaN,
+        "btc_regime": NaN,
+        "idea_id": NaN
+      },
+      {
+        "channel": "preopen",
+        "dimension": "policy_replay_decision",
+        "n_candidates": 88,
+        "n_closed": 88,
+        "start_date": "2026-05-05",
+        "end_date": "2026-05-18",
+        "tp5_hit_rate_pct": 14.7727,
+        "win_rate_pct": 38.6364,
+        "net_pnl_sum_pct": -40.8437,
+        "avg_net_pnl_pct": -0.4641,
+        "median_net_pnl_pct": -0.8888,
+        "avg_max_return_pct": 2.7297,
+        "worst_min_return_pct": -8.5366,
+        "avg_close_return_pct": -0.2053,
+        "daily_sharpe_ann": -5.8176,
+        "max_drawdown_pct": -39.1079,
+        "hit_h6_rate_pct": NaN,
+        "hit_first1h_5pct_rate_pct": 14.7727,
+        "evidence_tier": "DEMOTE_CANDIDATE",
+        "decision": NaN,
+        "policy_decision_v1": "WATCH_ONLY",
+        "setup_quality": NaN,
+        "btc_regime": NaN,
+        "idea_id": NaN
+      },
+      {
+        "channel": "distribution",
+        "dimension": "setup_quality",
+        "n_candidates": 32,
+        "n_closed": 32,
+        "start_date": "2025-11-06",
+        "end_date": "2026-05-20",
+        "tp5_hit_rate_pct": 65.625,
+        "win_rate_pct": 71.875,
+        "net_pnl_sum_pct": 71.7472,
+        "avg_net_pnl_pct": 2.2421,
+        "median_net_pnl_pct": 4.85,
+        "avg_max_return_pct": 9.2032,
+        "worst_min_return_pct": -11.1675,
+        "avg_close_return_pct": 0.7479,
+        "daily_sharpe_ann": 13.8834,
+        "max_drawdown_pct": -2.8992,
+        "hit_h6_rate_pct": 65.625,
+        "hit_first1h_5pct_rate_pct": NaN,
+        "evidence_tier": "PROMOTE_CANDIDATE",
+        "decision": NaN,
+        "policy_decision_v1": NaN,
+        "setup_quality": "A_TRIPLE",
+        "btc_regime": NaN,
+        "idea_id": NaN
+      },
+      {
+        "channel": "distribution",
+        "dimension": "setup_quality",
+        "n_candidates": 24,
+        "n_closed": 24,
+        "start_date": "2026-05-05",
+        "end_date": "2026-05-20",
+        "tp5_hit_rate_pct": 45.8333,
+        "win_rate_pct": 54.1667,
+        "net_pnl_sum_pct": -12.5908,
+        "avg_net_pnl_pct": -0.5246,
+        "median_net_pnl_pct": 1.4074,
+        "avg_max_return_pct": 9.7544,
+        "worst_min_return_pct": -11.9048,
+        "avg_close_return_pct": 1.7117,
+        "daily_sharpe_ann": -1.8358,
+        "max_drawdown_pct": -38.9113,
+        "hit_h6_rate_pct": 45.8333,
+        "hit_first1h_5pct_rate_pct": NaN,
+        "evidence_tier": "DEMOTE_CANDIDATE",
+        "decision": NaN,
+        "policy_decision_v1": NaN,
+        "setup_quality": "B_S03",
+        "btc_regime": NaN,
+        "idea_id": NaN
+      },
+      {
+        "channel": "distribution",
+        "dimension": "setup_quality",
+        "n_candidates": 76,
+        "n_closed": 76,
+        "start_date": "2025-11-06",
+        "end_date": "2026-05-20",
+        "tp5_hit_rate_pct": 23.6842,
+        "win_rate_pct": 36.8421,
+        "net_pnl_sum_pct": -104.1831,
+        "avg_net_pnl_pct": -1.3708,
+        "median_net_pnl_pct": -1.0859,
+        "avg_max_return_pct": 5.2246,
+        "worst_min_return_pct": -17.7243,
+        "avg_close_return_pct": -1.1148,
+        "daily_sharpe_ann": -7.598,
+        "max_drawdown_pct": -96.5072,
+        "hit_h6_rate_pct": 23.6842,
+        "hit_first1h_5pct_rate_pct": NaN,
+        "evidence_tier": "DEMOTE_CANDIDATE",
+        "decision": NaN,
+        "policy_decision_v1": NaN,
+        "setup_quality": "C_PRIMARY",
+        "btc_regime": NaN,
+        "idea_id": NaN
+      },
+      {
+        "channel": "preopen",
+        "dimension": "setup_quality",
+        "n_candidates": 88,
+        "n_closed": 88,
+        "start_date": "2026-05-05",
+        "end_date": "2026-05-18",
+        "tp5_hit_rate_pct": 14.7727,
+        "win_rate_pct": 38.6364,
+        "net_pnl_sum_pct": -40.8437,
+        "avg_net_pnl_pct": -0.4641,
+        "median_net_pnl_pct": -0.8888,
+        "avg_max_return_pct": 2.7297,
+        "worst_min_return_pct": -8.5366,
+        "avg_close_return_pct": -0.2053,
+        "daily_sharpe_ann": -5.8176,
+        "max_drawdown_pct": -39.1079,
+        "hit_h6_rate_pct": NaN,
+        "hit_first1h_5pct_rate_pct": 14.7727,
+        "evidence_tier": "DEMOTE_CANDIDATE",
+        "decision": NaN,
+        "policy_decision_v1": NaN,
+        "setup_quality": "PREOPEN",
+        "btc_regime": NaN,
+        "idea_id": NaN
+      }
+    ]
+  },
+  "policy_gate": {
+    "gate_id": "policy_gate_v1",
+    "gate_version": "2026-05-25.1",
+    "generated_at": "2026-05-25T23:25:22",
+    "rows": [
+      {
+        "channel": "distribution",
+        "state": "PROMOTE_PAPER",
+        "action": "ADOPT_ACTIVE_FILTER_IN_PAPER_AND_ALERTS",
+        "confidence": "MEDIUM_REPLAY_ONLY",
+        "policy_id": "setup_quality_policy_v1",
+        "replay_n_closed": 32,
+        "replay_net_pnl_sum_pct": 71.7472,
+        "replay_avg_net_pnl_pct": 2.2421,
+        "replay_bootstrap_avg_ci95_low_pct": 0.8895,
+        "replay_late_avg_net_pnl_pct": 1.0977,
+        "observed_net_pnl_sum_pct": -45.0268,
+        "delta_net_pnl_sum_pct": 116.774,
+        "shadow_closed_for_confidence": 0,
+        "reasons": [
+          "replay active filter is positive overall, positive in late split, and bootstrap avg CI is above zero",
+          "needs future shadow/live closed samples for high confidence"
+        ]
+      },
+      {
+        "channel": "preopen",
+        "state": "DEMOTE",
+        "action": "WATCH_ONLY",
+        "confidence": "MEDIUM_REPLAY_ONLY",
+        "policy_id": "setup_quality_policy_v1",
+        "replay_n_closed": 0,
+        "replay_net_pnl_sum_pct": null,
+        "replay_avg_net_pnl_pct": null,
+        "replay_bootstrap_avg_ci95_low_pct": null,
+        "replay_late_avg_net_pnl_pct": null,
+        "observed_net_pnl_sum_pct": -40.8437,
+        "delta_net_pnl_sum_pct": 40.8437,
+        "shadow_closed_for_confidence": 0,
+        "reasons": [
+          "observed active preopen book is materially negative"
+        ]
+      }
+    ]
+  }
+}

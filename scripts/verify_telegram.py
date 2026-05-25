@@ -2,7 +2,7 @@
 
 xsec_alpha 의 verify_telegram.py 패턴 (이전에 LONG 부호 버그로 모든 행 반대 표시된 적).
 
-매일 KST 09:30 cron — post_open_run 의 일부로 자동 실행.
+매일 KST 09:30 close 흐름에서 필요 시 실행.
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from notifier.telegram import send_telegram
+from ledger.config import ROUND_TRIP_COST_PCT
 
 
 def verify_signs(ledger_df: pd.DataFrame) -> tuple[bool, list]:
@@ -37,10 +38,16 @@ def verify_magnitude(ledger_df: pd.DataFrame, tp_pct: float = 0.10, sl_pct: floa
     for _, row in ledger_df.iterrows():
         nr = row.get("net_return_pct", 0)
         ex = row.get("exit_type", "")
-        if ex == "tp" and abs(nr - tp_pct + 0.002) > 0.02:  # cost ~0.2%
-            issues.append(f"{row['coin']}: TP magnitude {nr:+.4f} (expected ~{tp_pct - 0.002:+.4f})")
-        elif ex == "sl" and abs(nr - (-sl_pct) + 0.002) > 0.02:
-            issues.append(f"{row['coin']}: SL magnitude {nr:+.4f} (expected ~{-sl_pct - 0.002:+.4f})")
+        if ex == "tp" and abs(nr - tp_pct + ROUND_TRIP_COST_PCT) > 0.02:
+            issues.append(
+                f"{row['coin']}: TP magnitude {nr:+.4f} "
+                f"(expected ~{tp_pct - ROUND_TRIP_COST_PCT:+.4f})"
+            )
+        elif ex == "sl" and abs(nr - (-sl_pct) + ROUND_TRIP_COST_PCT) > 0.02:
+            issues.append(
+                f"{row['coin']}: SL magnitude {nr:+.4f} "
+                f"(expected ~{-sl_pct - ROUND_TRIP_COST_PCT:+.4f})"
+            )
     return len(issues) == 0, issues
 
 

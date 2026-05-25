@@ -39,8 +39,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from data.database import list_markets, load_candles
+from ledger.shadow import append_shadow_ledger
 from notifier.format import format_preopen_beta
 from notifier.telegram import send_telegram
+from ops.decision_policy import active_only, apply_preopen_policy, decision_counts
+from ops.decision_policy import POLICY_ID, POLICY_SUMMARY, POLICY_VERSION
+from ops.recommendation_quality import (
+    DEFAULT_META_MODEL_DIR,
+    META_POLICY_ID,
+    META_POLICY_VERSION,
+    apply_recommendation_quality,
+    load_channel_history,
+    load_trained_meta_model,
+)
 from signals.features import assemble_training_panel
 from signals.labels_preopen import PREOPEN_HEADS
 from signals.precursors import build_15m_precursor
@@ -48,9 +59,21 @@ from signals.precursors import build_15m_precursor
 
 CKPT_DIR = "signals/models/ckpt/preopen_v1"
 PAPER_LEDGER_PATH = "output/paper_ledger_preopen.csv"
+SHADOW_LEDGER_PATH = "output/shadow_ledger_preopen.csv"
 
 PAPER_LEDGER_COLS = [
     "date", "coin", "btc_regime",
+    "decision", "idea_id", "setup_quality", "decision_reason",
+    "policy_id", "policy_version",
+    "base_decision", "meta_policy_id", "meta_policy_version",
+    "meta_decision", "meta_reason",
+    "trained_model_id", "trained_model_version", "trained_model_status",
+    "trained_model_p_win", "trained_model_threshold",
+    "confidence_score", "confidence_tier",
+    "evidence_key", "evidence_n_closed", "evidence_net_pnl_sum_pct",
+    "evidence_avg_net_pnl_pct", "evidence_tp5_hit_rate_pct", "evidence_win_rate_pct",
+    "calibrated_hit_pct", "calibrated_bucket", "calibration_source", "expected_edge_pct",
+    "source_rank",
     "entry_price_proxy",
     "p_first15_3pct", "p_first15_5pct",
     "p_first30_3pct", "p_first30_5pct",
@@ -99,6 +122,11 @@ def is_preopen_window(asof: pd.Timestamp) -> bool:
     if asof.hour == 9 and asof.minute <= 10:
         return True
     return False
+
+
+def should_send_telegram(send_tg: bool, alerts: pd.DataFrame, send_silence: bool = False) -> bool:
+    """Telegram is for actionable ACTIVE pre-open recommendations by default."""
+    return send_tg and (len(alerts) > 0 or send_silence)
 
 
 def build_panel_for_asof(upbit_d1: str, upbit_15m: str, binance_d1: str,
@@ -170,10 +198,16 @@ def main():
     parser.add_argument("--universe", default="top100", choices=["top50", "top100", "all"])
     parser.add_argument("--no-telegram", action="store_true",
                         help="default: telegram ON. specify to disable.")
+    parser.add_argument("--send-silence-telegram", action="store_true",
+                        help="Send a Telegram silence/empty message when no ACTIVE recommendation exists")
+    parser.add_argument("--disable-meta-filter", action="store_true",
+                        help="Disable historical recommendation-quality demotion")
     parser.add_argument("--allow-late-run", action="store_true",
                         help="Allow telegram/ledger outside 08:45-08:59 for intentional manual tests.")
     parser.add_argument("--out-dir", default="output")
     parser.add_argument("--paper-ledger", default=PAPER_LEDGER_PATH)
+    parser.add_argument("--shadow-ledger", default=SHADOW_LEDGER_PATH)
+    parser.add_argument("--meta-model-dir", default=DEFAULT_META_MODEL_DIR)
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -248,20 +282,32 @@ def main():
         krw["p_first30_3pct"] * 0.4 + krw["p_first30_5pct"] * 0.8 +
         krw["p_first1h_3pct"] * 0.3 + krw["p_first1h_5pct"] * 0.6
     )
-    alerts = krw.sort_values("composite", ascending=False).head(args.top_k).copy()
-    alerts["alert_rank"] = range(1, len(alerts) + 1)
-    log.info(f"alerts: {len(alerts)}")
+    candidates = krw.sort_values("composite", ascending=False).head(args.top_k).copy()
+    candidates["alert_rank"] = range(1, len(candidates) + 1)
+    log.info(f"candidates: {len(candidates)}")
 
     # BTC regime
     btc_row = panel[panel["market"] == "KRW-BTC"]
     btc_regime = str(btc_row["btc_regime"].iloc[0]) if len(btc_row) else "unknown"
 
-    # Bear regime silence — detector_v1 패턴 일관성 (2026-05-20 추가).
-    # 5/8~5/20 라이브 결과 preopen 88건 100% bear_quiet, cum PnL -45%.
-    # 학습 가정 (BTC bull conditional) 과 운영 align.
-    if btc_regime.startswith("bear"):
-        log.warning(f"bear regime ({btc_regime}) — alerts silence (학습 분포 밖)")
-        alerts = alerts.iloc[0:0]
+    # Decision policy — preopen 은 live edge 가 약해 기본 WATCH_ONLY 중심.
+    decisions = apply_preopen_policy(candidates, btc_regime=btc_regime)
+    history = load_channel_history(args.paper_ledger, args.shadow_ledger, "preopen")
+    trained_meta = load_trained_meta_model(args.meta_model_dir)
+    decisions = apply_recommendation_quality(
+        decisions,
+        history,
+        asof,
+        "preopen",
+        enabled=not args.disable_meta_filter,
+        trained_model=trained_meta,
+    )
+    counts = decision_counts(decisions)
+    alerts = active_only(decisions)
+    log.info(f"decision policy: {counts} → active alerts: {len(alerts)}")
+    if len(decisions) and "confidence_tier" in decisions.columns:
+        meta_counts = decisions["confidence_tier"].fillna("").astype(str).value_counts().to_dict()
+        log.info(f"recommendation quality: {meta_counts}")
 
     # Save log JSON
     log_path = out_dir / f"preopen_log_{date_str}.json"
@@ -269,14 +315,84 @@ def main():
         "asof": asof.isoformat(),
         "btc_regime": btc_regime,
         "universe": args.universe,
+        "n_candidates": int(len(decisions)),
+        "policy": {
+            "policy_id": POLICY_ID,
+            "policy_version": POLICY_VERSION,
+            "summary": POLICY_SUMMARY,
+            "meta_policy_id": META_POLICY_ID,
+            "meta_policy_version": META_POLICY_VERSION,
+            "meta_filter_enabled": not args.disable_meta_filter,
+            "trained_meta_model": trained_meta.get("meta", {}) if trained_meta else {"available": False},
+        },
+        "decision_counts": counts,
         "n_alerts": int(len(alerts)),
         "alerts": [
             {"coin": r["market"],
+             "decision": r.get("decision", ""),
+             "base_decision": r.get("base_decision", ""),
+             "idea_id": r.get("idea_id", ""),
+             "setup_quality": r.get("setup_quality", ""),
+             "decision_reason": r.get("decision_reason", ""),
+             "meta_reason": r.get("meta_reason", ""),
+             "trained_model_status": r.get("trained_model_status", ""),
+             "trained_model_p_win": float(r.get("trained_model_p_win", np.nan)),
+             "trained_model_threshold": float(r.get("trained_model_threshold", np.nan)),
+             "confidence_score": float(r.get("confidence_score", np.nan)),
+             "confidence_tier": r.get("confidence_tier", ""),
+             "evidence_key": r.get("evidence_key", ""),
+             "evidence_n_closed": float(r.get("evidence_n_closed", np.nan)),
+             "evidence_avg_net_pnl_pct": float(r.get("evidence_avg_net_pnl_pct", np.nan)),
+             "evidence_tp5_hit_rate_pct": float(r.get("evidence_tp5_hit_rate_pct", np.nan)),
+             "calibrated_hit_pct": float(r.get("calibrated_hit_pct", np.nan)),
+             "calibrated_bucket": float(r.get("calibrated_bucket", np.nan)),
+             "calibration_source": r.get("calibration_source", ""),
+             "expected_edge_pct": float(r.get("expected_edge_pct", np.nan)),
+             "source_rank": int(r.get("source_rank", 0)),
+             "policy_id": r.get("policy_id", POLICY_ID),
+             "policy_version": r.get("policy_version", POLICY_VERSION),
              "p_first15_3pct": float(r["p_first15_3pct"]),
              "p_first15_5pct": float(r["p_first15_5pct"]),
              "p_first1h_3pct": float(r["p_first1h_3pct"]),
-             "composite": float(r["composite"])}
+             "p_first1h_5pct": float(r.get("p_first1h_5pct", 0)),
+             "composite": float(r["composite"]),
+             "entry_price_proxy": float(r.get("close", np.nan))}
             for _, r in alerts.iterrows()
+        ],
+        "candidates": [
+            {"coin": r["market"],
+             "decision": r.get("decision", ""),
+             "base_decision": r.get("base_decision", ""),
+             "blocked_reason": r.get("blocked_reason", ""),
+             "decision_reason": r.get("decision_reason", ""),
+             "meta_reason": r.get("meta_reason", ""),
+             "trained_model_status": r.get("trained_model_status", ""),
+             "trained_model_p_win": float(r.get("trained_model_p_win", np.nan)),
+             "trained_model_threshold": float(r.get("trained_model_threshold", np.nan)),
+             "idea_id": r.get("idea_id", ""),
+             "setup_quality": r.get("setup_quality", ""),
+             "source_rank": int(r.get("source_rank", 0)),
+             "confidence_score": float(r.get("confidence_score", np.nan)),
+             "confidence_tier": r.get("confidence_tier", ""),
+             "evidence_key": r.get("evidence_key", ""),
+             "evidence_n_closed": float(r.get("evidence_n_closed", np.nan)),
+             "evidence_net_pnl_sum_pct": float(r.get("evidence_net_pnl_sum_pct", np.nan)),
+             "evidence_avg_net_pnl_pct": float(r.get("evidence_avg_net_pnl_pct", np.nan)),
+             "evidence_tp5_hit_rate_pct": float(r.get("evidence_tp5_hit_rate_pct", np.nan)),
+             "evidence_win_rate_pct": float(r.get("evidence_win_rate_pct", np.nan)),
+             "calibrated_hit_pct": float(r.get("calibrated_hit_pct", np.nan)),
+             "calibrated_bucket": float(r.get("calibrated_bucket", np.nan)),
+             "calibration_source": r.get("calibration_source", ""),
+             "expected_edge_pct": float(r.get("expected_edge_pct", np.nan)),
+             "policy_id": r.get("policy_id", POLICY_ID),
+             "policy_version": r.get("policy_version", POLICY_VERSION),
+             "p_first15_3pct": float(r.get("p_first15_3pct", 0)),
+             "p_first15_5pct": float(r.get("p_first15_5pct", 0)),
+             "p_first1h_3pct": float(r.get("p_first1h_3pct", 0)),
+             "p_first1h_5pct": float(r.get("p_first1h_5pct", 0)),
+             "composite": float(r["composite"]),
+             "entry_price_proxy": float(r.get("close", np.nan))}
+            for _, r in decisions.iterrows()
         ],
     }
     with open(log_path, "w") as f:
@@ -290,6 +406,35 @@ def main():
             "date": asof.strftime("%Y-%m-%d"),
             "coin": r["market"],
             "btc_regime": r.get("btc_regime", "unknown"),
+            "decision": r.get("decision", "ACTIVE"),
+            "idea_id": r.get("idea_id", ""),
+            "setup_quality": r.get("setup_quality", ""),
+            "decision_reason": r.get("decision_reason", ""),
+            "policy_id": r.get("policy_id", POLICY_ID),
+            "policy_version": r.get("policy_version", POLICY_VERSION),
+            "base_decision": r.get("base_decision", r.get("decision", "")),
+            "meta_policy_id": r.get("meta_policy_id", META_POLICY_ID),
+            "meta_policy_version": r.get("meta_policy_version", META_POLICY_VERSION),
+            "meta_decision": r.get("meta_decision", r.get("decision", "")),
+            "meta_reason": r.get("meta_reason", ""),
+            "trained_model_id": r.get("trained_model_id", ""),
+            "trained_model_version": r.get("trained_model_version", ""),
+            "trained_model_status": r.get("trained_model_status", ""),
+            "trained_model_p_win": float(r.get("trained_model_p_win", np.nan)),
+            "trained_model_threshold": float(r.get("trained_model_threshold", np.nan)),
+            "confidence_score": float(r.get("confidence_score", np.nan)),
+            "confidence_tier": r.get("confidence_tier", ""),
+            "evidence_key": r.get("evidence_key", ""),
+            "evidence_n_closed": float(r.get("evidence_n_closed", np.nan)),
+            "evidence_net_pnl_sum_pct": float(r.get("evidence_net_pnl_sum_pct", np.nan)),
+            "evidence_avg_net_pnl_pct": float(r.get("evidence_avg_net_pnl_pct", np.nan)),
+            "evidence_tp5_hit_rate_pct": float(r.get("evidence_tp5_hit_rate_pct", np.nan)),
+            "evidence_win_rate_pct": float(r.get("evidence_win_rate_pct", np.nan)),
+            "calibrated_hit_pct": float(r.get("calibrated_hit_pct", np.nan)),
+            "calibrated_bucket": float(r.get("calibrated_bucket", np.nan)),
+            "calibration_source": r.get("calibration_source", ""),
+            "expected_edge_pct": float(r.get("expected_edge_pct", np.nan)),
+            "source_rank": float(r.get("source_rank", r["alert_rank"])),
             "entry_price_proxy": float(r.get("close", np.nan)),
             "p_first15_3pct": float(r["p_first15_3pct"]),
             "p_first15_5pct": float(r["p_first15_5pct"]),
@@ -315,23 +460,30 @@ def main():
             "hit_first1h_3pct": np.nan, "hit_first1h_5pct": np.nan,
             "status": "entered", "notes": "",
         })
-    if (in_window or args.allow_late_run) and rows:
-        new_df = pd.DataFrame(rows)[PAPER_LEDGER_COLS]
-        p = Path(args.paper_ledger)
-        if p.exists():
-            existing = pd.read_csv(p)
-            keys = set(zip(existing["date"], existing["coin"]))
-            mask = ~new_df.apply(lambda r: (r["date"], r["coin"]) in keys, axis=1)
-            to_append = new_df[mask]
-            if len(to_append) > 0:
-                pd.concat([existing, to_append], ignore_index=True).to_csv(p, index=False)
-                log.info(f"appended {len(to_append)} rows to {p}")
+    if in_window or args.allow_late_run:
+        n_shadow = append_shadow_ledger(decisions, asof, args.shadow_ledger, "preopen")
+        log.info(f"shadow_ledger: {n_shadow} new rows → {args.shadow_ledger}")
+        if rows:
+            new_df = pd.DataFrame(rows)[PAPER_LEDGER_COLS]
+            p = Path(args.paper_ledger)
+            if p.exists():
+                existing = pd.read_csv(p)
+                keys = set(zip(existing["date"], existing["coin"]))
+                mask = ~new_df.apply(lambda r: (r["date"], r["coin"]) in keys, axis=1)
+                to_append = new_df[mask]
+                if len(to_append) > 0:
+                    pd.concat([existing, to_append], ignore_index=True).to_csv(p, index=False)
+                    log.info(f"appended {len(to_append)} rows to {p}")
+                else:
+                    log.info(f"paper_ledger: 0 new rows → {p}")
+            else:
+                p.parent.mkdir(parents=True, exist_ok=True)
+                new_df.to_csv(p, index=False)
+                log.info(f"created {p} with {len(new_df)} rows")
         else:
-            p.parent.mkdir(parents=True, exist_ok=True)
-            new_df.to_csv(p, index=False)
-            log.info(f"created {p} with {len(new_df)} rows")
+            log.info(f"paper_ledger: 0 active rows → {args.paper_ledger}")
     else:
-        log.warning("paper ledger append skipped outside pre-open window")
+        log.warning("paper/shadow ledger append skipped outside pre-open window")
 
     # Build telegram message — formatter 통일 (notifier/format.py)
     msg = format_preopen_beta(
@@ -343,10 +495,16 @@ def main():
     )
     print(msg)
 
-    if send_tg:
+    send_active_message = should_send_telegram(send_tg, alerts, args.send_silence_telegram)
+    if send_tg and len(alerts) == 0 and not args.send_silence_telegram:
+        log.info("telegram skipped: no ACTIVE recommendation; details kept in logs/dashboard")
+
+    if send_active_message:
         try:
-            send_telegram(msg)
-            log.info("telegram sent")
+            if send_telegram(msg):
+                log.info("telegram sent")
+            else:
+                log.error("telegram not sent")
         except Exception as e:
             log.error(f"telegram fail: {e}")
 

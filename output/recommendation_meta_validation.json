@@ -1,0 +1,199 @@
+{
+  "model_id": "recommendation_quality_meta_label_v1",
+  "model_version": "2026-05-25.1",
+  "built_at": "2026-05-25T23:25:10",
+  "deployable": false,
+  "reason": "selected holdout too small: 1 < 5",
+  "target": "net_win",
+  "threshold": 0.74,
+  "n_samples": 220,
+  "n_train": 179,
+  "n_holdout": 41,
+  "date_range": {
+    "start": "2025-11-06",
+    "end": "2026-05-20",
+    "holdout_start": "2026-05-17",
+    "holdout_end": "2026-05-20"
+  },
+  "features": [
+    "expected_edge_pct",
+    "calibrated_hit_pct",
+    "source_rank",
+    "alert_rank",
+    "composite_score",
+    "p_h2_3pct_4h",
+    "p_h6_5pct_24h",
+    "p_h5_20pct_tail",
+    "p_first15_3pct",
+    "p_first15_5pct",
+    "p_first30_3pct",
+    "p_first30_5pct",
+    "p_first1h_3pct",
+    "p_first1h_5pct",
+    "log_return_1d_pct",
+    "atr_pct_14_pct",
+    "return_5d_rank",
+    "return_7d_rank",
+    "vol_5d_rank",
+    "roc_3d_rank",
+    "vol5_rank",
+    "return5_rank",
+    "channel",
+    "setup_quality",
+    "btc_regime",
+    "btc_context",
+    "calibration_source"
+  ],
+  "numeric_features": [
+    "expected_edge_pct",
+    "calibrated_hit_pct",
+    "source_rank",
+    "alert_rank",
+    "composite_score",
+    "p_h2_3pct_4h",
+    "p_h6_5pct_24h",
+    "p_h5_20pct_tail",
+    "p_first15_3pct",
+    "p_first15_5pct",
+    "p_first30_3pct",
+    "p_first30_5pct",
+    "p_first1h_3pct",
+    "p_first1h_5pct",
+    "log_return_1d_pct",
+    "atr_pct_14_pct",
+    "return_5d_rank",
+    "return_7d_rank",
+    "vol_5d_rank",
+    "roc_3d_rank",
+    "vol5_rank",
+    "return5_rank"
+  ],
+  "categorical_features": [
+    "channel",
+    "setup_quality",
+    "btc_regime",
+    "btc_context",
+    "calibration_source"
+  ],
+  "train_metrics": {
+    "n": 179,
+    "positive_rate_pct": 49.162011,
+    "brier": 0.202955,
+    "auc": 0.751748,
+    "average_precision": 0.73019,
+    "net_pnl_sum_pct": -26.674566,
+    "avg_net_pnl_pct": -0.14902
+  },
+  "holdout_metrics": {
+    "n": 41,
+    "positive_rate_pct": 24.390244,
+    "brier": 0.227971,
+    "auc": 0.516129,
+    "average_precision": 0.36517,
+    "net_pnl_sum_pct": -59.195875,
+    "avg_net_pnl_pct": -1.443802
+  },
+  "train_threshold_stats": {
+    "threshold": 0.74,
+    "n_selected": 31,
+    "selected_rate_pct": 17.318436,
+    "precision_pct": 80.645161,
+    "net_pnl_sum_pct": 91.135487,
+    "avg_net_pnl_pct": 2.939854
+  },
+  "holdout_threshold_stats": {
+    "threshold": 0.74,
+    "n_selected": 1,
+    "selected_rate_pct": 2.439024,
+    "precision_pct": 100.0,
+    "net_pnl_sum_pct": 4.85,
+    "avg_net_pnl_pct": 4.85
+  },
+  "top_coefficients": [
+    {
+      "feature": "cat__setup_quality_A_TRIPLE",
+      "coef": 0.801492
+    },
+    {
+      "feature": "num__alert_rank",
+      "coef": 0.710883
+    },
+    {
+      "feature": "num__p_h6_5pct_24h",
+      "coef": -0.464457
+    },
+    {
+      "feature": "num__return5_rank",
+      "coef": -0.463985
+    },
+    {
+      "feature": "num__p_h2_3pct_4h",
+      "coef": 0.447787
+    },
+    {
+      "feature": "cat__setup_quality_C_PRIMARY",
+      "coef": -0.394152
+    },
+    {
+      "feature": "num__p_first30_3pct",
+      "coef": 0.367814
+    },
+    {
+      "feature": "num__p_h5_20pct_tail",
+      "coef": 0.320323
+    },
+    {
+      "feature": "num__composite_score",
+      "coef": 0.30412
+    },
+    {
+      "feature": "cat__setup_quality_B_S03",
+      "coef": -0.294413
+    },
+    {
+      "feature": "num__p_first1h_5pct",
+      "coef": 0.252463
+    },
+    {
+      "feature": "num__return_5d_rank",
+      "coef": 0.237198
+    },
+    {
+      "feature": "num__vol_5d_rank",
+      "coef": 0.209111
+    },
+    {
+      "feature": "num__atr_pct_14_pct",
+      "coef": -0.205032
+    },
+    {
+      "feature": "num__p_first15_5pct",
+      "coef": -0.197585
+    },
+    {
+      "feature": "num__log_return_1d_pct",
+      "coef": 0.193064
+    },
+    {
+      "feature": "num__p_first30_5pct",
+      "coef": -0.186865
+    },
+    {
+      "feature": "cat__channel_distribution",
+      "coef": 0.112927
+    },
+    {
+      "feature": "num__return_7d_rank",
+      "coef": -0.096627
+    },
+    {
+      "feature": "num__p_first1h_3pct",
+      "coef": -0.084458
+    }
+  ],
+  "notes": [
+    "Time holdout is used to reduce overfit risk.",
+    "Artifact is used for live demotion only when deployable=true.",
+    "Base candidate generators are unchanged."
+  ]
+}

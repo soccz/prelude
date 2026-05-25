@@ -32,6 +32,9 @@ from data.database import load_candles
 from scripts.predict_preopen_trigger import PAPER_LEDGER_COLS
 
 
+DEFAULT_SHADOW_LEDGER = "output/shadow_ledger_preopen.csv"
+
+
 def compute_realized_preopen(coin: str, label_date: pd.Timestamp,
                               candles_15m_db: str = "data/upbit_15m.db") -> dict:
     """coin 의 label_date 09:00 첫 N 15m bars 로 realized 계산."""
@@ -96,20 +99,22 @@ def compute_realized_preopen(coin: str, label_date: pd.Timestamp,
     }
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--paper-ledger", default="output/paper_ledger_preopen.csv")
-    parser.add_argument("--upbit-15m", default="data/upbit_15m.db")
-    parser.add_argument("--asof", type=str, help="기준 시점 (default=now)")
-    parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
-
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-    log = logging.getLogger("close-preopen")
-
-    p = Path(args.paper_ledger)
+def close_ledger_file(
+    ledger_path: str,
+    candles_15m_db: str,
+    asof: pd.Timestamp,
+    dry_run: bool,
+    log: logging.Logger,
+    *,
+    required: bool = True,
+) -> None:
+    p = Path(ledger_path)
     if not p.exists():
-        log.warning(f"ledger missing (no entries yet): {p}")
+        msg = f"ledger missing (no entries yet): {p}"
+        if required:
+            log.warning(msg)
+        else:
+            log.info(msg)
         return
 
     ledger = pd.read_csv(p)
@@ -120,7 +125,6 @@ def main():
     ledger["notes"] = ledger["notes"].fillna("").astype(str)
     log.info(f"ledger: {len(ledger)} rows total")
 
-    asof = pd.Timestamp(args.asof) if args.asof else pd.Timestamp.now()
     # For pre-open, can close SAME DAY (15m bar at 09:00 closes at 09:15, available immediately).
     # cutoff = asof.date() (today is closeable since 09:30 service runs after 09:15+).
     cutoff_date = asof.date()
@@ -141,7 +145,7 @@ def main():
         if entry_date > cutoff_date:
             continue
 
-        result = compute_realized_preopen(r["coin"], entry_date, args.upbit_15m)
+        result = compute_realized_preopen(r["coin"], entry_date, candles_15m_db)
         if result["status"] == "no_data":
             ledger.at[idx, "status"] = "no_data"
             ledger.at[idx, "notes"] = result.get("notes", "no 15m data")
@@ -167,7 +171,7 @@ def main():
 
     log.info(f"  closed: {n_closed}, no_data: {n_no_data}")
 
-    if not args.dry_run:
+    if not dry_run:
         ordered = [c for c in PAPER_LEDGER_COLS if c in ledger.columns]
         extras = [c for c in ledger.columns if c not in ordered]
         ledger = ledger[ordered + extras]
@@ -181,6 +185,26 @@ def main():
         for h in ["h15_3", "h15_5", "h1h_3", "h1h_5"]:
             r = df[h].dropna().mean()
             print(f"  hit_{h}: {r*100:.1f}% ({int(df[h].sum())}/{len(df[h].dropna())})")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--paper-ledger", default="output/paper_ledger_preopen.csv")
+    parser.add_argument("--shadow-ledger", default=DEFAULT_SHADOW_LEDGER)
+    parser.add_argument("--skip-shadow-ledger", action="store_true")
+    parser.add_argument("--upbit-15m", default="data/upbit_15m.db")
+    parser.add_argument("--asof", type=str, help="기준 시점 (default=now)")
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    log = logging.getLogger("close-preopen")
+
+    asof = pd.Timestamp(args.asof) if args.asof else pd.Timestamp.now()
+    close_ledger_file(args.paper_ledger, args.upbit_15m, asof, args.dry_run, log, required=True)
+
+    if not args.skip_shadow_ledger and Path(args.shadow_ledger) != Path(args.paper_ledger):
+        close_ledger_file(args.shadow_ledger, args.upbit_15m, asof, args.dry_run, log, required=False)
 
 
 if __name__ == "__main__":

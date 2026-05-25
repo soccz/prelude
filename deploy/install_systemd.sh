@@ -6,11 +6,12 @@
 #   sudo bash deploy/install_systemd.sh
 #
 # 결과:
-#   - prelude-distribution.service  + .timer  (KST 09:05)
-#   - prelude-close.service          + .timer  (KST 09:30)
-#   - 둘 다 enable + start
-#   - close-out timer 만 부팅 후 누락 실행 catch up
-#     (distribution alert 는 늦은 catch-up 이 paper ledger 를 오염시켜 Persistent=false)
+#   - prelude-preopen.service        + .timer  (KST 08:50, ACTIVE-only telegram)
+#   - prelude-distribution.service   + .timer  (KST 09:05, ACTIVE-only telegram)
+#   - prelude-close.service          + .timer  (KST 09:30, distribution close)
+#   - prelude-preopen-close.service  + .timer  (KST 10:05, preopen close)
+#   - prelude-publish-dashboard      + .timer  (KST 10:10)
+#   - signal timers 는 늦은 catch-up 이 paper ledger 를 오염시켜 Persistent=false
 
 set -euo pipefail
 

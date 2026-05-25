@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prelude Idea Validation</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --text: #17202a;
+      --muted: #667085;
+      --line: #d9dee8;
+      --good: #0f8a5f;
+      --bad: #b42318;
+      --watch: #9a6700;
+    }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      padding: 28px 32px 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+    h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: 0; }
+    h2 { margin: 0 0 6px; font-size: 20px; letter-spacing: 0; }
+    main { padding: 24px 32px 40px; max-width: 1440px; margin: 0 auto; }
+    .muted { color: var(--muted); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-left-width: 5px;
+      border-radius: 8px;
+      padding: 18px;
+    }
+    .card.good { border-left-color: var(--good); }
+    .card.bad { border-left-color: var(--bad); }
+    .card.watch { border-left-color: var(--watch); }
+    .eyebrow { color: var(--muted); text-transform: uppercase; font-size: 12px; font-weight: 700; }
+    .action { margin: 0 0 14px; font-weight: 700; }
+    h3 { margin: 12px 0 4px; font-size: 14px; letter-spacing: 0; }
+    dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; margin: 0 0 12px; }
+    dl div { min-width: 0; }
+    dt { color: var(--muted); font-size: 12px; }
+    dd { margin: 2px 0 0; font-weight: 700; }
+    section.block { margin-top: 24px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+    th { color: var(--muted); font-size: 12px; text-transform: uppercase; }
+    ul { margin: 10px 0 0; padding-left: 18px; color: var(--muted); }
+    a { color: inherit; }
+    .two { display: grid; grid-template-columns: minmax(280px, 0.85fr) minmax(320px, 1.15fr); gap: 22px; }
+    .statusline { display: flex; align-items: center; gap: 10px; margin: 10px 0 16px; flex-wrap: wrap; }
+    .pill { display: inline-flex; align-items: center; min-height: 24px; padding: 0 10px; border-radius: 999px; font-size: 12px; font-weight: 800; }
+    .pill.good { color: var(--good); background: #e8f7ef; }
+    .pill.watch { color: var(--watch); background: #fff5d6; }
+    @media (max-width: 820px) { .two { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Prelude Idea Validation</h1>
+    <div class="muted">source generated: 2026-05-25T23:25:21 | html generated: 2026-05-25T23:30:55 | cost: 0.15%</div>
+  </header>
+  <main>
+    
+    <section class="block">
+      <h2>Model Card</h2>
+      <div class="two">
+        <div>
+          <p><strong>prelude AI quant recommendation assistant</strong></p>
+          <p class="muted">Personal KRW crypto trading recommendations; no automatic real-money orders.</p>
+          <dl>
+            <div><dt>version</dt><dd>policy-gated-beta-2026-05-25</dd></div>
+            <div><dt>closed evidence</dt><dd>220</dd></div>
+            <div><dt>net</dt><dd>-85.87%p</dd></div>
+            <div><dt>TP5 hit</dt><dd>28.64%</dd></div>
+          </dl>
+          <p class="muted"><strong>Trained meta model:</strong> recommendation_quality_meta_label_v1 (shadow) · n=220 · reason: selected holdout too small: 1 &lt; 5</p>
+        </div>
+        <div>
+          <h3>Decision Layers</h3>
+          <ul><li>XGBoost candidate generation</li><li>setup/regime decision policy</li><li>historical recommendation-quality meta-filter</li><li>paper/shadow ledger validation</li><li>policy gate for promotion/demotion</li></ul>
+          <h3>Risk Controls</h3>
+          <ul><li>look-ahead guard by as-of data cut</li><li>ACTIVE-only Telegram; WATCH/SILENCE retained for dashboard evidence</li><li>0.15% round-trip transaction cost in reports</li><li>paper/shadow close-out before dashboard publication</li><li>no automatic exchange order path</li></ul>
+          <h3>References</h3>
+          <ul><li><a href="https://www.davidhbailey.com/dhbpapers/deflated-sharpe.pdf">Bailey &amp; Lopez de Prado - Deflated Sharpe Ratio / backtest overfitting</a></li><li><a href="https://www.quantresearch.org/Publications.htm">Lopez de Prado publications - financial ML validation methods</a></li><li><a href="https://shap-community.readthedocs.io/en/latest/generated/shap.explainers.Tree.html">Tree SHAP documentation - explainable tree model attribution</a></li></ul>
+        </div>
+      </div>
+    </section>
+    
+    
+    <section class="block">
+      <h2>Recommendation Accuracy</h2>
+      <div class="statusline">
+        <span class="pill watch">SHADOW</span>
+        <span class="muted">selected holdout too small: 1 &lt; 5</span>
+      </div>
+      <div class="two">
+        <div>
+          <h3>Holdout Gate</h3>
+          <table>
+            <tbody><tr><td>holdout n</td><td>41.00</td></tr>
+<tr><td>positive rate</td><td>24.39%</td></tr>
+<tr><td>AUC</td><td>0.52</td></tr>
+<tr><td>average precision</td><td>0.37</td></tr>
+<tr><td>Brier</td><td>0.23</td></tr>
+<tr><td>all holdout net</td><td>-59.20%p</td></tr>
+<tr><td>selected n</td><td>1.00</td></tr>
+<tr><td>selected precision</td><td>100.00%</td></tr>
+<tr><td>selected net</td><td>4.85%p</td></tr>
+<tr><td>selected avg</td><td>4.85%p</td></tr></tbody>
+          </table>
+        </div>
+        <div>
+          <h3>Top Coefficients</h3>
+          <table>
+            <thead><tr><th>feature</th><th>coef</th></tr></thead>
+            <tbody><tr><td>cat__setup_quality_A_TRIPLE</td><td>0.8015</td></tr>
+<tr><td>num__alert_rank</td><td>0.7109</td></tr>
+<tr><td>num__p_h6_5pct_24h</td><td>-0.4645</td></tr>
+<tr><td>num__return5_rank</td><td>-0.4640</td></tr>
+<tr><td>num__p_h2_3pct_4h</td><td>0.4478</td></tr>
+<tr><td>cat__setup_quality_C_PRIMARY</td><td>-0.3942</td></tr>
+<tr><td>num__p_first30_3pct</td><td>0.3678</td></tr>
+<tr><td>num__p_h5_20pct_tail</td><td>0.3203</td></tr>
+<tr><td>num__composite_score</td><td>0.3041</td></tr>
+<tr><td>cat__setup_quality_B_S03</td><td>-0.2944</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+    
+    <div class="grid">
+      
+            <section class="card good">
+              <div class="eyebrow">distribution</div>
+              <h2>PROMOTE_PAPER</h2>
+              <p class="action">ADOPT_ACTIVE_FILTER_IN_PAPER_AND_ALERTS</p>
+              <dl>
+                <div><dt>confidence</dt><dd>MEDIUM_REPLAY_ONLY</dd></div>
+                <div><dt>replay closed</dt><dd>32</dd></div>
+                <div><dt>replay net</dt><dd>71.75%p</dd></div>
+                <div><dt>delta</dt><dd>116.77%p</dd></div>
+                <div><dt>CI low</dt><dd>0.89%p</dd></div>
+                <div><dt>late avg</dt><dd>1.10%p</dd></div>
+              </dl>
+              <ul><li>replay active filter is positive overall, positive in late split, and bootstrap avg CI is above zero</li><li>needs future shadow/live closed samples for high confidence</li></ul>
+            </section>
+            
+
+            <section class="card bad">
+              <div class="eyebrow">preopen</div>
+              <h2>DEMOTE</h2>
+              <p class="action">WATCH_ONLY</p>
+              <dl>
+                <div><dt>confidence</dt><dd>MEDIUM_REPLAY_ONLY</dd></div>
+                <div><dt>replay closed</dt><dd>0</dd></div>
+                <div><dt>replay net</dt><dd>—</dd></div>
+                <div><dt>delta</dt><dd>40.84%p</dd></div>
+                <div><dt>CI low</dt><dd>—</dd></div>
+                <div><dt>late avg</dt><dd>—</dd></div>
+              </dl>
+              <ul><li>observed active preopen book is materially negative</li></ul>
+            </section>
+            
+    </div>
+    <section class="block">
+      <h2>Recommendation Quality</h2>
+      <table>
+        <thead><tr><th>channel</th><th>tier</th><th>candidates</th><th>avg conf</th><th>closed</th><th>net</th><th>TP5 hit</th></tr></thead>
+        <tbody><tr><td colspan="7" class="muted">confidence_tier is not populated yet; next prediction run will add meta-filter evidence.</td></tr></tbody>
+      </table>
+    </section>
+    <section class="block">
+      <h2>Policy Replay</h2>
+      <table>
+        <thead><tr><th>channel</th><th>observed n</th><th>observed net</th><th>replay n</th><th>replay net</th><th>delta</th></tr></thead>
+        <tbody><tr><td>all</td><td>220</td><td>-85.87%p</td><td>32</td><td>71.75%p</td><td>157.62%p</td></tr>
+<tr><td>distribution</td><td>132</td><td>-45.03%p</td><td>32</td><td>71.75%p</td><td>116.77%p</td></tr>
+<tr><td>preopen</td><td>88</td><td>-40.84%p</td><td>0</td><td>—</td><td>40.84%p</td></tr></tbody>
+      </table>
+    </section>
+    <section class="block">
+      <h2>Idea Attribution</h2>
+      <table>
+        <thead><tr><th>channel</th><th>idea</th><th>setup</th><th>regime</th><th>n</th><th>TP5 hit</th><th>net</th><th>avg</th><th>tier</th></tr></thead>
+        <tbody><tr><td>distribution</td><td>legacy_distribution_a_triple_bear_quiet_v1</td><td>A_TRIPLE</td><td>bear_quiet</td><td>30</td><td>63.33%</td><td>62.05%p</td><td>2.07%p</td><td>PROMOTE_CANDIDATE</td></tr>
+<tr><td>distribution</td><td>legacy_distribution_a_triple_bull_volatile_v1</td><td>A_TRIPLE</td><td>bull_volatile</td><td>2</td><td>100.00%</td><td>9.70%p</td><td>4.85%p</td><td>COLLECT</td></tr>
+<tr><td>distribution</td><td>legacy_distribution_b_s03_bear_quiet_v1</td><td>B_S03</td><td>bear_quiet</td><td>24</td><td>45.83%</td><td>-12.59%p</td><td>-0.52%p</td><td>DEMOTE_CANDIDATE</td></tr>
+<tr><td>distribution</td><td>legacy_distribution_c_primary_bull_volatile_v1</td><td>C_PRIMARY</td><td>bull_volatile</td><td>6</td><td>33.33%</td><td>-22.48%p</td><td>-3.75%p</td><td>COLLECT</td></tr>
+<tr><td>distribution</td><td>legacy_distribution_c_primary_bear_quiet_v1</td><td>C_PRIMARY</td><td>bear_quiet</td><td>70</td><td>22.86%</td><td>-81.71%p</td><td>-1.17%p</td><td>DEMOTE_CANDIDATE</td></tr>
+<tr><td>preopen</td><td>legacy_preopen_bear_quiet_v1</td><td>PREOPEN</td><td>bear_quiet</td><td>88</td><td>14.77%</td><td>-40.84%p</td><td>-0.46%p</td><td>DEMOTE_CANDIDATE</td></tr></tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,5 +1,5 @@
 [Unit]
-Description=prelude pre-open trigger daily 08:55 KST (Stage 2 telegram ON)
+Description=prelude pre-open trigger daily 08:50 KST (ACTIVE-only telegram)
 After=network.target
 
 [Service]

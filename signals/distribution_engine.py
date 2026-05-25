@@ -132,9 +132,9 @@ class DistributionEngine:
         n_universe = len(sub)
         if "liq_rank_daily" in sub.columns and universe.startswith("top"):
             n = int(universe.replace("top", ""))
-            sub_filt = sub[sub["liq_rank_daily"] <= n]
+            sub_filt = sub[sub["liq_rank_daily"] <= n].copy()
         else:
-            sub_filt = sub
+            sub_filt = sub.copy()
 
         sub_filt["setups"] = sub_filt.apply(detect_setups, axis=1)
         sub_filt["primary"] = sub_filt["setups"].apply(

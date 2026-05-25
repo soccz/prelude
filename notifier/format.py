@@ -70,6 +70,56 @@ def composite_tier(composite: float, fire: float = 1.5, hot: float = 1.0) -> str
     return "👀"
 
 
+def _finite_float(value, default=None):
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(v):
+        return default
+    return v
+
+
+def _fmt_pctp(value) -> str:
+    v = _finite_float(value)
+    if v is None:
+        return "검증중"
+    return f"{v:+.2f}%p"
+
+
+def _fmt_pct(value) -> str:
+    v = _finite_float(value)
+    if v is None:
+        return "검증중"
+    return f"{v:.1f}%"
+
+
+def _fmt_rank(value) -> str:
+    v = _finite_float(value)
+    if v is None or v <= 0:
+        return "#?"
+    return f"#{int(v)}"
+
+
+def _fmt_conf(score, tier) -> str:
+    v = _finite_float(score)
+    t = str(tier or "").strip()
+    if v is None and not t:
+        return ""
+    if v is None:
+        return f"conf {t}"
+    if t:
+        return f"conf {v:.0f}/{t}"
+    return f"conf {v:.0f}"
+
+
+def _hit_label(source: str, fallback: str) -> str:
+    source = str(source or "")
+    if source.startswith("bucket"):
+        return "검증 hit"
+    return fallback
+
+
 # ============================================================================
 # Tier emoji
 # ============================================================================
@@ -294,8 +344,8 @@ def format_preopen_beta(
     """Pre-open trigger 알림 (08:55 KST).
 
     inputs (alerts row 기대 컬럼):
-      market, p_first15_3pct, p_first15_5pct, p_first1h_3pct,
-      composite, close
+      market, composite, close, expected_edge_pct, calibrated_hit_pct,
+      source_rank, decision_reason
     """
     asof = asof or datetime.now()
     date_str = asof.strftime("%Y-%m-%d")
@@ -319,21 +369,26 @@ def format_preopen_beta(
     lines.append("")
     for _, r in alerts.iterrows():
         coin = str(r["market"]).replace("KRW-", "")
-        p15_3 = float(r.get("p_first15_3pct", 0)) * 100
-        p15_5 = float(r.get("p_first15_5pct", 0)) * 100
-        p1h_3 = float(r.get("p_first1h_3pct", 0)) * 100
         price = r.get("close", float("nan"))
         tier = composite_tier(r.get("composite", 0))
-        lines.append(f"{tier} {coin}  진입가 ≈ {_fmt_krw_price(price)}")
-        lines.append(f"   ▸ 15분 안 +3 raw: {p15_3:.0f}  +5 raw: {p15_5:.0f}")
-        lines.append(f"   ▸ 1시간 안 +3 raw: {p1h_3:.0f}")
+        edge = _fmt_pctp(r.get("expected_edge_pct"))
+        hit = _fmt_pct(r.get("calibrated_hit_pct"))
+        rank = _fmt_rank(r.get("source_rank", r.get("alert_rank")))
+        reason = str(r.get("decision_reason", "") or "").strip()
+        signal_label = _hit_label(r.get("calibration_source", ""), "1h +5 signal")
+        conf = _fmt_conf(r.get("confidence_score"), r.get("confidence_tier"))
+        conf_text = f" | {conf}" if conf else ""
+        lines.append(f"{tier} {coin}  진입가 ≈ {_fmt_krw_price(price)}  [PREOPEN | rank {rank}]")
+        lines.append(f"   ▸ edge {edge}{conf_text} | {signal_label} {hit}")
+        if reason:
+            lines.append(f"   ▸ policy: {reason}")
         lines.append("")
 
     lines.append("━━━ 사용 ━━━")
     lines.append("• 09:00 직후 진입, 5% 오르면 즉시 매도")
-    lines.append("• 자동 손절 X — 직접 판단")
-    lines.append("• 09:05 distribution 알림과 함께 보세요")
-    lines.append("• raw score 는 실제 확률 아님 — 1주 live 후 calibration 예정")
+    lines.append("• 텔레그램은 ACTIVE만 발송, WATCH/SILENCE는 dashboard·ledger에 기록")
+    lines.append("• 자동 실거래 주문 없음 — 사용자가 직접 판단")
+    lines.append("• 09:05 distribution 알림과 함께 확인")
     return "\n".join(lines)
 
 
@@ -351,9 +406,8 @@ def format_distribution_beta(
     """Distribution Engine beta 알림 (09:05 KST).
 
     inputs (alerts row 기대 컬럼):
-      market, primary_setups, btc_context,
-      p_h2_hit_3_4h, p_h6_hit_5_24h, p_h5_tail_20,
-      composite, close
+      market, primary_setups, btc_context, setup_quality, expected_edge_pct,
+      calibrated_hit_pct, source_rank, decision_reason, composite, close
 
     톤은 pre-open 과 통일: ⚡ 헤더, BTC 한글 라벨, composite tier (🔥/✨/👀),
     코인당 본문 3줄, 사용 가이드. 진단/Setup library 블록은 텔레그램에서 제거
@@ -390,24 +444,30 @@ def format_distribution_beta(
         ctx = r.get("btc_context", "—")
         ctx_suffix = f" / {ctx}" if ctx and ctx != "—" else ""
 
-        s_h2 = float(r.get("p_h2_hit_3_4h", 0)) * 100
-        s_h5 = float(r.get("p_h5_tail_20", 0)) * 100
-        s_h6 = float(r.get("p_h6_hit_5_24h", 0)) * 100
         price = r.get("close", float("nan"))
         tier = composite_tier(r.get("composite", 0))
+        setup_quality = str(r.get("setup_quality", "") or "SETUP")
+        edge = _fmt_pctp(r.get("expected_edge_pct"))
+        hit = _fmt_pct(r.get("calibrated_hit_pct"))
+        rank = _fmt_rank(r.get("source_rank", r.get("alert_rank")))
+        reason = str(r.get("decision_reason", "") or "").strip()
+        signal_label = _hit_label(r.get("calibration_source", ""), "h6 signal")
+        conf = _fmt_conf(r.get("confidence_score"), r.get("confidence_tier"))
+        conf_text = f" | {conf}" if conf else ""
 
         lines.append(
-            f"{tier} {coin}  진입가 ≈ {_fmt_krw_price(price)}  [{setup_str}]{ctx_suffix}"
+            f"{tier} {coin}  진입가 ≈ {_fmt_krw_price(price)}  [{setup_quality} | rank {rank}]"
         )
-        lines.append(f"   ▸ 4h 안 +3 raw: {s_h2:.0f}  24h 안 +5 raw: {s_h6:.0f}")
-        lines.append(f"   ▸ +20% tail raw: {s_h5:.0f}")
+        lines.append(f"   ▸ edge {edge}{conf_text} | {signal_label} {hit} | setup {setup_str}{ctx_suffix}")
+        if reason:
+            lines.append(f"   ▸ policy: {reason}")
         lines.append("")
 
     lines.append("━━━ 사용 ━━━")
     lines.append("• 09:00 직후 또는 첫 4h 안 진입")
-    lines.append("• 5% 오르면 즉시 매도, 자동 손절 X")
-    lines.append("• 08:55 pre-open 알림과 함께 보세요")
-    lines.append("• raw score 는 실제 확률 아님 — 1주 live 후 calibration 예정")
+    lines.append("• 5% 오르면 즉시 매도, 자동 실거래 주문 없음")
+    lines.append("• 텔레그램은 ACTIVE만 발송, WATCH/SILENCE는 dashboard·ledger에 기록")
+    lines.append("• 08:55 pre-open 알림과 함께 확인")
     return "\n".join(lines)
 
 
