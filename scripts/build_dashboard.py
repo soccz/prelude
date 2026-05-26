@@ -39,6 +39,7 @@ from scripts.idea_validation_report import (
     build_report as build_idea_validation_report,
     load_candidate_ledger as load_idea_candidate_ledger,
 )
+from scripts.policy_history import build_policy_evolution
 
 
 DEFAULT_OUT_DIR = "/home/soccz/22tb/soccz.github.io/projects/prelude/dashboard/data"
@@ -1485,6 +1486,17 @@ def main():
 
     df_dist = _load_or_empty(args.paper_ledger)
     df_pre = _load_or_empty(args.paper_ledger_preopen)
+    # policy_evolution 등 cross-cutting consumer 가 사용할 수 있게 가상 PnL 컬럼 부착.
+    # distribution = next_max/next_close, preopen = first_1h_max/first_1h_close.
+    for _ledger, _max, _close in [
+        (df_dist, "next_max_return_pct", "next_close_return_pct"),
+        (df_pre, "first_1h_max_return_pct", "first_1h_close_return_pct"),
+    ]:
+        if len(_ledger) and _max in _ledger.columns and "virtual_pnl_pct" not in _ledger.columns:
+            max_d = pd.to_numeric(_ledger[_max], errors="coerce") / 100.0
+            close_d = pd.to_numeric(_ledger.get(_close, np.nan), errors="coerce") / 100.0
+            gross = np.where(max_d >= TP_PCT, TP_PCT, close_d)
+            _ledger["virtual_pnl_pct"] = (gross - ROUND_TRIP_COST_PCT) * 100.0
     log.info(f"loaded: distribution {len(df_dist)} rows, preopen {len(df_pre)} rows")
 
     # 0) BTC benchmark (summary + accuracy 둘 다 사용)
@@ -1526,16 +1538,11 @@ def main():
         "notes_vs_system": notes_vs,
         "coin_universe": coin_matrix,
         # 정책 layer (2026-05-25 추가) — narrative + 결과
+        # events / live_summary 는 policy_history.py 에서 자동 로드 + paper_ledger 로 metrics 산출
         "policy_evolution": {
             "version": "2026-05-25.1",
             "policy_id": "setup_quality_policy_v1",
-            "summary": (
-                "5/8 → 5/20 라이브 결과: bear regime 89% / cum -52% / "
-                "Sharpe -2.67 (dist), -5.04 (pre). 학습 분포 (BTC bull conditional) "
-                "위반 + 룰 EV 음수. 5/25 정책 layer 추가: ACTIVE/WATCH/SILENCE "
-                "분류, shadow ledger 누적, meta-label 학습 (배포 보수적), "
-                "daily heartbeat telegram."
-            ),
+            **build_policy_evolution(df_dist, df_pre, asof=str(asof)),
             "rule_set": [
                 {"channel": "distribution", "regime": "bear_volatile", "decision": "SILENCE"},
                 {"channel": "distribution", "regime": "bear_quiet", "decision": "WATCH_ONLY (A_TRIPLE 만 ACTIVE)"},
