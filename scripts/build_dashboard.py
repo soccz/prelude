@@ -1638,12 +1638,27 @@ def _load_or_empty(path: str | Path) -> pd.DataFrame:
     return df
 
 
+def _sanitize_json(obj):
+    """NaN/Infinity → None. Python json allows NaN; browser JSON.parse rejects."""
+    import math
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_json(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_json(v) for v in obj]
+    return obj
+
+
 def _write_json(path: Path, payload: dict, passphrase: str | None = None):
     path.parent.mkdir(parents=True, exist_ok=True)
+    payload = _sanitize_json(payload)
     if passphrase:
         payload = _encrypt_payload(payload, passphrase)
     with open(path, "w") as f:
-        json.dump(payload, f, indent=2, ensure_ascii=False, default=str)
+        json.dump(payload, f, indent=2, ensure_ascii=False, default=str, allow_nan=False)
 
 
 def _encrypt_payload(payload: dict, passphrase: str) -> dict:
@@ -1656,7 +1671,7 @@ def _encrypt_payload(payload: dict, passphrase: str) -> dict:
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
     from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-    plaintext = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
+    plaintext = json.dumps(payload, ensure_ascii=False, default=str, allow_nan=False).encode("utf-8")
     salt = os.urandom(16)
     iv = os.urandom(16)
     kdf = PBKDF2HMAC(
