@@ -340,22 +340,32 @@ def format_preopen_beta(
     universe_label: str = "top100",
     asof: Optional[datetime] = None,
     dry_run: bool = False,
+    demoted: bool = False,
 ) -> str:
     """Pre-open trigger 알림 (08:55 KST).
 
     inputs (alerts row 기대 컬럼):
       market, composite, close, expected_edge_pct, calibrated_hit_pct,
       source_rank, decision_reason
+
+    demoted=True 면 채널 전체가 WATCH_ONLY 강등 상태 — 알림 형식을 그렇게 표시.
     """
     asof = asof or datetime.now()
     date_str = asof.strftime("%Y-%m-%d")
-    header = f"⚡ pre-open trigger {date_str} (KST 08:55)"
+    header = f"⚡ pre-open trigger {date_str} (KST 08:50)"
     if dry_run:
         header += "  [DRY-RUN]"
 
     lines = [header]
     lines.append(f"BTC: {btc_regime_kr(btc_regime)} | universe: {universe_label}")
     lines.append("")
+
+    if demoted:
+        lines.append("━━━ DEMOTED (shadow only) ━━━")
+        lines.append("preopen 채널 강등 — 모든 후보 shadow_ledger 만 누적")
+        lines.append("(2026-05-26 사용자 컨펌 · 누적 -40.8%, replay active 0건)")
+        lines.append("· 검증 누적 후 재평가 — distribution 09:05 알림 참고")
+        return "\n".join(lines)
 
     if len(alerts) == 0:
         lines.append("━━━ 침묵 ━━━")

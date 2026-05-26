@@ -24,8 +24,25 @@
 - [ ] **Stage 2 live paper 축적** — systemd/cron 운영 후 live shadow 표본 확보
 - [ ] **Stage 3** (NOTES 기반 사용자 실제 매매 vs system 추천 비교)
 - [x] **Phase X+1 초안** — Distribution head (multi-target) + pre-open trigger 운영 후보
+- [x] **Phase X+4** — 정책 채택 (distribution PROMOTE_PAPER + preopen DEMOTE) 2026-05-26 사용자 컨펌
 - [ ] [Research] Downside guard / 4h confirmation tier (병렬)
 - [ ] [Later] MTF features / regime split / Optuna
+
+### Phase X+4 — 정책 채택 (2026-05-26 사용자 컨펌)
+
+**의도**: policy_gate replay 결과를 사용자가 검토 후 실제 운영 정책으로 채택.
+
+- **distribution PROMOTE_PAPER**: 새 decision policy (`setup_quality_policy_v1`) 가 replay 에서
+  observed -45.0% vs replay +71.7% (Δ +116.8%, 32 closed) 였고 late split / bootstrap CI95 low 모두 양수.
+  이미 5/25 부터 코드 상 적용 중이라 변경 없음. PHASES 에 사용자 채택 사실 기록.
+- **preopen DEMOTE → WATCH_ONLY (전 채널)**: observed -40.8% over 88 alerts, replay active 0건.
+  `ops/decision_policy.py` 에 `PREOPEN_DEMOTED=True` flag 추가, `apply_preopen_policy` 의 ACTIVE
+  분기를 WATCH_ONLY 로 강등 (bear_volatile 만 SILENCE 유지). POLICY_VERSION → `2026-05-26.1`.
+- **텔레그램**: 사용자 의도로 매일 2 통 유지. preopen 은 매일 "DEMOTED (shadow only)" 한 줄 알림
+  (정책 사실 가시성). distribution 은 ACTIVE/침묵 메시지 변동.
+- **heartbeat**: preopen paper_ledger 빈 거 정상 처리. shadow_ledger_preopen 검사로 대체.
+- **결과 검증**: shadow_ledger_preopen 누적 후 추후 재평가. 재활성 시 `PREOPEN_DEMOTED=False`
+  한 줄 변경 + version bump.
 
 ### Phase X+3 — 운영 안전 (2026-05-26)
 

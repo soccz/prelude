@@ -19,10 +19,19 @@ ACTIVE = "ACTIVE"
 WATCH_ONLY = "WATCH_ONLY"
 SILENCE = "SILENCE"
 POLICY_ID = "setup_quality_policy_v1"
-POLICY_VERSION = "2026-05-25.1"
+POLICY_VERSION = "2026-05-26.1"
 POLICY_SUMMARY = (
     "Distribution promotes A_TRIPLE/S03-quality candidates by BTC regime and "
-    "h6 edge proxy; preopen stays watch-first until live edge improves."
+    "h6 edge proxy. Preopen is DEMOTED to WATCH_ONLY across all regimes "
+    "(user confirm 2026-05-26 — observed -40.8% over 88 alerts, replay had "
+    "0 active candidates)."
+)
+# preopen demote 사용자 컨펌 (policy_gate replay DEMOTE → user-confirmed adoption).
+# 모든 후보를 WATCH_ONLY 로 강등. shadow_ledger 누적해서 추후 재평가.
+PREOPEN_DEMOTED = True
+PREOPEN_DEMOTE_REASON = (
+    "preopen channel demoted by policy_gate 2026-05-26 (user confirm). "
+    "shadow_ledger 누적 후 재평가."
 )
 
 
@@ -192,32 +201,41 @@ def apply_preopen_policy(candidates: pd.DataFrame, btc_regime: str) -> pd.DataFr
     decisions = []
     for _, r in out.iterrows():
         regime = str(r.get("btc_regime", btc_regime))
-        p_1h_5 = float(r.get("p_first1h_5pct", 0) or 0)
-        composite = float(r.get("composite", 0) or 0)
         if regime == "bear_volatile":
             d = {
                 "decision": SILENCE,
                 "blocked_reason": "btc_bear_volatile",
                 "decision_reason": "BTC bear_volatile: pre-open silence",
             }
-        elif regime == "bear_quiet":
+        elif PREOPEN_DEMOTED:
+            # 채널 DEMOTE — bull regime / 강한 셋업이라도 모두 WATCH_ONLY (검증 누적).
             d = {
                 "decision": WATCH_ONLY,
-                "blocked_reason": "bear_quiet_watch",
-                "decision_reason": "pre-open bear_quiet stays watch-only until live edge improves",
-            }
-        elif composite >= 1.5 and p_1h_5 >= 0.35:
-            d = {
-                "decision": ACTIVE,
-                "blocked_reason": "",
-                "decision_reason": "bull regime with strong first1h_5 and composite",
+                "blocked_reason": "preopen_demoted",
+                "decision_reason": PREOPEN_DEMOTE_REASON,
             }
         else:
-            d = {
-                "decision": WATCH_ONLY,
-                "blocked_reason": "preopen_threshold_watch",
-                "decision_reason": "pre-open retained for validation, below active threshold",
-            }
+            # (legacy 분기 — PREOPEN_DEMOTED 가 False 일 때만 도달)
+            p_1h_5 = float(r.get("p_first1h_5pct", 0) or 0)
+            composite = float(r.get("composite", 0) or 0)
+            if regime == "bear_quiet":
+                d = {
+                    "decision": WATCH_ONLY,
+                    "blocked_reason": "bear_quiet_watch",
+                    "decision_reason": "pre-open bear_quiet stays watch-only until live edge improves",
+                }
+            elif composite >= 1.5 and p_1h_5 >= 0.35:
+                d = {
+                    "decision": ACTIVE,
+                    "blocked_reason": "",
+                    "decision_reason": "bull regime with strong first1h_5 and composite",
+                }
+            else:
+                d = {
+                    "decision": WATCH_ONLY,
+                    "blocked_reason": "preopen_threshold_watch",
+                    "decision_reason": "pre-open retained for validation, below active threshold",
+                }
         decisions.append(d)
 
     for col in ["decision", "blocked_reason", "decision_reason"]:

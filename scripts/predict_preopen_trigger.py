@@ -42,7 +42,7 @@ from data.database import list_markets, load_candles
 from ledger.shadow import append_shadow_ledger
 from notifier.format import format_preopen_beta
 from notifier.telegram import send_telegram
-from ops.decision_policy import active_only, apply_preopen_policy, decision_counts
+from ops.decision_policy import PREOPEN_DEMOTED, active_only, apply_preopen_policy, decision_counts
 from ops.decision_policy import POLICY_ID, POLICY_SUMMARY, POLICY_VERSION
 from ops.recommendation_quality import (
     DEFAULT_META_MODEL_DIR,
@@ -492,11 +492,13 @@ def main():
         universe_label=args.universe,
         asof=asof,
         dry_run=not send_tg,
+        demoted=PREOPEN_DEMOTED,
     )
     print(msg)
 
-    send_active_message = should_send_telegram(send_tg, alerts, args.send_silence_telegram)
-    if send_tg and len(alerts) == 0 and not args.send_silence_telegram:
+    # DEMOTED 면 silence flag 없어도 매일 한 통 보냄 (사용자 가시성 유지).
+    send_active_message = should_send_telegram(send_tg, alerts, args.send_silence_telegram or PREOPEN_DEMOTED)
+    if send_tg and len(alerts) == 0 and not args.send_silence_telegram and not PREOPEN_DEMOTED:
         log.info("telegram skipped: no ACTIVE recommendation; details kept in logs/dashboard")
 
     if send_active_message:

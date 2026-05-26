@@ -34,10 +34,27 @@ WARN() { ALERTS+=("$1"); echo "  ⚠️  $1" >> "$LOG"; }
 
 # 1) paper_ledger — 어제 새 row 있나
 YESTERDAY=$(date -d "yesterday" +%Y-%m-%d)
+# preopen 은 2026-05-26 사용자 컨펌 DEMOTE 후 paper_ledger 추가 없음 (shadow 로만) — 정상.
 for ledger in "$PROJ_ROOT/output/paper_ledger.csv" "$PROJ_ROOT/output/paper_ledger_preopen.csv"; do
     name=$(basename "$ledger")
     if [ ! -f "$ledger" ]; then
-        WARN "$name 파일 없음"
+        # preopen 은 DEMOTE 직후라 파일 없을 수도 — alert X.
+        if [ "$name" = "paper_ledger_preopen.csv" ]; then
+            echo "  $name: DEMOTED — 파일 없음 (정상)" >> "$LOG"
+        else
+            WARN "$name 파일 없음"
+        fi
+        continue
+    fi
+    # preopen DEMOTED — paper_ledger 빈 거 정상. shadow_ledger 측 기록만 확인.
+    if [ "$name" = "paper_ledger_preopen.csv" ]; then
+        shadow="$PROJ_ROOT/output/shadow_ledger_preopen.csv"
+        if [ -f "$shadow" ]; then
+            shadow_n=$(grep -c "^$YESTERDAY," "$shadow" 2>/dev/null || echo 0)
+            echo "  $name: DEMOTED — shadow row $shadow_n 개" >> "$LOG"
+        else
+            echo "  $name: DEMOTED — shadow ledger 미생성" >> "$LOG"
+        fi
         continue
     fi
     n=$(grep -c "^$YESTERDAY," "$ledger" 2>/dev/null || echo 0)
