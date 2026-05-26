@@ -477,7 +477,7 @@ def format_distribution_beta(
     lines.append("• 09:00 직후 또는 첫 4h 안 진입")
     lines.append("• 5% 오르면 즉시 매도, 자동 실거래 주문 없음")
     lines.append("• 텔레그램은 ACTIVE만 발송, WATCH/SILENCE는 dashboard·ledger에 기록")
-    lines.append("• 08:55 pre-open 알림과 함께 확인")
+    lines.append("• 08:50 pre-open 채널은 DEMOTED (shadow only) — distribution 만 신뢰")
     return "\n".join(lines)
 
 
