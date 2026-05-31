@@ -45,7 +45,7 @@ notify_fail() {
 }
 
 # 1) build JSON
-echo "[1/2] build_dashboard.py" >> "$LOG"
+echo "[1/3] build_dashboard.py" >> "$LOG"
 python scripts/build_dashboard.py --out-dir "$DATA_DIR" >> "$LOG" 2>&1
 BUILD=$?
 if [ $BUILD -ne 0 ]; then
@@ -54,8 +54,14 @@ if [ $BUILD -ne 0 ]; then
     exit $BUILD
 fi
 
+# 1.5) findings.json — 세션 새 발견 차트 (DB 검증값, backtest 펌프 재검증)
+#      실패해도 메인 publish 는 막지 않음 (대시보드는 findings 없어도 동작).
+echo "[2/3] build_findings_dashboard.py" >> "$LOG"
+python scripts/build_findings_dashboard.py --out-dir "$DATA_DIR" >> "$LOG" 2>&1 \
+    || echo "[warn] build_findings_dashboard 실패 (findings 차트 stale, 메인 publish 계속)" >> "$LOG"
+
 # 2) git add + commit + push if changed
-echo "[2/2] git add + push (in $SITE_ROOT)" >> "$LOG"
+echo "[3/3] git add + push (in $SITE_ROOT)" >> "$LOG"
 cd "$SITE_ROOT"
 git add projects/prelude/dashboard/data >> "$LOG" 2>&1
 

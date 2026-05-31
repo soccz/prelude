@@ -1,0 +1,12 @@
+[Unit]
+Description=prelude recommend radar open daily 09:05 KST timer
+
+[Timer]
+# 09:05 KST = 00:05 UTC (개장 후). distribution(09:05) 과 같은 슬롯.
+OnCalendar=*-*-* 00:05:00 UTC
+# 추천 알림은 결정 시각 근처에서만 유효 — 놓친 발사를 나중에 catch-up 하지 않는다.
+Persistent=false
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

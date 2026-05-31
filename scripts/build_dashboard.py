@@ -1280,6 +1280,63 @@ def compute_preopen_summary(df: pd.DataFrame, btc_series: list[dict] | None = No
 
 
 # ============================================================================
+# Recommend radar (SHADOW 스캐너) — 일일 출력 + net 실현 요약
+# ============================================================================
+def compute_recommend_summary(df_rec: pd.DataFrame) -> dict:
+    """SHADOW 추천 레이더 ledger(shadow_ledger_recommend.csv) → KPI dict.
+
+    - latest_radar: 가장 최근 추천일의 top-3 (오늘 분포 — 대시보드 노출용).
+    - closed 행 실현 요약: realized_pct 는 close_recommend_ledger.py 가 이미
+      net(왕복 0.15% 차감) 로 기록 → 추가 차감 없이 그대로 사용 (ops-steward §0).
+    """
+    out = {"channel": "recommend", "n_alerts_total": int(len(df_rec))}
+    if df_rec is None or len(df_rec) == 0:
+        return out
+
+    df = df_rec.copy()
+    df["date"] = df["date"].astype(str)
+    out["first_alert_date"] = str(pd.to_datetime(df["date"]).min().date())
+    out["last_alert_date"] = str(pd.to_datetime(df["date"]).max().date())
+
+    # 최신 추천일 top-3 (오늘 분포). dump_risk⚠️ + calibrated 확률 그대로 노출.
+    last_day = df["date"].max()
+    today = df[df["date"] == last_day].sort_values("rank")
+    radar = []
+    for _, r in today.iterrows():
+        radar.append({
+            "date": str(r["date"]),
+            "coin": str(r["coin"]).replace("KRW-", ""),
+            "rank": _safe_int(r.get("rank")),
+            "score": _safe_float(r.get("score")),
+            "pump_prob_pct": _safe_float(r.get("pump_prob")),  # 0~1 → viewer 가 %
+            "dump_risk_flag": bool(str(r.get("dump_risk_flag")).lower() == "true"),
+            "btc_regime": str(r.get("btc_regime", "")),
+            "entry_open": _safe_float(r.get("entry_open")),
+        })
+    out["latest_radar"] = radar
+    out["latest_radar_date"] = str(last_day)
+
+    # 실현(closed) 요약 — net realized_pct(%) 그대로. cum = 일별 net 합 누적.
+    closed = df[df["status"].astype(str) == "closed"].copy()
+    out["n_closed"] = int(len(closed))
+    if len(closed):
+        net = pd.to_numeric(closed["realized_pct"], errors="coerce").dropna()
+        if len(net):
+            out["avg_net_realized_pct"] = float(net.mean())
+            out["cum_net_pnl_pct"] = float(net.sum())
+            out["win_rate_pct"] = float((net > 0).mean() * 100)
+        hits = pd.to_numeric(closed.get("pump20_hit"), errors="coerce").dropna()
+        if len(hits):
+            out["pump20_hit_rate_pct"] = float(hits.mean() * 100)
+        if "exit_reason" in closed.columns:
+            out["exit_reason_counts"] = {
+                str(k): int(v) for k, v in
+                closed["exit_reason"].dropna().value_counts().items()
+            }
+    return out
+
+
+# ============================================================================
 # History (combined rows)
 # ============================================================================
 def history_rows(df_dist: pd.DataFrame, df_preopen: pd.DataFrame) -> list[dict]:
@@ -1452,6 +1509,7 @@ def main():
     parser.add_argument("--paper-ledger-preopen", default="output/paper_ledger_preopen.csv")
     parser.add_argument("--shadow-ledger-distribution", default="output/shadow_ledger_distribution.csv")
     parser.add_argument("--shadow-ledger-preopen", default="output/shadow_ledger_preopen.csv")
+    parser.add_argument("--shadow-ledger-recommend", default="output/shadow_ledger_recommend.csv")
     parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR)
     parser.add_argument("--asof", type=str, help="기준 시점 (default=now)")
     parser.add_argument(
@@ -1497,7 +1555,10 @@ def main():
             close_d = pd.to_numeric(_ledger.get(_close, np.nan), errors="coerce") / 100.0
             gross = np.where(max_d >= TP_PCT, TP_PCT, close_d)
             _ledger["virtual_pnl_pct"] = (gross - ROUND_TRIP_COST_PCT) * 100.0
-    log.info(f"loaded: distribution {len(df_dist)} rows, preopen {len(df_pre)} rows")
+    # SHADOW 추천 레이더 스캐너 일일 출력 — graceful (파일 없으면 빈 채널).
+    df_rec = _load_or_empty(args.shadow_ledger_recommend)
+    log.info(f"loaded: distribution {len(df_dist)} rows, preopen {len(df_pre)} rows, "
+             f"recommend {len(df_rec)} rows")
 
     # 0) BTC benchmark (summary + accuracy 둘 다 사용)
     all_dates = []
@@ -1534,6 +1595,7 @@ def main():
         "channels": {
             "distribution": compute_distribution_summary(df_dist, btc_series=btc_bench),
             "preopen": compute_preopen_summary(df_pre, btc_series=btc_bench),
+            "recommend": compute_recommend_summary(df_rec),
         },
         "notes_vs_system": notes_vs,
         "coin_universe": coin_matrix,

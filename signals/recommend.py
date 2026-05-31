@@ -87,6 +87,22 @@ UNIVERSE_TOP_N = 100        # 정적 유니버스 = D-1 qv top100
 TOP_K = 3                   # 매일 top-3 추천
 MAIN_LABEL = "lab_pump20"   # 적중 기준: (high_D/open_D - 1) >= 0.20
 
+# --- risk-reward 레이더 라벨 (전부 day-D 타겟 — score 에 안 섞임, leak 아님) ---
+# upside magnitude: high_D/open_D - 1 의 임계 초과 (intraday_high_ret 재사용).
+# base rate (FACTS, DB 실측): up5≈23% / up10≈7.5% / up20≈1.8%.
+UPSIDE_LABELS = {
+    "p_up5": ("intraday_high_ret", 0.05),    # P(고가가 +5% 이상)
+    "p_up10": ("intraday_high_ret", 0.10),   # P(+10% 이상)
+    "p_up20": ("intraday_high_ret", 0.20),   # P(+20% 이상) — pump20 과 동일 기준
+}
+# downside: low_D/open_D - 1 (intraday_low_ret) 의 임계 미만.
+# upside-only 함정 방어 (FACTS): P(≤-5%) upside-only 0.53, deep-dump(≤-10%) 0.15.
+DOWNSIDE_LABELS = {
+    "p_dn5": 0.05,    # P(저가가 -5% 이하)
+    "p_dn10": 0.10,   # P(-10% 이하) deep-dump
+}
+EXP_DOWNSIDE_LABEL = "intraday_low_ret"   # E[하방] = 조건부 음수 low excursion 기대값
+
 # 청산 플랜 (shadow 가상평가용). 진입 = day-D open(09:00).
 SL_PCT = -0.03              # -3% 손절
 TP_PCT = 0.05               # +5% 익절
@@ -130,7 +146,16 @@ def _build_panel(asof: pd.Timestamp, limit_markets: int | None = None) -> pd.Dat
         if len(df) < MIN_HISTORY:
             continue
         df["market"] = m
-        frames.append(build_market_features(df))
+        feat = build_market_features(df)
+        # day-D 하방 라벨 부착 (intraday_high_ret 은 builder 가 이미 부착).
+        # intraday_low_ret = low_D/open_D - 1 (음수). day-D 타겟 → score 에 안 섞임.
+        low_ret = (df["low"] / (df["open"] + 1e-12) - 1.0)
+        feat = feat.merge(
+            pd.DataFrame({"timestamp": df["timestamp"].values,
+                          "market": df["market"].values,
+                          "intraday_low_ret": low_ret.values}),
+            on=["timestamp", "market"], how="left")
+        frames.append(feat)
     if not frames:
         raise RuntimeError(f"no markets with >= {MIN_HISTORY} bars up to {asof.date()}")
     panel = pd.concat(frames, ignore_index=True)
@@ -190,6 +215,35 @@ def _apply_calibration(scores: np.ndarray, hit_map, edges, base: float) -> np.nd
     idx = np.searchsorted(edges, scores, side="left")
     idx = np.clip(idx, 0, len(edges) - 1)
     return np.array([hit_map.get(int(b), base) for b in idx], dtype=float)
+
+
+def _fit_binary_label(train: pd.DataFrame, ret_col: str, thr: float, sign: str,
+                      n_buckets: int):
+    """ret_col 의 임계(thr) 초과/미만 binary 라벨을 즉석 생성 후 bucket calibration.
+    sign='ge' → ret >= thr (upside), sign='le' → ret <= -thr (downside).
+    반환: (hit_map, edges, base) — _apply_calibration 과 동일 계약."""
+    d = train.dropna(subset=["score", ret_col]).copy()
+    if sign == "ge":
+        d["_y"] = (d[ret_col] >= thr).astype(float)
+    else:
+        d["_y"] = (d[ret_col] <= -thr).astype(float)
+    return _fit_calibration(d, "_y", n_buckets)
+
+
+def _fit_expected_downside(train: pd.DataFrame, ret_col: str, n_buckets: int):
+    """E[하방] = score bucket 별 day-D low excursion(intraday_low_ret) 평균.
+    음수 기대값(보통 -0.0x). rare-event 과신 없음 — 단순 bucket mean."""
+    d = train.dropna(subset=["score", ret_col])
+    if len(d) < 200:
+        return None, None, np.nan
+    try:
+        bk = pd.qcut(d["score"].rank(method="first"), n_buckets,
+                     labels=False, duplicates="drop")
+    except ValueError:
+        return None, None, float(d[ret_col].mean())
+    d = d.assign(bk=bk)
+    g = d.groupby("bk").agg(hi=("score", "max"), m=(ret_col, "mean")).sort_index()
+    return g["m"].to_dict(), g["hi"].values, float(d[ret_col].mean())
 
 
 # ==========================================================================
@@ -253,8 +307,11 @@ def score_candidates(asof_date, limit_markets: int | None = None) -> dict:
         "top3": [
           {
             "coin": "KRW-XXX", "rank": 1, "score": float,
-            "pump_prob": float,            # calibrated (~0.08~0.10 top bin)
+            "pump_prob": float,            # calibrated (~0.06~0.10 top bin) = p_up20
             "pump_prob_pct": "8.5%",       # 정직 표기 (≥20% 다음날)
+            "p_up5": float, "p_up10": float, "p_up20": float,  # P(고가 ≥5/10/20%)
+            "p_dn5": float, "p_dn10": float,                   # P(저가 ≤-5/-10%)
+            "exp_downside": float,         # E[하방] (음수 low excursion 기대값)
             "dump_risk_flag": bool,        # ⚠️ hi-risk (상위 1/3)
             "entry_open": float,           # asof open (09:00 진입가)
             "sl": -0.03, "tp": 0.05,       # shadow 청산 플랜
@@ -294,6 +351,15 @@ def score_candidates(asof_date, limit_markets: int | None = None) -> dict:
     if np.isnan(base):
         base = float(train[MAIN_LABEL].dropna().mean()) if len(train) else 0.0
 
+    # --- risk-reward 레이더 멀티임계 calibration (전부 같은 train, train-only) ---
+    # upside: P(≥5/10/20%) = high_D/open_D-1 임계 bucket-hit.
+    # downside: P(≤-5/-10%) = low_D/open_D-1 임계 bucket-hit. E[하방] = low excursion mean.
+    up_cal = {k: _fit_binary_label(train, col, thr, "ge", CAL_BUCKETS)
+              for k, (col, thr) in UPSIDE_LABELS.items()}
+    dn_cal = {k: _fit_binary_label(train, EXP_DOWNSIDE_LABEL, thr, "le", CAL_BUCKETS)
+              for k, thr in DOWNSIDE_LABELS.items()}
+    exp_dn_cal = _fit_expected_downside(train, EXP_DOWNSIDE_LABEL, CAL_BUCKETS)
+
     # --- 4) asof 유니버스 내 score 내림차순 top-3 + calibrated prob ---
     today = panel[(panel["date"] == asof_date) & panel["in_universe"]].copy()
     today = today.dropna(subset=["score"]).sort_values("score", ascending=False)
@@ -307,12 +373,27 @@ def score_candidates(asof_date, limit_markets: int | None = None) -> dict:
         coin = r["market"]
         eo = open_map.get(coin, np.nan)
         prob = float(r["pump_prob"]) if pd.notna(r["pump_prob"]) else float(base)
+        s = float(r["score"])
+        sc = np.array([s])
+        # 멀티임계 calibrated prob (score → bucket-hit). p_up20 == pump_prob 와 동일 계열.
+        up = {k: round(float(_apply_calibration(sc, hm, ed, bs)[0]), 4)
+              for k, (hm, ed, bs) in up_cal.items()}
+        dn = {k: round(float(_apply_calibration(sc, hm, ed, bs)[0]), 4)
+              for k, (hm, ed, bs) in dn_cal.items()}
+        e_down = round(float(_apply_calibration(sc, *exp_dn_cal)[0]), 4)
         items.append({
             "coin": coin,
             "rank": int(i + 1),
-            "score": round(float(r["score"]), 4),
+            "score": round(s, 4),
             "pump_prob": round(prob, 4),
             "pump_prob_pct": f"{prob * 100:.1f}%",
+            # --- risk-reward 레이더 축 (calibrated, 정직 표기) ---
+            "p_up5": up["p_up5"],     # P(≥5%)
+            "p_up10": up["p_up10"],   # P(≥10%)
+            "p_up20": up["p_up20"],   # P(≥20%)
+            "p_dn5": dn["p_dn5"],     # P(≤-5%)
+            "p_dn10": dn["p_dn10"],   # P(≤-10%) deep-dump
+            "exp_downside": e_down,   # E[하방] (음수 low excursion)
             "dump_risk_flag": bool(r.get("dump_risk_flag", False)),
             "entry_open": float(eo) if np.isfinite(eo) else None,
             "sl": SL_PCT,
