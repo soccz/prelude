@@ -9,10 +9,16 @@
 
 확정 스펙 (사용자, 변경 금지):
   - 스코어러 = equal-weight rank-mean: 8개 검증 leak-free 선행 feature 의
-    그날 cross-section percentile rank 동일가중 평균 = score. XGB/logit 아님
-    (과신·과적합으로 탈락; rank-mean 이 precision@K 더 높음).
+    그날 cross-section percentile rank 동일가중 평균 = score (상승 proxy, 부가표시 보존).
+    XGB/logit 아님 (과신·과적합으로 탈락; rank-mean 이 precision@K 더 높음).
+  - ★ 최종 top-K 정렬 = R1 risk-reward (downside-first). rr_ratio = P(≥10%)/max(P(≤-5%),eps)
+    내림차순 → "하락확률 낮고 상승확률 높은" 코인 상단. P(≥10%)/P(≤-5%)/P(≤-10%) 는
+    rank-mean score 가 아니라 de-correlated XGB head(D-1 feature 로 코인별 따로 학습)에서
+    산출 → 저-하방 분리(NXPC/ZK/VET 상단, POKT/IN/INJ 강등). rank-mean 의 상·하방 대칭
+    saturate(top-3 동일확률) 함정을 제거. head 는 downside_head_riskreward_v1 의 검증
+    빌더(4/4 leak PASS) 를 포팅. score/pump_prob 는 부가표시로 보존.
   - 유니버스 = D-1 quote_volume top100 (정적). 동적 surge 는 이득 ~0.
-  - 매일 top-3 추천.
+  - 매일 top-3 추천 (R1 정렬).
   - 라벨(적중 기준) = pump20 = (high_D / open_D - 1) >= 0.20.
   - calibrated 급등확률 = 과거(asof 이전) score→pump20 bucket historical-hit.
     raw 90% 류 절대 금지 (이 프로젝트 +20% tail 90%→실제 11.6% 전적).
@@ -61,6 +67,14 @@ from scripts.univariate_precursor_lift_v1 import (  # noqa: E402
     add_cross_sectional,
 )
 from scripts.regime_split_precursor_v1 import attach_btc_regime  # noqa: E402
+# de-correlated leak-free 하락/상승 head (R1 risk-reward 정렬용) — 검증된 4/4 leak PASS 빌더.
+# rank-mean score 와 달리 코인별 P(≤-5%)/P(≥10%)를 D-1 feature 로 따로 학습 → 저-하방 분리.
+from scripts.downside_head_riskreward_v1 import (  # noqa: E402
+    _feats as _dh_feats,
+    _xgb_fit_predict as _dh_xgb,
+    _oof_bucket_calib as _dh_calib_fit,
+    _apply_calib as _dh_calib_apply,
+)
 
 log = logging.getLogger("recommend")
 
@@ -111,6 +125,21 @@ TP_PCT = 0.05               # +5% 익절
 # asof 이전 전체로 적합. rare-event raw 과신 금지: bucket hist hit 만 사용).
 CAL_BUCKETS = 10
 EMBARGO_DAYS = 5            # asof 직전 embargo (calibration train 종료를 asof-embargo 로)
+
+# --- R1 risk-reward 정렬 (★ 최종 top-K 정렬 키 — 사용자 확정) ------------------
+# 문제: rank-mean score → bucket calibration 은 상·하방 모두 같은 score 의 함수라
+#   top-3 가 동일 bucket 에 몰려 p_up/p_dn 이 saturate(전부 같은 값)되고, 하방이
+#   상방과 대칭이라 "저-하방" 코인이 분리 안 됨 (ID/XLM/INJ 처럼 고-하방이 상단).
+# 해결: de-correlated XGB head 가 D-1 feature 로 P(≥10%)·P(≤-5%)·P(≤-10%)를 따로
+#   학습 → 코인별로 하방이 실제로 갈림(NXPC vs POKT). 정렬키 = R1_ratio.
+#   R1_ratio = p_up10 / max(p_dn5, RR_EPS) 내림차순 (상승 유지하며 하방 낮은 코인 상단).
+# leak-free: head feature = D-1 (_dh_feats=LEAK_COLS/next_* 제외), 라벨은 day-D(미래),
+#   train = asof-embargo 이전 universe (calibration 과 동일 cutoff). asof 는 추론만.
+RR_UP_LABELS = {"p_up5": 0.05, "p_up10": 0.10, "p_up20": 0.20}   # high/open-1 >= thr
+RR_DN_LABELS = {"p_dn5": 0.05, "p_dn10": 0.10}                   # low/open-1 <= -thr
+RR_RATIO_UP = "p_up10"     # R1 numerator
+RR_RATIO_DN = "p_dn5"      # R1 denominator (≤-5% — 사용자 ~-5% 손실 수용 anchor)
+RR_EPS = 1e-3              # downside floor (downside_head_riskreward_v1 와 동일)
 
 # dump_risk 게이지 구성요소 (D-1 정보). 상위 1/3 → hi-risk.
 DUMP_OVERHEAT_FEAT = "f_ret_7d"     # 과열 (ret_7d 극단 상위)
@@ -247,6 +276,71 @@ def _fit_expected_downside(train: pd.DataFrame, ret_col: str, n_buckets: int):
 
 
 # ==========================================================================
+# 3b. de-correlated 하락/상승 head (R1 risk-reward) — leak-free XGB.
+#     rank-mean score 가 아니라 D-1 feature 로 P(≥X%)/P(≤-X%)를 코인별로 따로 학습 →
+#     저-하방 코인이 실제로 분리됨 (NXPC/ZK/VET 상단, POKT/IN/INJ 강등).
+# ==========================================================================
+def _rr_outcome_labels(panel: pd.DataFrame) -> pd.DataFrame:
+    """day-D open-anchored outcome 라벨을 패널에 부착 (타겟=미래, feature(D-1)와 시점분리).
+    intraday_high_ret = high_D/open_D-1, intraday_low_ret = low_D/open_D-1 (이미 패널에 있음)
+    로부터 임계 라벨 생성. downside_head_riskreward_v1._add_outcome_labels 와 동일 정의."""
+    p = panel.copy()
+    hi = p["intraday_high_ret"]
+    lo = p["intraday_low_ret"]
+    for k, thr in RR_UP_LABELS.items():
+        p[f"lab_{k}"] = (hi >= thr).astype(float)
+    for k, thr in RR_DN_LABELS.items():
+        p[f"lab_{k}"] = (lo <= -thr).astype(float)
+    return p
+
+
+def _fit_rr_head(train: pd.DataFrame, asof_rows: pd.DataFrame, feats: list[str]):
+    """train(asof-embargo 이전 universe) 으로 각 임계 head 를 XGB 학습 → asof 후보 추론.
+    calibration = train OOF bucket historical-hit (rare-event raw 과신 금지, leak-free).
+    반환: dict[label_key -> np.ndarray (asof_rows 길이)] + exp_downside array.
+
+    ★ leak 방어:
+      - feature = _dh_feats(LEAK_COLS/next_* 제외) → 전부 D-1.
+      - 라벨 = day-D high/low (미래) — train 에서만 fit, asof 는 predict 만.
+      - calibration bucket 도 train OOF 에서만 적합 → asof 적용 (train-only).
+    """
+    Xtr = train[feats].replace([np.inf, -np.inf], np.nan)
+    med = Xtr.median()
+    Xtr = Xtr.fillna(med).values
+    Xte = asof_rows[feats].replace([np.inf, -np.inf], np.nan).fillna(med).values
+    out = {}
+    n = len(asof_rows)
+    for k in list(RR_UP_LABELS) + list(RR_DN_LABELS):
+        y = train[f"lab_{k}"].values
+        raw_te, m = _dh_xgb(Xtr, y, Xte)
+        if raw_te is None:
+            out[k] = np.full(n, float(np.nanmean(y)), dtype=float)
+            continue
+        raw_tr = m.predict_proba(Xtr)[:, 1]
+        ed, hm, base = _dh_calib_fit(raw_tr, y, CAL_BUCKETS)
+        out[k] = _dh_calib_apply(raw_te, ed, hm, base)
+    # E[하방] = dn5 raw bucket 별 train low excursion 조건부 평균 (leak-free 회귀 head).
+    exp_dn = np.full(n, float(train["intraday_low_ret"].mean()), dtype=float)
+    yraw, mtmp = _dh_xgb(Xtr, train["lab_p_dn5"].values, Xtr)
+    if yraw is not None:
+        tdf = pd.DataFrame({"s": yraw, "lr": train["intraday_low_ret"].values}).dropna()
+        try:
+            tdf["bk"] = pd.qcut(tdf["s"].rank(method="first"), CAL_BUCKETS,
+                                labels=False, duplicates="drop")
+            gg = tdf.groupby("bk").agg(hi=("s", "max"), m=("lr", "mean"))
+            edd = gg["hi"].values
+            mmap = gg["m"].to_dict()
+            g_base = float(tdf["lr"].mean())
+            raw_te_dn = mtmp.predict_proba(Xte)[:, 1]
+            idx = np.clip(np.searchsorted(edd, raw_te_dn, side="left"), 0, len(edd) - 1)
+            exp_dn = np.array([mmap.get(int(b), g_base) for b in idx], dtype=float)
+        except ValueError:
+            pass
+    out["exp_downside"] = exp_dn
+    return out
+
+
+# ==========================================================================
 # 4. dump_risk 게이지 — D-1 (ret_7d 극단 과열 + log_qv board-top + bear_volatile).
 #    그날 cross-section 에서 게이지 상위 1/3 = hi-risk bool.
 # ==========================================================================
@@ -360,10 +454,47 @@ def score_candidates(asof_date, limit_markets: int | None = None) -> dict:
               for k, thr in DOWNSIDE_LABELS.items()}
     exp_dn_cal = _fit_expected_downside(train, EXP_DOWNSIDE_LABEL, CAL_BUCKETS)
 
-    # --- 4) asof 유니버스 내 score 내림차순 top-3 + calibrated prob ---
-    today = panel[(panel["date"] == asof_date) & panel["in_universe"]].copy()
-    today = today.dropna(subset=["score"]).sort_values("score", ascending=False)
+    # --- 3b) de-correlated R1 head 학습 (★ 정렬키 출처) ---
+    #   rank-mean score→bucket 은 상·하방이 대칭이라 top-3 가 saturate + 저-하방 미분리.
+    #   D-1 feature 로 P(≥10%)/P(≤-5%)/P(≤-10%)를 코인별로 따로 XGB 학습 → 하방 분리.
+    #   train = 같은 cutoff(asof-embargo 이전 universe), asof 는 추론만 → leak-free.
+    rr_head_ok = False
+    today_all = panel[(panel["date"] == asof_date) & panel["in_universe"]].copy()
+    today_all = today_all.dropna(subset=["score"])
+    try:
+        dh_feats = [f for f in _dh_feats(panel) if f in panel.columns]
+        train_lab = _rr_outcome_labels(train).dropna(
+            subset=["intraday_high_ret", "intraday_low_ret"])
+        if len(train_lab) >= 1000 and len(dh_feats) >= 5 and not today_all.empty:
+            rr_pred = _fit_rr_head(train_lab, today_all, dh_feats)
+            for k in list(RR_UP_LABELS) + list(RR_DN_LABELS):
+                today_all[f"rr_{k}"] = rr_pred[k]
+            today_all["rr_exp_downside"] = rr_pred["exp_downside"]
+            rr_head_ok = True
+        else:
+            log.warning("RR head skipped (train=%d feats=%d today=%d) — fallback score-rank",
+                        len(train_lab), len(dh_feats), len(today_all))
+    except Exception as e:  # noqa: BLE001
+        log.warning("RR head failed (%s) — fallback score-rank", e)
+
+    # --- 4) 최종 정렬 = R1 risk-reward (de-correlated head). ---
+    #   rr_ratio = p_up10 / max(p_dn5, eps) 내림차순. 동률은 연속 tie-break:
+    #     1) p_dn10 작을수록(deep-dump 낮음), 2) p_up10 클수록, 3) exp_downside 높을수록
+    #     (덜 깊은 하방). 셋 다 연속값이라 top-3 가 서로 다른 P/rr 을 갖게 함.
+    #   head 실패(소표본 등) 시에만 기존 score 내림차순으로 fallback.
+    today = today_all
     today["pump_prob"] = _apply_calibration(today["score"].values, hit_map, edges, base)
+    if rr_head_ok:
+        today["rr_ratio"] = today[f"rr_{RR_RATIO_UP}"] / np.maximum(
+            today[f"rr_{RR_RATIO_DN}"], RR_EPS)
+        today = today.sort_values(
+            ["rr_ratio", "rr_p_dn10", "rr_p_up10", "rr_exp_downside"],
+            ascending=[False, True, False, False])
+        rank_basis = "R1_riskreward(de-corr head)"
+    else:
+        today["rr_ratio"] = np.nan
+        today = today.sort_values("score", ascending=False)
+        rank_basis = "score_rank(fallback)"
 
     btc_regime = _mode_regime(today)
     top = today.head(TOP_K).reset_index(drop=True)
@@ -375,19 +506,32 @@ def score_candidates(asof_date, limit_markets: int | None = None) -> dict:
         prob = float(r["pump_prob"]) if pd.notna(r["pump_prob"]) else float(base)
         s = float(r["score"])
         sc = np.array([s])
-        # 멀티임계 calibrated prob (score → bucket-hit). p_up20 == pump_prob 와 동일 계열.
-        up = {k: round(float(_apply_calibration(sc, hm, ed, bs)[0]), 4)
-              for k, (hm, ed, bs) in up_cal.items()}
-        dn = {k: round(float(_apply_calibration(sc, hm, ed, bs)[0]), 4)
-              for k, (hm, ed, bs) in dn_cal.items()}
-        e_down = round(float(_apply_calibration(sc, *exp_dn_cal)[0]), 4)
+        if rr_head_ok:
+            # de-correlated head 확률 (코인별 분리). p_up20 은 head 에 없으므로
+            # score-bucket calibration 유지(희소 tail — rank-mean 이 더 정직).
+            up = {"p_up5": round(float(r["rr_p_up5"]), 4),
+                  "p_up10": round(float(r["rr_p_up10"]), 4),
+                  "p_up20": round(float(_apply_calibration(sc, *up_cal["p_up20"])[0]), 4)}
+            dn = {"p_dn5": round(float(r["rr_p_dn5"]), 4),
+                  "p_dn10": round(float(r["rr_p_dn10"]), 4)}
+            e_down = round(float(r["rr_exp_downside"]), 4)
+            rr_val = round(float(r["rr_ratio"]), 4) if pd.notna(r["rr_ratio"]) else None
+        else:
+            # fallback: 기존 score→bucket calibration (saturate 가능 — head 실패 시만).
+            up = {k: round(float(_apply_calibration(sc, hm, ed, bs)[0]), 4)
+                  for k, (hm, ed, bs) in up_cal.items()}
+            dn = {k: round(float(_apply_calibration(sc, hm, ed, bs)[0]), 4)
+                  for k, (hm, ed, bs) in dn_cal.items()}
+            e_down = round(float(_apply_calibration(sc, *exp_dn_cal)[0]), 4)
+            rr_val = None
         items.append({
             "coin": coin,
             "rank": int(i + 1),
             "score": round(s, 4),
             "pump_prob": round(prob, 4),
             "pump_prob_pct": f"{prob * 100:.1f}%",
-            # --- risk-reward 레이더 축 (calibrated, 정직 표기) ---
+            "rr_ratio": rr_val,       # R1 = p_up10/max(p_dn5,eps) — 최종 정렬키
+            # --- risk-reward 레이더 축 (de-corr head, 정직 표기) ---
             "p_up5": up["p_up5"],     # P(≥5%)
             "p_up10": up["p_up10"],   # P(≥10%)
             "p_up20": up["p_up20"],   # P(≥20%)
@@ -406,6 +550,7 @@ def score_candidates(asof_date, limit_markets: int | None = None) -> dict:
         "btc_regime": btc_regime,
         "universe_n": int(today.shape[0]),
         "calibration_source": cal_source,
+        "rank_basis": rank_basis,          # "R1_riskreward(de-corr head)" | fallback
         "n_history_dates": int(train["date"].nunique()),
         "top3": items,
     }

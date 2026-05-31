@@ -182,6 +182,7 @@ def _xgb_fit_predict(Xtr, ytr, Xte):
         subsample=0.8, colsample_bytree=0.8, min_child_weight=5,
         reg_lambda=1.5, scale_pos_weight=spw, n_jobs=4,
         eval_metric="logloss", tree_method="hist",
+        random_state=42,   # 일일 알림 재현성 (subsample/colsample 확률성 고정)
     )
     m.fit(Xtr, ytr)
     return m.predict_proba(Xte)[:, 1], m
