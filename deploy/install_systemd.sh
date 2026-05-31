@@ -40,12 +40,17 @@ cp "$REPO/deploy/prelude-heartbeat.timer"           "$UNIT_DIR/prelude-heartbeat
 
 # -----------------------------------------------------------------------------
 # [OPTIONAL] v-next 추천 레이더 스캐너 — SHADOW(검증중) 텔레그램 2회 (08:50 / 09:05)
-#   기존 7 timer 와 별개. 활성화하려면 아래 4줄 + enable 2줄 주석 해제 후 sudo 재실행.
+#   + 청산 1회 (09:35 = forward 평가 표본 누적용, 발송/주문 없는 기록-only).
+#   기존 7 timer 와 별개. 활성화하려면 아래 cp 6줄 + enable 3줄 주석 해제 후 sudo 재실행.
 #   (SHADOW 채널이라 기본 OFF — 사용자가 발송 시작을 명시할 때 켠다.)
+#   close(09:35)는 발송이 없으므로 send(am/open)와 무관하게 단독으로 켜도 안전:
+#   record 가 쌓인 ledger 의 open 행을 매일 실현해 SHADOW→ADOPT 평가 데이터를 만든다.
 # cp "$REPO/deploy/prelude-recommend-am.service"      "$UNIT_DIR/prelude-recommend-am.service"
 # cp "$REPO/deploy/prelude-recommend-am.timer"        "$UNIT_DIR/prelude-recommend-am.timer"
 # cp "$REPO/deploy/prelude-recommend-open.service"    "$UNIT_DIR/prelude-recommend-open.service"
 # cp "$REPO/deploy/prelude-recommend-open.timer"      "$UNIT_DIR/prelude-recommend-open.timer"
+# cp "$REPO/deploy/prelude-recommend-close.service"   "$UNIT_DIR/prelude-recommend-close.service"
+# cp "$REPO/deploy/prelude-recommend-close.timer"     "$UNIT_DIR/prelude-recommend-close.timer"
 # -----------------------------------------------------------------------------
 
 systemctl daemon-reload
@@ -59,6 +64,7 @@ systemctl enable --now prelude-heartbeat.timer
 # [OPTIONAL] 추천 레이더 (SHADOW) — 위 cp 블록과 함께 주석 해제 시 활성화.
 # systemctl enable --now prelude-recommend-am.timer
 # systemctl enable --now prelude-recommend-open.timer
+# systemctl enable --now prelude-recommend-close.timer
 
 echo ""
 echo "=== Installed timers ==="

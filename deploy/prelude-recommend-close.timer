@@ -1,0 +1,16 @@
+[Unit]
+Description=prelude recommend SHADOW ledger close-out daily 09:35 KST timer
+
+[Timer]
+# 09:35 KST = 00:35 UTC.
+# day-D 추천(09:00 진입)의 실현은 D+1 09:00 일봉 경계가 닫힌 뒤에야 완전하다.
+# close_recommend_ledger.py 가 cutoff = asof-1day 로 prior-day open 행만 청산하므로
+# 오늘 09:35 실행은 "어제까지" 마감된 추천을 -3%SL/+5%TP 15m 경로로 실현 채운다.
+# distribution close(09:30, prelude-close.timer) 직후 슬롯 — 같은 15m/d1 데이터 사용.
+OnCalendar=*-*-* 00:35:00 UTC
+# close 는 catch-up 해도 안전(과거 봉으로 실현만 채움, 발송/주문 없음) → Persistent=true.
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

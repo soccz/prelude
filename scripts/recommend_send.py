@@ -1,8 +1,10 @@
 """SHADOW 추천 스캐너 — 텔레그램 risk-reward 레이더 발송 (매일 2회: 08:50 / 09:05).
 
 흐름:
-  1. signals.recommend.score_candidates(asof) 호출 → leak-free rank-mean top-3
+  1. signals.recommend.score_candidates(asof) 호출 → leak-free top-3
      + 멀티임계 calibrated 확률 (P(≥5/10/20%) / P(≤-5/-10%) / E[하방]).
+     최종 정렬 = R1 risk-reward (downside-first): rr_ratio = P(≥10%)/max(P(≤-5%),eps)
+     내림차순. score(rank-mean) 는 후보 추리기·부가표시일 뿐 정렬키가 아니다.
   2. risk-reward 레이더 메시지로 포맷 (코인 | 상방확률 | 하방확률 | E[하방] + dump_risk⚠️
      + "자동매매X·본인판단·검증중" + "-3% SL / +5% TP" 가이드).
   3. notifier.telegram.send_telegram 으로 발송.
@@ -13,9 +15,11 @@
     - score_candidates 가 시그널 계산 전담 (이 스크립트는 포맷+발송만 = notifier 책임).
     - 기록(ledger append)은 scripts/recommend_today.py 책임 — 여기서는 발송만.
 
-★ 확률 출처: signals.recommend 의 equal-weight rank-mean 스코어러 + train-only
-  bucket calibration (asof-embargo 이전 universe top100 내 score→실제 hit). XGB-head
-  스캔(downside_head_riskreward_v1)과는 별개 엔진 — 이 채널의 정본은 rank-mean.
+★ 정렬 = R1 risk-reward(de-corr 하락 head, downside-first): rr_ratio = P(≥10%)/max(P(≤-5%),eps)
+  내림차순으로 top-K 를 고른다. P-prob 은 downside_head_riskreward_v1 의 de-correlated
+  XGB head(코인별 D-1 feature 로 따로 학습)에서 산출 → 저-하방 분리.
+  score(equal-weight rank-mean + train-only bucket calibration)는 후보 추리기·부가표시용
+  부가값일 뿐, 최종 정렬키가 아니다. rank-mean 의 상·하방 대칭 saturate 함정을 R1 이 제거.
 
 확률 정직성 (이 프로젝트 전적: +20% tail 90%→실제 11.6% 과신 사고):
   - p_up20 == pump_prob (둘 다 pump20 calibrated, top bin ~6~10%).
@@ -102,7 +106,7 @@ def format_radar(res: dict, slot: str, *, dry_run: bool = False) -> str:
     lines = [header]
     lines.append(
         f"BTC: {_regime_kr(regime)} | universe top100 ({res.get('universe_n', 0)})"
-        f" | rank-mean 스코어러 · SHADOW(검증중)"
+        f" | R1 risk-reward · downside-first · SHADOW(검증중)"
     )
     lines.append("")
 
