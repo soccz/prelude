@@ -1,47 +1,58 @@
 # prelude cron 등록 (KST 기준)
 #
-# 등록 방법:
-#   1. 'crontab -e' 로 열고 아래 내용 추가
-#   2. 또는 'crontab deploy/crontab.txt' 로 통째 적용 (기존 cron 덮어씀 — 주의)
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  ⚠️  SUPERSEDED — 이 파일은 더 이상 사용하지 않는다 (참고용 보존).            ║
+# ║                                                                            ║
+# ║  운영은 systemd timer 로 일원화됐다:  sudo bash deploy/install_systemd.sh   ║
+# ║  (prelude-preopen/distribution/close/preopen-close/publish-dashboard/      ║
+# ║   backup/heartbeat — 7 timer).                                             ║
+# ║                                                                            ║
+# ║  ★ systemd 와 이 crontab 을 둘 다 켜면 매일 동일 스크립트가 2번 돌아         ║
+# ║    텔레그램이 2통씩 가고 ledger 가 중복된다(방치 운영 치명).                  ║
+# ║    그래서 아래 모든 job 라인을 주석 처리해 둔다 — `crontab deploy/crontab.txt`║
+# ║    를 실수로 실행해도 아무 job 도 등록되지 않게.                              ║
+# ║                                                                            ║
+# ║  cron 을 굳이 쓰려면(systemd 없는 환경): 먼저 systemd timer 를 disable 한 뒤  ║
+# ║  아래 주석을 풀어라. 절대 동시 운용 금지.                                     ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
 #
 # 시스템이 KST 가 아니면 (UTC 인 경우) 아래 KST 시각 -9 시간 (또는 CRON_TZ 사용)
 
 # Cron timezone (시스템 지원 시)
-CRON_TZ=Asia/Seoul
+# CRON_TZ=Asia/Seoul
 
 # 환경 (cron 은 PATH 가 짧음)
-PATH=/usr/local/bin:/usr/bin:/bin:/home/soccz/.pyenv/shims
+# PATH=/usr/local/bin:/usr/bin:/bin:/home/soccz/.pyenv/shims
 
 # ============================================================================
-# 매일 KST 08:50 — pre-open trigger + ACTIVE-only 텔레그램
+# 매일 KST 08:50 — pre-open trigger + R1 레이더 (systemd: prelude-preopen.timer)
 # ============================================================================
-50 8 * * * cd /home/soccz/22tb/prelude && bash scripts/daily_run_preopen.sh >> output/cron_preopen.log 2>&1
+# 50 8 * * * cd /home/soccz/22tb/prelude && bash scripts/daily_run_preopen.sh >> output/cron_preopen.log 2>&1
 
 # ============================================================================
-# 매일 KST 09:05 — distribution + ACTIVE-only 텔레그램
+# 매일 KST 09:05 — distribution + R1 레이더 (systemd: prelude-distribution.timer)
 # ============================================================================
-5 9 * * * cd /home/soccz/22tb/prelude && bash scripts/daily_run_distribution.sh >> output/cron_dist.log 2>&1
+# 5 9 * * * cd /home/soccz/22tb/prelude && bash scripts/daily_run_distribution.sh >> output/cron_dist.log 2>&1
 
 # ============================================================================
-# 매일 KST 09:30 — distribution paper/shadow ledger close
+# 매일 KST 09:30 — distribution close + champion_selector (systemd: prelude-close.timer)
 # ============================================================================
-30 9 * * * cd /home/soccz/22tb/prelude && bash scripts/daily_close_distribution.sh >> output/cron_close.log 2>&1
+# 30 9 * * * cd /home/soccz/22tb/prelude && bash scripts/daily_close_distribution.sh >> output/cron_close.log 2>&1
 
 # ============================================================================
-# 매일 KST 10:05 — pre-open paper/shadow ledger close
+# 매일 KST 10:05 — pre-open close (systemd: prelude-preopen-close.timer)
 # ============================================================================
-5 10 * * * cd /home/soccz/22tb/prelude && bash scripts/daily_close_preopen.sh >> output/cron_preopen_close.log 2>&1
+# 5 10 * * * cd /home/soccz/22tb/prelude && bash scripts/daily_close_preopen.sh >> output/cron_preopen_close.log 2>&1
 
 # ============================================================================
-# 매일 KST 10:10 — dashboard JSON 빌드 + soccz.github.io push
-# (close cron 두 개 끝난 후 publish)
+# 매일 KST 10:10 — dashboard publish (systemd: prelude-publish-dashboard.timer)
 # ============================================================================
-10 10 * * * cd /home/soccz/22tb/prelude && bash scripts/publish_dashboard.sh >> output/cron_publish.log 2>&1
+# 10 10 * * * cd /home/soccz/22tb/prelude && bash scripts/publish_dashboard.sh >> output/cron_publish.log 2>&1
 
 # ============================================================================
-# 주간 재학습 — 일요일 KST 06:00
+# 주간 재학습 — 일요일 KST 06:00 (systemd 미등록 — 필요 시 수동/별도 timer)
 # ============================================================================
-0 6 * * 0 cd /home/soccz/22tb/prelude && bash scripts/retrain_run.sh >> output/cron_retrain.log 2>&1
+# 0 6 * * 0 cd /home/soccz/22tb/prelude && bash scripts/retrain_run.sh >> output/cron_retrain.log 2>&1
 
 # ============================================================================
 # 데이터 매시 정각 — incremental 갱신 (옵션, 안 해도 daily_run 이 알아서 update)

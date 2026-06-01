@@ -30,9 +30,17 @@ echo "[1/3] data update — d1 + 4h all 2 days" >> "$LOG"
 python -m data.collector_d1 --update >> "$LOG" 2>&1 || echo "  d1 update warn" >> "$LOG"
 python -m data.collector_4h --all --days 2 >> "$LOG" 2>&1 || echo "  4h update warn" >> "$LOG"
 
+# ★ set -e 가드: close_paper_ledger 가 실패해도 아래 close_recommend_ledger(R1 SHADOW
+#   실현)와 champion_selector(재선정)는 반드시 돌아야 한다 — 다음날 08:50/09:05 챔피언
+#   결정에 직결. 가드가 없으면 set -e 가 여기서 스크립트를 죽여 R1 행 미실현 + 챔피언
+#   stale 가 되고, close 스크립트엔 실패 알림이 없어 조용히 방치된다.
 echo "[2/3] close_paper_ledger" >> "$LOG"
-python scripts/close_paper_ledger.py >> "$LOG" 2>&1
-EXIT=$?
+if python scripts/close_paper_ledger.py >> "$LOG" 2>&1; then
+    EXIT=0
+else
+    EXIT=$?
+    echo "  paper close warn (exit=$EXIT) — close_recommend/champion_selector 는 계속" >> "$LOG"
+fi
 
 # R1 SHADOW recommend ledger 실현 (전일 open 행을 -3%SL/+5%TP 15m 경로로 청산 + pump_hit).
 # forward 표본 평가가능하려면 매일 청산 필수 — 별도 timer 없이 기존 close(09:30)에 fold.

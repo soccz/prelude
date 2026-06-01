@@ -1,4 +1,4 @@
-"""Pre-open Trigger 운영 entry — KST 08:55 cron.
+"""Pre-open Trigger 운영 entry — KST 08:50 (systemd prelude-preopen.timer; window 08:45-09:10).
 
 타겟: 09:00 직후 첫 15m/30m/1h 펌프 후보.
 

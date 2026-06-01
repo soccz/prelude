@@ -24,7 +24,7 @@ cp "$REPO/deploy/prelude-distribution.service" "$UNIT_DIR/prelude-distribution.s
 cp "$REPO/deploy/prelude-distribution.timer"    "$UNIT_DIR/prelude-distribution.timer"
 cp "$REPO/deploy/prelude-close.service"          "$UNIT_DIR/prelude-close.service"
 cp "$REPO/deploy/prelude-close.timer"            "$UNIT_DIR/prelude-close.timer"
-# Pre-open trigger (08:55) + close (09:30 same as distribution close, separate ledger)
+# Pre-open trigger (08:50, window 08:45-09:10) + close (10:05, separate ledger)
 cp "$REPO/deploy/prelude-preopen.service"        "$UNIT_DIR/prelude-preopen.service"
 cp "$REPO/deploy/prelude-preopen.timer"          "$UNIT_DIR/prelude-preopen.timer"
 cp "$REPO/deploy/prelude-preopen-close.service"  "$UNIT_DIR/prelude-preopen-close.service"

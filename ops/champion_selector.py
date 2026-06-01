@@ -159,18 +159,34 @@ def _beats_by_margin(challenger: ModelMetric, champ: ModelMetric) -> bool:
 
 
 def _update_streak(state: dict, slot: str, current_champ: str | None,
-                   best_challenger_id: str | None, beats: bool) -> int:
-    """slot 의 연속-우위 streak 업데이트. 같은 챌린저가 마진 이상 이기면 +1, 아니면 리셋.
-    state['streaks'][slot] = {'challenger_id':..., 'count':int}."""
+                   best_challenger_id: str | None, beats: bool,
+                   challenger_last_date: str | None = None) -> int:
+    """slot 의 연속-우위 streak 업데이트.
+
+    ★ '거래일' 기준 (flip-flop·수동재실행 방어): 같은 챌린저가 마진 이상 이기되,
+       **새 거래일(last_date 전진)이 추가됐을 때만** +1. 같은 last_date 로 재실행하거나
+       주말/수집실패로 새 CLOSED 거래일이 없는 날엔 streak 증가 X (stale 관측으로
+       K일 약속을 채우지 못하게). 챌린저가 바뀌거나 못 이기면 리셋.
+    state['streaks'][slot] = {'challenger_id':..., 'count':int, 'last_date':str|None}."""
     streaks = state.setdefault("streaks", {})
-    cur = streaks.get(slot, {"challenger_id": None, "count": 0})
+    cur = streaks.get(slot, {"challenger_id": None, "count": 0, "last_date": None})
     if best_challenger_id is not None and beats and best_challenger_id != current_champ:
         if cur.get("challenger_id") == best_challenger_id:
-            cur = {"challenger_id": best_challenger_id, "count": int(cur["count"]) + 1}
+            # 같은 챌린저: 새 거래일(ISO date 문자열은 사전식==시간순)일 때만 카운트 증가.
+            prev_ld = cur.get("last_date")
+            advanced = challenger_last_date is not None and (
+                prev_ld is None or str(challenger_last_date) > str(prev_ld))
+            cur = {
+                "challenger_id": best_challenger_id,
+                "count": int(cur["count"]) + (1 if advanced else 0),
+                "last_date": str(challenger_last_date) if advanced else prev_ld,
+            }
         else:
-            cur = {"challenger_id": best_challenger_id, "count": 1}
+            # 새 챌린저 → 첫 거래일 관측.
+            cur = {"challenger_id": best_challenger_id, "count": 1,
+                   "last_date": str(challenger_last_date) if challenger_last_date else None}
     else:
-        cur = {"challenger_id": None, "count": 0}
+        cur = {"challenger_id": None, "count": 0, "last_date": None}
     streaks[slot] = cur
     return cur["count"]
 
@@ -216,8 +232,10 @@ def select_for_slot(slot: str, metrics: dict[str, ModelMetric], state: dict,
         return _slot_entry(slot, best.model_id, prev, best, reason, asof, fallback=False)
 
     # 현 챔피언 자격 유지 → 히스테리시스로 교체 판정.
+    # ★ best.last_date 를 넘겨 streak 이 '거래일' 단위로만 증가하게 (stale 재실행 방어).
     beats = _beats_by_margin(best, champ_mm) and best.model_id != prev_champ
-    streak = _update_streak(state, slot, prev_champ, best.model_id, beats)
+    streak = _update_streak(state, slot, prev_champ, best.model_id, beats,
+                            challenger_last_date=best.last_date)
 
     if beats and streak >= HYST_K:
         reason = (f"교체: 챌린저({best.model_id}) 가 챔피언({prev_champ}) 을 마진 이상 + "

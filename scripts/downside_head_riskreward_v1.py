@@ -182,7 +182,11 @@ def _xgb_fit_predict(Xtr, ytr, Xte):
         subsample=0.8, colsample_bytree=0.8, min_child_weight=5,
         reg_lambda=1.5, scale_pos_weight=spw, n_jobs=4,
         eval_metric="logloss", tree_method="hist",
-        random_state=42,   # 일일 알림 재현성 (subsample/colsample 확률성 고정)
+        random_state=42,   # 일일 알림 재현성 (subsample/colsample 확률성 고정).
+        # ★ n_jobs=4 + hist 의 멀티스레드 부동소수 비결정성 우려 → 실측(2026-06-01,
+        #   score_candidates asof=2026-05-30 동일입력 2회) top-3 rr_ratio/p_up10/p_dn5
+        #   bit-identical 확인. 비결정 미발현이라 n_jobs=1 강제 불필요(속도 우선). 드리프트
+        #   재발 시 n_jobs=1 로 강제할 것.
     )
     m.fit(Xtr, ytr)
     return m.predict_proba(Xte)[:, 1], m

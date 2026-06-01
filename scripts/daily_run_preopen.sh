@@ -31,9 +31,12 @@ echo "[1/3] data update — d1 + 15m all 1 day" >> "$LOG"
 python -m data.collector_d1 --update >> "$LOG" 2>&1 || echo "  d1 update warn" >> "$LOG"
 python -m data.collector_15m_upbit --all --days 1 >> "$LOG" 2>&1 || echo "  15m update warn" >> "$LOG"
 
-# 2) Health check
-echo "[2/3] health_check gate (preopen: d1 + 15m)" >> "$LOG"
-python scripts/health_check.py --channel preopen --no-telegram >> "$LOG" 2>&1 || echo "  health gate warn" >> "$LOG"
+# 2) Health check — ★ stale DB 면 hard-fail (set -e 로 스크립트 중단 → record/send 둘 다 안 함).
+#    distribution 채널과 동일 동작(비대칭 제거): preopen 은 진입가 미확정이라 stale 발송이
+#    오히려 더 위험 → 게이트 통과 못 하면 08:50 R1 발송도 안 한다. (이전엔 '|| echo warn'
+#    으로 삼켜서 stale 에도 발송하던 버그.)
+echo "[2/3] health_check gate (preopen: d1 + 15m) — stale 면 중단" >> "$LOG"
+python scripts/health_check.py --channel preopen --no-telegram >> "$LOG" 2>&1
 
 # 3) Pre-open trigger predict — RECORD ONLY (telegram OFF; R1 레이더가 발송 담당).
 #    --no-telegram 으로 발송만 끄고 shadow/paper 기록은 유지(window-gate, 대시보드 continuity).

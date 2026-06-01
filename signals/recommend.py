@@ -579,9 +579,12 @@ def score_candidates(asof_date, limit_markets: int | None = None,
         if rr_head_ok:
             # de-correlated head 확률 (코인별 분리). p_up20 은 head 에 없으므로
             # score-bucket calibration 유지(희소 tail — rank-mean 이 더 정직).
+            # p_up20 만 head 가 아니라 score-bucket calib → 소표본 시 base=NaN 가능 →
+            # None 으로 가드(CSV 빈칸·JSON null 안전, NaN 토큰 방지).
+            _pu20 = float(_apply_calibration(sc, *up_cal["p_up20"])[0])
             up = {"p_up5": round(float(r["rr_p_up5"]), 4),
                   "p_up10": round(float(r["rr_p_up10"]), 4),
-                  "p_up20": round(float(_apply_calibration(sc, *up_cal["p_up20"])[0]), 4)}
+                  "p_up20": round(_pu20, 4) if np.isfinite(_pu20) else None}
             dn = {"p_dn5": round(float(r["rr_p_dn5"]), 4),
                   "p_dn10": round(float(r["rr_p_dn10"]), 4)}
             e_down = round(float(r["rr_exp_downside"]), 4)
