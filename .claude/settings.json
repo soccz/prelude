@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /home/soccz/22tb/soccz.github.io status --porcelain)",
+      "Bash(git -C /home/soccz/22tb/soccz.github.io rev-parse --abbrev-ref HEAD)"
+    ]
+  }
+}

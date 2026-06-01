@@ -379,23 +379,42 @@ def _add_dump_risk(panel: pd.DataFrame, asof_date) -> pd.DataFrame:
 # ==========================================================================
 # 5. 공개 API — score_candidates(asof_date)
 # ==========================================================================
-def score_candidates(asof_date, limit_markets: int | None = None) -> dict:
-    """asof(=오늘) 기준 D-1 까지 데이터로 top-3 추천을 반환.
+def score_candidates(asof_date, limit_markets: int | None = None,
+                     slot: str = "auto") -> dict:
+    """asof 기준 D-1 까지 데이터로 top-3 추천을 반환 (post-open / pre-open 양쪽).
+
+    두 호출 시점(slot):
+      - **open** (09:05, post-open): asof 당일 일봉(09:00)이 이미 DB 에 있음.
+        feature 는 그 봉의 .shift(1)=D-1 까지, 진입가 entry_open = asof open(09:00 실제값).
+        기존 동작 그대로 (무변경 경로).
+      - **preopen** (08:50, 개장 전): asof 당일 봉이 아직 없음(09:00 미개장).
+        가장 최신 가용일(D-1)까지의 feature 로 '다음 거래일(asof)' 후보를 예측.
+        진입가 entry_open = None (09:00 open 미존재 — 아직 거래 불가).
+
+    slot="auto"(기본): asof 가 panel(일봉)에 있으면 post-open, 없으면 pre-open 으로
+    자동 분기. 명시적으로 "open"/"preopen" 을 줄 수도 있다 (08:50/09:05 송신 분리용).
 
     Parameters
     ----------
     asof_date : str | datetime | date
-        오늘 날짜 (KST 일봉 09:00 기준). 이 날짜의 open 이 진입가(entry_open).
+        예측 대상일 D (KST 일봉 09:00 기준). post-open 이면 이 날의 open 이 진입가.
+        pre-open 이면 이 날은 '다음 거래일'이고 진입가는 미확정(None).
     limit_markets : int | None
         개발용 마켓 수 제한 (None = 전체).
+    slot : {"auto", "open", "preopen"}
+        호출 시점. "auto" 면 asof 당일 봉 존재 여부로 자동 판정.
 
     Returns
     -------
     dict:
       {
-        "asof": "YYYY-MM-DD",
+        "asof": "YYYY-MM-DD",              # 예측 대상일 D
+        "slot": "open" | "preopen",        # 실제 사용된 모드 (auto 해소 결과)
+        "feature_date": "YYYY-MM-DD",      # feature 가 참조한 reference date
+                                           #   open: = asof (그 봉 feature 는 shift(1)=D-1)
+                                           #   preopen: = 최신 가용일 (= asof 직전 거래일)
         "btc_regime": <D-1 regime>,
-        "universe_n": int,                 # asof 유니버스 내 후보 수
+        "universe_n": int,                 # 유니버스 내 후보 수
         "calibration_source": "bucket_score_pump20" | "base_rate",
         "n_history_dates": int,            # calibration train 일수
         "top3": [
@@ -407,17 +426,28 @@ def score_candidates(asof_date, limit_markets: int | None = None) -> dict:
             "p_dn5": float, "p_dn10": float,                   # P(저가 ≤-5/-10%)
             "exp_downside": float,         # E[하방] (음수 low excursion 기대값)
             "dump_risk_flag": bool,        # ⚠️ hi-risk (상위 1/3)
-            "entry_open": float,           # asof open (09:00 진입가)
+            "entry_open": float | None,    # open: asof open(09:00). preopen: None(미개장).
             "sl": -0.03, "tp": 0.05,       # shadow 청산 플랜
             "btc_regime": <D-1 regime>,
           }, ...
         ],
       }
+
+    ★ LEAK 방어 (pre-open 도 post-open 과 동일하게 t-1 까지만):
+      - feature 는 두 경로 모두 build_market_features 의 .shift(1) 결과(D-1 까지).
+        pre-open 은 reference date 가 D-1(최신 가용일)이라 그 feature 는 D-2 까지.
+        즉 pre-open feature 가 본 가장 미래 시점은 asof 의 전날 종가 — asof(미래)는 안 봄.
+      - 라벨/실현(intraday_high/low_ret, pump20)은 모두 미래(asof day-D) → score/head 학습에
+        안 섞임 (post-open 과 동일). pre-open 에서는 reference 일에 해당하는 미래 라벨도
+        존재하지 않으므로 더더욱 leak 불가.
+      - calibration/head train cutoff 도 reference date 기준 embargo (asof 미래 안 봄).
     """
     asof = pd.Timestamp(asof_date).normalize()
-    log.info("score_candidates asof=%s", asof.date())
+    if slot not in ("auto", "open", "preopen"):
+        raise ValueError(f"slot must be auto|open|preopen, got {slot!r}")
+    log.info("score_candidates asof=%s slot=%s", asof.date(), slot)
 
-    # --- 1) leak-free panel (asof 까지) ---
+    # --- 1) leak-free panel (asof 까지 — pre-open 이면 asof 봉이 아직 없을 뿐) ---
     panel = _build_panel(asof, limit_markets=limit_markets)
     panel = add_cross_sectional(panel)
     panel = attach_btc_regime(panel)
@@ -425,20 +455,60 @@ def score_candidates(asof_date, limit_markets: int | None = None) -> dict:
     panel = _add_universe(panel)
 
     asof_date = asof.date()
-    if asof_date not in set(panel["date"]):
-        raise RuntimeError(
-            f"asof {asof_date} not in panel (DB stale? max date={max(panel['date'])})")
+    panel_dates = set(panel["date"])
+    asof_in_panel = asof_date in panel_dates
 
-    panel = _add_dump_risk(panel, asof_date)
+    # --- slot 해소: auto 면 asof 봉 존재 여부로 판정. 명시 slot 은 일관성 검증. ---
+    if slot == "auto":
+        resolved_slot = "open" if asof_in_panel else "preopen"
+    elif slot == "open":
+        if not asof_in_panel:
+            raise RuntimeError(
+                f"slot='open' 인데 asof {asof_date} 봉이 panel 에 없음 "
+                f"(개장 전? DB stale? max date={max(panel_dates)}). "
+                f"개장 전이면 slot='preopen' 또는 'auto' 를 사용.")
+        resolved_slot = "open"
+    else:  # slot == "preopen"
+        resolved_slot = "preopen"
 
-    # --- 2) entry_open (asof open, 09:00 진입가) — DB 에서 직접 (라벨 아님, 진입가) ---
-    open_map = _load_asof_open(asof, set(panel.loc[panel["date"] == asof_date, "market"]))
+    # --- reference date (feature 가 참조하는 행의 date). ---
+    #   open: asof 당일 행(그 행 feature 는 shift(1)=D-1 까지). entry_open = asof open.
+    #   preopen: asof 당일 행이 없으니 최신 가용일(= asof 직전 거래일)을 reference 로.
+    #            그 행 feature 는 그 날의 shift(1) → D-2 까지. asof(미래)는 절대 안 봄.
+    #            entry_open 은 미확정(None) — 09:00 open 이 아직 존재하지 않음.
+    if resolved_slot == "open":
+        feat_date = asof_date
+    else:
+        feat_date = max(panel_dates)   # 최신 가용 reference (D-1)
+        if feat_date >= asof_date:
+            # asof 봉이 실제로 존재(=post-open 인데 preopen 강제) → 비일관. 막는다.
+            raise RuntimeError(
+                f"slot='preopen' 인데 reference {feat_date} >= asof {asof_date} "
+                f"(asof 봉이 이미 존재). post-open 이면 slot='open'/'auto' 사용.")
+        log.info("  pre-open: reference(feature) date=%s, predicting next trading day=%s",
+                 feat_date, asof_date)
 
-    # --- 3) calibration: asof-embargo 이전 데이터로만 적합 (train-only).
+    # dump_risk / 후보 선택은 reference(feature) date 의 cross-section 에서 한다.
+    #   open: feat_date == asof_date (기존과 동일).
+    #   preopen: feat_date == 최신 가용일 (asof 봉이 없으므로 그날의 후보를 평가).
+    panel = _add_dump_risk(panel, feat_date)
+
+    # --- 2) entry_open — DB 에서 직접 (라벨 아님, 진입가) ---
+    #   open: asof open(09:00) = 실제 진입가.
+    #   preopen: 09:00 이 아직 미개장 → 진입가 미확정. open_map 비움(전부 None).
+    if resolved_slot == "open":
+        open_map = _load_asof_open(
+            asof, set(panel.loc[panel["date"] == feat_date, "market"]))
+    else:
+        open_map = {}   # pre-open: entry_open 미확정 (None)
+
+    # --- 3) calibration: (feat_date)-embargo 이전 데이터로만 적합 (train-only).
     #   ★ 유니버스(top100) 내 train 으로 적합 — 픽이 나오는 모집단과 동일해야
     #   top-bucket hit 이 실제 top100 픽이 겪는 확률을 정직하게 반영한다.
-    #   (full panel 로 적합하면 모집단이 달라 prob 이 왜곡됨.) ---
-    cutoff = (asof - pd.Timedelta(days=EMBARGO_DAYS)).date()
+    #   (full panel 로 적합하면 모집단이 달라 prob 이 왜곡됨.)
+    #   ★ leak: cutoff 는 feat_date(=feature reference) 기준 embargo. pre-open 이면
+    #   feat_date < asof 라 train 이 asof 미래를 보는 일이 원천적으로 불가능.
+    cutoff = (pd.Timestamp(feat_date) - pd.Timedelta(days=EMBARGO_DAYS)).date()
     train = panel[(panel["date"] < cutoff) & panel["in_universe"]].copy()
     hit_map, edges, base = _fit_calibration(train, MAIN_LABEL, CAL_BUCKETS)
     cal_source = "bucket_score_pump20" if hit_map is not None else "base_rate"
@@ -459,7 +529,7 @@ def score_candidates(asof_date, limit_markets: int | None = None) -> dict:
     #   D-1 feature 로 P(≥10%)/P(≤-5%)/P(≤-10%)를 코인별로 따로 XGB 학습 → 하방 분리.
     #   train = 같은 cutoff(asof-embargo 이전 universe), asof 는 추론만 → leak-free.
     rr_head_ok = False
-    today_all = panel[(panel["date"] == asof_date) & panel["in_universe"]].copy()
+    today_all = panel[(panel["date"] == feat_date) & panel["in_universe"]].copy()
     today_all = today_all.dropna(subset=["score"])
     try:
         dh_feats = [f for f in _dh_feats(panel) if f in panel.columns]
@@ -547,6 +617,8 @@ def score_candidates(asof_date, limit_markets: int | None = None) -> dict:
 
     return {
         "asof": str(asof_date),
+        "slot": resolved_slot,             # "open" | "preopen" (auto 해소 결과)
+        "feature_date": str(feat_date),    # feature reference date (open: =asof, preopen: D-1)
         "btc_regime": btc_regime,
         "universe_n": int(today.shape[0]),
         "calibration_source": cal_source,
