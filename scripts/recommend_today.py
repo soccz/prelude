@@ -45,6 +45,10 @@ SHADOW_RECOMMEND_LEDGER = "output/shadow_ledger_recommend.csv"
 # shadow_ledger_* 패턴에 이미 걸림. 스키마는 R1 과 동일 (champion_selector 가
 # 30거래일 후 R1 vs R2 를 같은 컬럼으로 비교 가능해야 하므로).
 SHADOW_RECOMMEND_LEDGER_R2 = "output/shadow_ledger_recommend_r2.csv"
+# A1 sustainability challenger 전용 shadow ledger (record-only, 챔피언/R2 와 분리 평가).
+# gitignore shadow_ledger_* 패턴에 이미 걸림. 스키마는 R1 과 동일 (champion_selector 가
+# forward CLOSED 로 R1 vs A1 을 같은 컬럼으로 하방-우선 비교 가능해야 하므로).
+SHADOW_RECOMMEND_LEDGER_SUSTAIN = "output/shadow_ledger_recommend_sustain.csv"
 
 RECOMMEND_LEDGER_COLS = [
     "date",            # 추천일 D (= 진입일, KST 일봉 09:00)
@@ -94,9 +98,10 @@ def append_today(asof: str, *, dry_run: bool = False,
                  ranking: str = "R1") -> dict:
     """asof 기준 top-3 를 shadow recommend ledger 에 append (status='open').
 
-    ranking : {"R1","R2"} — "R1"(기본)은 챔피언 경로(기존과 무변경). "R2"는
-      downside-penalized 챌린저 → 반드시 ledger_path=SHADOW_RECOMMEND_LEDGER_R2
-      (별도 record-only ledger) 와 함께 호출한다 (챔피언 ledger 오염 금지)."""
+    ranking : {"R1","R2","A1"} — "R1"(기본)은 챔피언 경로(기존과 무변경). "R2"는
+      downside-penalized, "A1"은 sustainability-filter 챌린저 → 각각 반드시 자기
+      record-only ledger(SHADOW_RECOMMEND_LEDGER_R2 / _SUSTAIN)와 함께 호출한다
+      (챔피언 ledger 오염 금지)."""
     res = score_candidates(asof, limit_markets=limit_markets, ranking=ranking)
     log.info("asof=%s btc_regime=%s universe_n=%d calib=%s n_hist_dates=%d top=%d",
              res["asof"], res["btc_regime"], res["universe_n"],
@@ -180,17 +185,23 @@ def main():
     ap.add_argument("--asof", type=str, default=None, help="YYYY-MM-DD (default=오늘 KST)")
     ap.add_argument("--limit-markets", type=int, default=None, help="개발용 마켓 제한")
     ap.add_argument("--dry-run", action="store_true", help="기록 X, 출력만")
-    ap.add_argument("--ranking", type=str, default="R1", choices=["R1", "R2"],
-                    help="정렬 모드. R1=챔피언(기본), R2=downside-penalized 챌린저")
+    ap.add_argument("--ranking", type=str, default="R1", choices=["R1", "R2", "A1"],
+                    help="정렬 모드. R1=챔피언(기본), R2=downside-penalized 챌린저, "
+                         "A1=sustainability-filter 챌린저")
     ap.add_argument("--ledger", type=str, default=None,
                     help="ledger 경로 (default: R1→shadow_ledger_recommend.csv, "
-                         "R2→shadow_ledger_recommend_r2.csv)")
+                         "R2→shadow_ledger_recommend_r2.csv, "
+                         "A1→shadow_ledger_recommend_sustain.csv)")
     args = ap.parse_args()
 
     asof = args.asof or _today_kst()
-    # R2 는 기본적으로 자기 ledger 로 (챔피언 ledger 오염 방지).
-    ledger = args.ledger or (SHADOW_RECOMMEND_LEDGER_R2 if args.ranking == "R2"
-                             else SHADOW_RECOMMEND_LEDGER)
+    # 챌린저는 기본적으로 자기 ledger 로 (챔피언 ledger 오염 방지).
+    _DEFAULT_LEDGER = {
+        "R1": SHADOW_RECOMMEND_LEDGER,
+        "R2": SHADOW_RECOMMEND_LEDGER_R2,
+        "A1": SHADOW_RECOMMEND_LEDGER_SUSTAIN,
+    }
+    ledger = args.ledger or _DEFAULT_LEDGER[args.ranking]
     append_today(asof, dry_run=args.dry_run, limit_markets=args.limit_markets,
                  ledger_path=ledger, ranking=args.ranking)
 

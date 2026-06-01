@@ -137,6 +137,33 @@ MODELS: list[ModelSpec] = [
               "R2 를 동일 스키마 ledger 로 비교. daily_run 배선/활성화는 ops 단계(evaluator "
               "ADOPT 후). 기록: scripts/recommend_today.py --ranking R2.",
     ),
+    # --- A1 sustainability-filter 챌린저 (post-open, 별도 shadow ledger) -------
+    #   R1 진입(top-3) 위에 dump head(D-1 feature 로 day-D 펌프-후-덤프 확률 학습)로
+    #   dump-prone 픽을 강등→다음 R1 후보로 교체. ch_sustainability_v1 OOS(765일, 15m
+    #   SL/TP/EOD net): deep-loss(SL 끈 본질 하방) 0.135→0.060 절반(bootstrap 유의),
+    #   %SL 0.456→0.326. 단 net Δ 비유의·양쪽 net-negative, prec20 0.037→0.012(상방도
+    #   같이 깎임). evaluator SHADOW 판정 → challenger_only(승격 금지) record-only.
+    ModelSpec(
+        id="recommend_r1_sustain_open",
+        name="A1 sustainability-filter (challenger), post-open 09:05",
+        ledger_path="output/shadow_ledger_recommend_sustain.csv",
+        slots=["open"],
+        metric=MetricSource(
+            status_col="status", closed_value="closed", date_col="date",
+            realized_pct_col="realized_pct",   # close_recommend_ledger 가 net(0.15% 차감) 저장
+            hit_col="pump20_hit", cost_already_deducted=True),
+        predict_ref="signals.recommend:score_candidates",   # ranking='A1' 로 호출
+        is_backtest_fallback=False,
+        challenger_only=True,    # forward 누적 + evaluator ADOPT 전까지 챔피언 승격 금지
+        hypothesis="D-1 시점 dump head 로 '지속 펌프 vs 펌프-후-덤프'를 갈라 R1 top-3 중 "
+                   "dump-prone 픽을 강등·교체하면, deep-loss·%SL 등 하방위험이 낮아진다 "
+                   "(사용자: 하락최소화 > 상승). OOS 15m net 경로에서 deep-loss 반감.",
+        notes="R1 과 동일 de-corr head 확률 위에 dump head(dump_B, cutoff q0.6) 하나 추가 — "
+              "같은 panel/train cutoff, 새 leak 0. A1_DUMP_*/A1_CUTOFF_Q (recommend.py 상수, "
+              "placeholder). champion_selector 가 30거래일 후 R1 vs A1 을 동일 스키마 ledger 로 "
+              "비교. 기록: scripts/recommend_today.py --ranking A1 (record-only). "
+              "trade-off 관측: 하방 개선의 대가로 prec20 도 깎임 → forward 로 재현 확인.",
+    ),
     # --- R1 pre-open 변형 (08:50 예고, 같은 스코어러 preopen slot) -------------
     ModelSpec(
         id="recommend_r1_preopen",

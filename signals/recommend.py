@@ -156,6 +156,25 @@ RR_EPS = 1e-3              # downside floor (downside_head_riskreward_v1 와 동
 #   ★ ranking="R1"(기본)일 때 이 상수는 사용되지 않는다 — 챔피언 경로 불변 보장.
 R2_LAMBDA = 1.0
 
+# --- A1 sustainability 정렬 (challenger — ranking="A1" 일 때만) -----------------
+#   A1 = R1 정렬 그대로 산출한 뒤, **dump head** (D-1 feature 로 day-D "펌프-후-덤프"
+#   확률을 코인별로 학습)로 top 후보의 p_dump 를 산출 → train-only 임계 초과 픽을 강등하고
+#   다음 R1 후보로 교체해 top-3 를 채운다 (R1 진입집합 위 re-selection).
+#   ★ R1/R2 와 동일 head 인프라(_dh_xgb/_dh_calib, random_state=42)·동일 panel·동일
+#     train cutoff(asof-embargo 이전 universe) 재사용 — dump head 라벨(day-D)만 추가.
+#     dump head 라벨은 학습 타겟(미래)이지 입력 feature 가 아니다 (leak 방어).
+#   ★ 검증 (ch_sustainability_v1.py, quant-evaluator SHADOW 판정 2026-06-01, OOS 765일):
+#     best = dump_B 라벨 + cutoff q0.6. deep-loss(SL 끈 본질 하방) 0.135→0.060 절반
+#     (bootstrap 유의), %SL 0.456→0.326. 단 net Δ 비유의·양쪽 net-negative,
+#     prec20 0.037→0.012 (상방도 같이 깎임 = "꼬리 동시 절단"). 사용자 1순위(하방최소화)
+#     부합이라 SHADOW record-only 로 forward 표본 적립.
+#   ★ placeholder (CLAUDE.md §2.5): evaluator 판정/forward 결과로 라벨/임계 갱신 가능.
+#   ★ ranking="R1"(기본)일 때 이 상수/dump head 는 사용되지 않는다 — 챔피언 경로 불변 보장.
+#   dump_B 라벨 = (high_D/open_D-1 >= +5%) AND (close_D/open_D-1 < -2%) — 펌프-후-명확음수.
+A1_DUMP_UP = 0.05          # 장중 +5% 이상 (펌프)
+A1_DUMP_EOD = -0.02        # 종가 -2% 미만 (덤프) — dump_B 정의
+A1_CUTOFF_Q = 0.60         # train-only p_dump 분위 임계 (초과 픽 강등). best = q0.6.
+
 # dump_risk 게이지 구성요소 (D-1 정보). 상위 1/3 → hi-risk.
 DUMP_OVERHEAT_FEAT = "f_ret_7d"     # 과열 (ret_7d 극단 상위)
 DUMP_BOARDTOP_FEAT = "f_log_qv"     # 고유동 board-top
@@ -193,11 +212,14 @@ def _build_panel(asof: pd.Timestamp, limit_markets: int | None = None) -> pd.Dat
         feat = build_market_features(df)
         # day-D 하방 라벨 부착 (intraday_high_ret 은 builder 가 이미 부착).
         # intraday_low_ret = low_D/open_D - 1 (음수). day-D 타겟 → score 에 안 섞임.
+        # eod_ret = close_D/open_D - 1 (A1 dump_B 라벨용 — day-D 타겟, 학습 label 만).
         low_ret = (df["low"] / (df["open"] + 1e-12) - 1.0)
+        eod_ret = (df["close"] / (df["open"] + 1e-12) - 1.0)
         feat = feat.merge(
             pd.DataFrame({"timestamp": df["timestamp"].values,
                           "market": df["market"].values,
-                          "intraday_low_ret": low_ret.values}),
+                          "intraday_low_ret": low_ret.values,
+                          "eod_ret": eod_ret.values}),
             on=["timestamp", "market"], how="left")
         frames.append(feat)
     if not frames:
@@ -356,6 +378,61 @@ def _fit_rr_head(train: pd.DataFrame, asof_rows: pd.DataFrame, feats: list[str])
 
 
 # ==========================================================================
+# 3c. A1 sustainability "dump head" — leak-free XGB (ranking="A1" 일 때만).
+#     R1 head 와 동일 인프라(_dh_xgb/_dh_calib, random_state=42)·동일 train cutoff.
+#     라벨 = day-D dump_B = (high/open-1 >= A1_DUMP_UP) AND (close/open-1 < A1_DUMP_EOD)
+#       → 펌프-후-덤프. day-D 타겟(미래)이라 학습 입력 feature(D-1)에 안 섞임 (leak X).
+#     반환: (p_dump_asof[np.ndarray], cutoff[float]).
+#       cutoff = train calibrated p_dump 의 A1_CUTOFF_Q 분위 (train-only, asof/미래 미사용).
+# ==========================================================================
+def _fit_dump_head(train: pd.DataFrame, asof_rows: pd.DataFrame, feats: list[str]):
+    """train(asof-embargo 이전 universe) 으로 dump_B head 학습 → asof 후보 p_dump 추론.
+    cutoff = train 의 calibrated p_dump 분위(train-only) → 라이브에서 매일 재계산하되
+    asof/미래 outcome 은 안 본다 (train < asof-embargo).
+
+    ★ leak 방어 (R1 head 와 동일 규율):
+      - feature = _dh_feats(LEAK_COLS/next_* 제외) → 전부 D-1.
+      - 라벨 = day-D high/close (미래) — train 에서만 fit, asof 는 predict 만.
+      - calibration bucket·cutoff 분위 모두 train 에서만 산출 → asof 적용 (train-only).
+    """
+    n = len(asof_rows)
+    # day-D dump_B 라벨 (학습 타겟 — 미래. 입력 feature 아님).
+    y = ((train["intraday_high_ret"] >= A1_DUMP_UP) &
+         (train["eod_ret"] < A1_DUMP_EOD)).astype(float).values
+    Xtr = train[feats].replace([np.inf, -np.inf], np.nan)
+    med = Xtr.median()
+    Xtr = Xtr.fillna(med).values
+    Xte = asof_rows[feats].replace([np.inf, -np.inf], np.nan).fillna(med).values
+    raw_te, m = _dh_xgb(Xtr, y, Xte)
+    if raw_te is None:
+        # 학습 불가(소표본/단일클래스) → 강등 안 함(전부 통과). cutoff=+inf.
+        return np.full(n, 0.0, dtype=float), float(np.inf)
+    raw_tr = m.predict_proba(Xtr)[:, 1]
+    ed, hm, base = _dh_calib_fit(raw_tr, y, CAL_BUCKETS)
+    p_dump_te = _dh_calib_apply(raw_te, ed, hm, base)
+    p_dump_tr = _dh_calib_apply(raw_tr, ed, hm, base)   # train-only cutoff 산출용
+    cutoff = float(np.nanquantile(p_dump_tr, A1_CUTOFF_Q))
+    return p_dump_te, cutoff
+
+
+def _a1_reselect(today_sorted: pd.DataFrame, p_dump_col: str, cutoff: float,
+                 k: int) -> pd.DataFrame:
+    """R1 순위(today_sorted 가 이미 R1 정렬)대로 보되 p_dump > cutoff 픽은 강등,
+    통과 픽으로 top-k 채우고 부족하면 강등 픽으로 채운다 (R1 후보 풀 내 재선택).
+    ch_sustainability_v1.a1_reselect 와 동일 정신(단일 asof 라 fold/날짜 루프 없음)."""
+    d = today_sorted.copy()
+    # dump-prone = p_dump > cutoff. NaN p_dump 는 통과로 본다.
+    d["_dumpprone"] = (d[p_dump_col] > cutoff).fillna(False)
+    passed = d[~d["_dumpprone"]]
+    rejected = d[d["_dumpprone"]]
+    need = max(0, k - len(passed.head(k)))
+    chosen = pd.concat([passed.head(k), rejected.head(need)])
+    # 원래 R1 순위(인덱스 순)대로 정렬 — today_sorted 가 R1 정렬이므로 index 가 순위.
+    chosen = chosen.sort_index().head(k)
+    return chosen
+
+
+# ==========================================================================
 # 4. dump_risk 게이지 — D-1 (ret_7d 극단 과열 + log_qv board-top + bear_volatile).
 #    그날 cross-section 에서 게이지 상위 1/3 = hi-risk bool.
 # ==========================================================================
@@ -398,11 +475,14 @@ def score_candidates(asof_date, limit_markets: int | None = None,
                      slot: str = "auto", ranking: str = "R1") -> dict:
     """asof 기준 D-1 까지 데이터로 top-3 추천을 반환 (post-open / pre-open 양쪽).
 
-    ranking : {"R1", "R2"} (기본 "R1" — 챔피언 경로 불변)
+    ranking : {"R1", "R2", "A1"} (기본 "R1" — 챔피언 경로 불변)
       - "R1": p_up10 / max(p_dn5, eps) 내림차순 (현행 챔피언, byte-identical).
       - "R2": p_up10 - R2_LAMBDA*p_dn5 내림차순 (challenger, downside-penalized).
-      두 모드는 **동일 de-corr head 확률의 결정론적 재정렬**일 뿐 — head 학습/calibration/
-      panel 은 완전히 공유한다(새 leak 유입 0). tie-break 도 하방-우선 동일.
+      - "A1": R1 정렬 후 dump head 로 dump-prone 픽 강등→다음 R1 후보로 교체
+        (challenger, sustainability-filter). R1/R2 와 **동일 head 확률** 위에 dump head
+        하나만 추가(같은 인프라·panel·train cutoff). dump head 라벨은 day-D 타겟(학습만).
+      R1/R2 는 동일 de-corr head 확률의 결정론적 재정렬, A1 은 거기에 dump head re-selection.
+      모두 panel/head 학습/calibration·train cutoff 를 공유한다(새 leak 유입 0).
 
     두 호출 시점(slot):
       - **open** (09:05, post-open): asof 당일 일봉(09:00)이 이미 DB 에 있음.
@@ -466,8 +546,8 @@ def score_candidates(asof_date, limit_markets: int | None = None,
     asof = pd.Timestamp(asof_date).normalize()
     if slot not in ("auto", "open", "preopen"):
         raise ValueError(f"slot must be auto|open|preopen, got {slot!r}")
-    if ranking not in ("R1", "R2"):
-        raise ValueError(f"ranking must be R1|R2, got {ranking!r}")
+    if ranking not in ("R1", "R2", "A1"):
+        raise ValueError(f"ranking must be R1|R2|A1, got {ranking!r}")
     log.info("score_candidates asof=%s slot=%s ranking=%s", asof.date(), slot, ranking)
 
     # --- 1) leak-free panel (asof 까지 — pre-open 이면 asof 봉이 아직 없을 뿐) ---
@@ -587,7 +667,7 @@ def score_candidates(asof_date, limit_markets: int | None = None,
                 ["rr_ratio", "rr_p_dn10", "rr_p_up10", "rr_exp_downside"],
                 ascending=[False, True, False, False])
             rank_basis = "R1_riskreward(de-corr head)"
-        else:  # ranking == "R2" — downside-penalized challenger.
+        elif ranking == "R2":  # downside-penalized challenger.
             # R2 = p_up10 - λ*p_dn5 내림차순. tie-break 은 R1 과 동일 하방-우선
             # (deep-dump↓ → p_up10↑ → exp_downside↑) — 같은 head 확률의 재정렬.
             today["rr_pen"] = today[f"rr_{RR_RATIO_UP}"] - R2_LAMBDA * today[f"rr_{RR_RATIO_DN}"]
@@ -595,6 +675,38 @@ def score_candidates(asof_date, limit_markets: int | None = None,
                 ["rr_pen", "rr_p_dn10", "rr_p_up10", "rr_exp_downside"],
                 ascending=[False, True, False, False])
             rank_basis = f"R2_penalized(λ={R2_LAMBDA}, de-corr head)"
+        else:  # ranking == "A1" — sustainability-filter challenger.
+            # 1) R1 정렬 그대로 (R1 과 동일 키·tie-break — A1 의 후보 풀 순위).
+            today = today.sort_values(
+                ["rr_ratio", "rr_p_dn10", "rr_p_up10", "rr_exp_downside"],
+                ascending=[False, True, False, False]).reset_index(drop=True)
+            # 2) dump head 학습 → top 후보 p_dump + train-only 임계.
+            #    train_lab(=R1 head 와 동일 train, asof-embargo 이전 universe)에 eod_ret
+            #    필요 → dropna 로 보강. 실패 시 R1 그대로 (강등 안 함).
+            try:
+                dump_tr = train_lab.dropna(subset=["intraday_high_ret", "eod_ret"])
+                if len(dump_tr) >= 1000 and not today.empty:
+                    p_dump, a1_cut = _fit_dump_head(dump_tr, today, dh_feats)
+                    today["p_dump"] = p_dump
+                    chosen = _a1_reselect(today, "p_dump", a1_cut, TOP_K)
+                    # 강등/교체 진단: R1 top-K 집합 대비 새로 들어온 픽 = substituted.
+                    r1_set = set(today.head(TOP_K)["market"])
+                    chosen = chosen.copy()
+                    chosen["a1_substituted"] = ~chosen["market"].isin(r1_set)
+                    # 선택된 top-K 를 앞으로, 나머지는 뒤로 (head(TOP_K) 가 픽이 되도록).
+                    rest = today[~today.index.isin(chosen.index)]
+                    today = pd.concat([chosen, rest], ignore_index=True)
+                    rank_basis = (f"A1_sustain(dump_B, cutoff_q={A1_CUTOFF_Q}, "
+                                  f"de-corr head, demoted {int(chosen['a1_substituted'].sum())})")
+                    log.info("  A1: dump cutoff(q%.2f)=%.4f, substituted top-%d=%d",
+                             A1_CUTOFF_Q, a1_cut, TOP_K,
+                             int(chosen["a1_substituted"].sum()))
+                else:
+                    rank_basis = "A1_sustain(R1 fallback — dump train 부족)"
+                    log.warning("A1 dump head skipped (train=%d) — R1 정렬 유지", len(dump_tr))
+            except Exception as e:  # noqa: BLE001
+                rank_basis = "A1_sustain(R1 fallback — dump head 실패)"
+                log.warning("A1 dump head failed (%s) — R1 정렬 유지", e)
     else:
         today["rr_ratio"] = np.nan
         today = today.sort_values("score", ascending=False)

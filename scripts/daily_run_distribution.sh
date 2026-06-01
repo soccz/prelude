@@ -56,8 +56,15 @@ EXIT=$?
 #    적립용으로 자기 ledger(shadow_ledger_recommend_r2.csv)에만 기록. challenger_only=True 라
 #    champion_selector 가 영구 차단(절대 발송 안 됨). 30거래일 후 R1 과 하방-우선 비교.
 #    실패해도 R1 운영과 무관(가드).
-echo "[5/5] recommend_today --ranking R2 (R2 challenger ledger, record-only)" >> "$LOG"
+echo "[5/6] recommend_today --ranking R2 (R2 challenger ledger, record-only)" >> "$LOG"
 python scripts/recommend_today.py --ranking R2 >> "$LOG" 2>&1 || echo "  R2 record warn" >> "$LOG"
+
+# 6) A1 sustainability challenger — SHADOW · record-only (텔레그램 X). R1 top-3 위에
+#    dump head 로 dump-prone 픽 강등→교체. 자기 ledger(shadow_ledger_recommend_sustain.csv)
+#    에만 기록. challenger_only=True 라 champion_selector 가 영구 차단(절대 발송 안 됨).
+#    30거래일 후 R1 과 하방-우선 비교. 실패해도 R1 운영과 무관(가드).
+echo "[6/6] recommend_today --ranking A1 (A1 sustainability ledger, record-only)" >> "$LOG"
+python scripts/recommend_today.py --ranking A1 >> "$LOG" 2>&1 || echo "  A1 record warn" >> "$LOG"
 
 # 1h/15m incremental update 는 별도 research cron 으로 분리 (Phase B/C 용, 운영 critical X)
 
