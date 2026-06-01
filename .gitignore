@@ -67,3 +67,6 @@ Thumbs.db
 .env
 *.key
 secrets/
+
+# Claude Code local settings (machine-local, public push X)
+.claude/settings.local.json

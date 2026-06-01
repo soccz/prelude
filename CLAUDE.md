@@ -5,6 +5,22 @@
 
 ---
 
+## 하네스: prelude AI 퀀트
+
+**목표:** 실제 AI 퀀트 포트폴리오로 통할 수준의 신뢰도·평가지표를 갖춘, 의미 있는 시그널/모델. (논문적 아이디어는 보너스)
+
+**트리거:** prelude 관련 작업(시그널/모델 연구·백테스트·sweep / 포트폴리오급 평가·leak 감사·채택 판정 / decision_policy·cron·텔레그램·dashboard 운영) 요청 시 `prelude-quant` 스킬을 사용하라. 이 오케스트레이터가 §0 의례를 돌리고 전문 에이전트(signal-researcher / quant-evaluator / ops-steward)로 라우팅한다. 단순 1줄 질문(현재 상태·파일 위치)은 직접 응답 가능.
+
+**실행 모드:** 하이브리드(서브에이전트 on-demand 기본 + 독립작업 병렬 fan-out + researcher→evaluator 생성-검증). §7.2 lean 철학상 팀 상시가동은 보류.
+
+**변경 이력:**
+| 날짜 | 변경 내용 | 대상 | 사유 |
+|------|----------|------|------|
+| 2026-05-31 | 초기 구성 (에이전트 3 + 오케스트레이터 + 스킬 4) | `.claude/agents/`, `.claude/skills/` | 평가 신뢰도 우선 하네스 구축 |
+| 2026-05-31 | 25-에이전트 검증 후 정정 — policy_gate 경로(ops/), bootstrap CI95 귀속, ledger/ 소유=ops-steward, √252/√365·DSR trials 명시, legacy 6-class·collector 핸드오프, 트리거 우선권 힌트 | quant-eval/signal-research/ops-steward/signal-researcher | 코드베이스 대조 검증 결함 수정 |
+
+---
+
 ## 0. 매 세션 시작 의례 (30초)
 
 새 세션 시작 시 무조건 이 순서:
