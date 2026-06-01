@@ -197,11 +197,17 @@ MODELS: list[ModelSpec] = [
             hit_col="hit_h6", cost_already_deducted=False),
         predict_ref="signals.distribution_engine:DistributionEngine.score_panel",
         is_backtest_fallback=False,
-        challenger_only=False,
+        challenger_only=True,    # ★ 발송 절대 불가로 잠금 (2026-06-01): 사용자 명시 "수정한
+                                 #   걸로만 와야지 기존은 왜 와" = R1 만 발송. + predict_ref 가
+                                 #   score_candidates 와 다른 시그니처(score_panel)라 챔피언
+                                 #   되면 발송 깨짐 + observed -45% vs replay +71.7% 갭(신뢰불가).
+                                 #   → 영구 challenger(forward 비교·대시보드용만). 승급은 사용자
+                                 #   명시 + 발송 어댑터 작성 후에만.
         hypothesis="T×C×DD×H 라벨 공간 7-head 확률 + setup library 교집합이 분포적으로 "
                    "상승/안정 구간을 분리한다. ATR(변동성)이 universal first-split.",
         notes="paper_ledger 실현은 next_close_return_pct(gross %) → 셀렉터가 비용 차감. "
-              "open slot 만. observed -45% vs replay +71.7% 갭 있어 policy_gate 관찰 중.",
+              "open slot 만. observed -45% vs replay +71.7% 갭 있어 policy_gate 관찰 중. "
+              "challenger_only=True 로 발송 차단(R1 단일 발송 보장).",
     ),
 ]
 
