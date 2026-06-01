@@ -112,6 +112,31 @@ MODELS: list[ModelSpec] = [
         notes="현 메인. forward closed 누적 전이라 fallback 챔피언으로 등록. "
               "open slot 은 entry_open(09:00) 확정 후 진입.",
     ),
+    # --- R2 downside-penalized 챌린저 (post-open, 별도 shadow ledger) ----------
+    #   R1 과 동일 head 확률의 재정렬(p_up10 - λ*p_dn5). r2_challenger_compare_v1
+    #   OOS(765일, 15m SL/TP/EOD net): R1 %SL 0.456/no-SL deep 0.135 →
+    #   R2 λ=1 %SL 0.272/deep 0.058 (하방 반감, net_mean 유지). 채택은 evaluator 판정 +
+    #   forward 누적 후. 지금은 challenger_only(승격 금지) — 자기 ledger record-only.
+    ModelSpec(
+        id="recommend_r2_open",
+        name="R2 risk-reward downside-penalized (challenger), post-open 09:05",
+        ledger_path="output/shadow_ledger_recommend_r2.csv",
+        slots=["open"],
+        metric=MetricSource(
+            status_col="status", closed_value="closed", date_col="date",
+            realized_pct_col="realized_pct",   # close_recommend_ledger 가 net(0.15% 차감) 저장
+            hit_col="pump20_hit", cost_already_deducted=True),
+        predict_ref="signals.recommend:score_candidates",   # ranking='R2' 로 호출
+        is_backtest_fallback=False,
+        challenger_only=True,    # forward 누적 + evaluator 판정 전까지 챔피언 승격 금지
+        hypothesis="하방을 선형 패널티(p_up10 - λ*p_dn5)로 더 강하게 누르면 stop-out/"
+                   "deep-dump 픽이 상단에서 배제돼 R1(비율) 대비 하방위험이 낮아진다 "
+                   "(사용자: 하락최소화 > 상승). OOS 15m net 경로에서 %SL·deep-loss 반감.",
+        notes="R1 과 동일 de-corr head 의 결정론적 재정렬 — 새 leak 0. R2_LAMBDA=1.0 "
+              "(recommend.py 상수, placeholder). champion_selector 가 30거래일 후 R1 vs "
+              "R2 를 동일 스키마 ledger 로 비교. daily_run 배선/활성화는 ops 단계(evaluator "
+              "ADOPT 후). 기록: scripts/recommend_today.py --ranking R2.",
+    ),
     # --- R1 pre-open 변형 (08:50 예고, 같은 스코어러 preopen slot) -------------
     ModelSpec(
         id="recommend_r1_preopen",

@@ -141,6 +141,21 @@ RR_RATIO_UP = "p_up10"     # R1 numerator
 RR_RATIO_DN = "p_dn5"      # R1 denominator (≤-5% — 사용자 ~-5% 손실 수용 anchor)
 RR_EPS = 1e-3              # downside floor (downside_head_riskreward_v1 와 동일)
 
+# --- R2 downside-penalized 정렬 (challenger — ranking="R2" 일 때만) -----------
+#   R2 = p_up10 - λ*p_dn5 (선형 패널티). R1(비율) 의 대안으로, 하방을 더 강하게
+#   눌러 stop-out·deep-dump 픽을 상단에서 배제한다 (사용자: 하방최소화 > 상승).
+#   λ 는 r2_challenger_compare_v1 OOS 비교(15m SL/TP/EOD net, 765일)로 선정:
+#     R1 %SL 0.456 / no-SL deep-loss 0.135 → R2 λ=1 %SL 0.272 / deep 0.058
+#     (λ=3 이 하방 최저지만 상방 포기 큼). λ=1 = 하방 반감 + net_mean 유지의 균형점.
+#   ★ evaluator 판정(SHADOW, 2026-06-01): 하방 Δ 는 bootstrap-유의(artifact 아님)하나
+#     net_mean Δ 비유의 + 양쪽 net-negative. compare 스크립트 auto-best=λ3.0(순수 하방최소)
+#     과 라이브 λ1.0(균형) 불일치는 의도적 — λ3 은 prec@3 0.037→0.003 으로 펌프포착을
+#     거의 포기해 레이더 취지에 안 맞음. 단 λ1 도 첫 픽이 BTC/DOGE/TRX(저변동 대형주)라
+#     "안 움직이는 것 골라 하방 낮추는" degeneracy 경향 관측 → forward 30거래일로 검증.
+#   ★ placeholder (CLAUDE.md §2.5): evaluator 판정/추가 forward 결과로 갱신 가능.
+#   ★ ranking="R1"(기본)일 때 이 상수는 사용되지 않는다 — 챔피언 경로 불변 보장.
+R2_LAMBDA = 1.0
+
 # dump_risk 게이지 구성요소 (D-1 정보). 상위 1/3 → hi-risk.
 DUMP_OVERHEAT_FEAT = "f_ret_7d"     # 과열 (ret_7d 극단 상위)
 DUMP_BOARDTOP_FEAT = "f_log_qv"     # 고유동 board-top
@@ -380,8 +395,14 @@ def _add_dump_risk(panel: pd.DataFrame, asof_date) -> pd.DataFrame:
 # 5. 공개 API — score_candidates(asof_date)
 # ==========================================================================
 def score_candidates(asof_date, limit_markets: int | None = None,
-                     slot: str = "auto") -> dict:
+                     slot: str = "auto", ranking: str = "R1") -> dict:
     """asof 기준 D-1 까지 데이터로 top-3 추천을 반환 (post-open / pre-open 양쪽).
+
+    ranking : {"R1", "R2"} (기본 "R1" — 챔피언 경로 불변)
+      - "R1": p_up10 / max(p_dn5, eps) 내림차순 (현행 챔피언, byte-identical).
+      - "R2": p_up10 - R2_LAMBDA*p_dn5 내림차순 (challenger, downside-penalized).
+      두 모드는 **동일 de-corr head 확률의 결정론적 재정렬**일 뿐 — head 학습/calibration/
+      panel 은 완전히 공유한다(새 leak 유입 0). tie-break 도 하방-우선 동일.
 
     두 호출 시점(slot):
       - **open** (09:05, post-open): asof 당일 일봉(09:00)이 이미 DB 에 있음.
@@ -445,7 +466,9 @@ def score_candidates(asof_date, limit_markets: int | None = None,
     asof = pd.Timestamp(asof_date).normalize()
     if slot not in ("auto", "open", "preopen"):
         raise ValueError(f"slot must be auto|open|preopen, got {slot!r}")
-    log.info("score_candidates asof=%s slot=%s", asof.date(), slot)
+    if ranking not in ("R1", "R2"):
+        raise ValueError(f"ranking must be R1|R2, got {ranking!r}")
+    log.info("score_candidates asof=%s slot=%s ranking=%s", asof.date(), slot, ranking)
 
     # --- 1) leak-free panel (asof 까지 — pre-open 이면 asof 봉이 아직 없을 뿐) ---
     panel = _build_panel(asof, limit_markets=limit_markets)
@@ -555,12 +578,23 @@ def score_candidates(asof_date, limit_markets: int | None = None,
     today = today_all
     today["pump_prob"] = _apply_calibration(today["score"].values, hit_map, edges, base)
     if rr_head_ok:
+        # rr_ratio(R1 키)는 항상 계산 — 출력/ledger 의 부가표시로 보존(정렬 모드 무관).
         today["rr_ratio"] = today[f"rr_{RR_RATIO_UP}"] / np.maximum(
             today[f"rr_{RR_RATIO_DN}"], RR_EPS)
-        today = today.sort_values(
-            ["rr_ratio", "rr_p_dn10", "rr_p_up10", "rr_exp_downside"],
-            ascending=[False, True, False, False])
-        rank_basis = "R1_riskreward(de-corr head)"
+        if ranking == "R1":
+            # ★ 챔피언 경로 — byte-identical 보존. 정렬키·tie-break 절대 변경 금지.
+            today = today.sort_values(
+                ["rr_ratio", "rr_p_dn10", "rr_p_up10", "rr_exp_downside"],
+                ascending=[False, True, False, False])
+            rank_basis = "R1_riskreward(de-corr head)"
+        else:  # ranking == "R2" — downside-penalized challenger.
+            # R2 = p_up10 - λ*p_dn5 내림차순. tie-break 은 R1 과 동일 하방-우선
+            # (deep-dump↓ → p_up10↑ → exp_downside↑) — 같은 head 확률의 재정렬.
+            today["rr_pen"] = today[f"rr_{RR_RATIO_UP}"] - R2_LAMBDA * today[f"rr_{RR_RATIO_DN}"]
+            today = today.sort_values(
+                ["rr_pen", "rr_p_dn10", "rr_p_up10", "rr_exp_downside"],
+                ascending=[False, True, False, False])
+            rank_basis = f"R2_penalized(λ={R2_LAMBDA}, de-corr head)"
     else:
         today["rr_ratio"] = np.nan
         today = today.sort_values("score", ascending=False)

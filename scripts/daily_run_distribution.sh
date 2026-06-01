@@ -47,10 +47,17 @@ python scripts/predict_today_distribution.py \
     >> "$LOG" 2>&1 || echo "  dist predict warn (record only)" >> "$LOG"
 
 # 4) R1 risk-reward 레이더 — 이 채널의 유일한 텔레그램 발송 + R1 SHADOW ledger 기록
-echo "[4/4] recommend_send (R1 radar, open slot) + recommend_today (R1 ledger)" >> "$LOG"
+echo "[4/5] recommend_send (R1 radar, open slot) + recommend_today (R1 ledger)" >> "$LOG"
 python scripts/recommend_send.py --slot open >> "$LOG" 2>&1 || echo "  R1 send warn" >> "$LOG"
 python scripts/recommend_today.py >> "$LOG" 2>&1
 EXIT=$?
+
+# 5) R2 challenger (downside-penalized) — SHADOW · record-only (텔레그램 X). forward 표본
+#    적립용으로 자기 ledger(shadow_ledger_recommend_r2.csv)에만 기록. challenger_only=True 라
+#    champion_selector 가 영구 차단(절대 발송 안 됨). 30거래일 후 R1 과 하방-우선 비교.
+#    실패해도 R1 운영과 무관(가드).
+echo "[5/5] recommend_today --ranking R2 (R2 challenger ledger, record-only)" >> "$LOG"
+python scripts/recommend_today.py --ranking R2 >> "$LOG" 2>&1 || echo "  R2 record warn" >> "$LOG"
 
 # 1h/15m incremental update 는 별도 research cron 으로 분리 (Phase B/C 용, 운영 critical X)
 
