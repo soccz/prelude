@@ -56,6 +56,14 @@ RECOMMEND_LEDGER_COLS = [
     "tp_pct",          # 청산 플랜 익절 = +0.05
     "status",          # 'open' → close 후 'closed'
     "calibration_source",  # bucket_score_pump20 | base_rate
+    # --- 평가용 분포/하방 확률 (SHADOW→ADOPT calibration 정직성·rr 정렬 감사용) ---
+    "p_up5",           # P(고가 ≥+5%)  calibrated
+    "p_up10",          # P(고가 ≥+10%) calibrated (R1 분자)
+    "p_up20",          # P(고가 ≥+20%) calibrated
+    "p_dn5",           # P(저가 ≤-5%)  calibrated (R1 분모, ~-5% 손실 anchor)
+    "p_dn10",          # P(저가 ≤-10%) deep-dump
+    "exp_downside",    # E[하방] (음수 low excursion 기대값)
+    "rr_ratio",        # R1 정렬키 = p_up10 / max(p_dn5, eps)
     # --- 청산 후 채움 (close_recommend_ledger.py) ---
     "exit_price",      # 청산가 (15m 경로)
     "exit_reason",     # SL | TP | EOD
@@ -105,6 +113,13 @@ def append_today(asof: str, *, dry_run: bool = False,
             "tp_pct": item["tp"],     # +0.05
             "status": "open",
             "calibration_source": res["calibration_source"],
+            "p_up5": item.get("p_up5"),
+            "p_up10": item.get("p_up10"),
+            "p_up20": item.get("p_up20"),
+            "p_dn5": item.get("p_dn5"),
+            "p_dn10": item.get("p_dn10"),
+            "exp_downside": item.get("exp_downside"),
+            "rr_ratio": item.get("rr_ratio"),
             "exit_price": pd.NA,
             "exit_reason": pd.NA,
             "realized_pct": pd.NA,

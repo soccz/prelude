@@ -48,6 +48,7 @@ NOTES.md
 output/paper_ledger.csv
 output/paper_ledger_backfill.csv
 output/paper_ledger_preopen.csv
+output/shadow_ledger_*.csv
 
 # Daily run logs (cron 산출물 — git 추적 X)
 output/distribution_log_*.json
