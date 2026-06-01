@@ -34,6 +34,11 @@ echo "[2/3] close_paper_ledger" >> "$LOG"
 python scripts/close_paper_ledger.py >> "$LOG" 2>&1
 EXIT=$?
 
+# R1 SHADOW recommend ledger 실현 (전일 open 행을 -3%SL/+5%TP 15m 경로로 청산 + pump_hit).
+# forward 표본 평가가능하려면 매일 청산 필수 — 별도 timer 없이 기존 close(09:30)에 fold.
+echo "[2b/3] close_recommend_ledger (R1 SHADOW 실현)" >> "$LOG"
+python scripts/close_recommend_ledger.py >> "$LOG" 2>&1 || echo "  recommend close warn" >> "$LOG"
+
 echo "[3/4] train_recommendation_meta (shadow-gated)" >> "$LOG"
 python scripts/train_recommendation_meta.py >> "$LOG" 2>&1 || echo "  recommendation meta train warn" >> "$LOG"
 

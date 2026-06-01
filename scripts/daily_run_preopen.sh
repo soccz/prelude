@@ -35,13 +35,18 @@ python -m data.collector_15m_upbit --all --days 1 >> "$LOG" 2>&1 || echo "  15m 
 echo "[2/3] health_check gate (preopen: d1 + 15m)" >> "$LOG"
 python scripts/health_check.py --channel preopen --no-telegram >> "$LOG" 2>&1 || echo "  health gate warn" >> "$LOG"
 
-# 3) Pre-open trigger predict + telegram
-echo "[3/3] predict_preopen_trigger (telegram daily heartbeat ON)" >> "$LOG"
+# 3) Pre-open trigger predict — RECORD ONLY (telegram OFF; R1 레이더가 발송 담당).
+#    --no-telegram 으로 발송만 끄고 shadow/paper 기록은 유지(window-gate, 대시보드 continuity).
+echo "[3/4] predict_preopen_trigger (record only — --no-telegram)" >> "$LOG"
 python scripts/predict_preopen_trigger.py \
     --top-k 8 \
     --universe top100 \
-    --send-silence-telegram \
-    >> "$LOG" 2>&1
+    --no-telegram \
+    >> "$LOG" 2>&1 || echo "  preopen predict warn (record only)" >> "$LOG"
+
+# 4) R1 risk-reward 레이더 — 이 채널의 유일한 텔레그램 발송 (downside-first, SHADOW)
+echo "[4/4] recommend_send (R1 radar, preopen slot)" >> "$LOG"
+python scripts/recommend_send.py --slot preopen >> "$LOG" 2>&1
 EXIT=$?
 
 echo "[done] $(date +%H:%M:%S) exit=$EXIT" >> "$LOG"

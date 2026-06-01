@@ -39,12 +39,13 @@ cp "$REPO/deploy/prelude-heartbeat.service"         "$UNIT_DIR/prelude-heartbeat
 cp "$REPO/deploy/prelude-heartbeat.timer"           "$UNIT_DIR/prelude-heartbeat.timer"
 
 # -----------------------------------------------------------------------------
-# [OPTIONAL] v-next 추천 레이더 스캐너 — SHADOW(검증중) 텔레그램 2회 (08:50 / 09:05)
-#   + 청산 1회 (09:35 = forward 평가 표본 누적용, 발송/주문 없는 기록-only).
-#   기존 7 timer 와 별개. 활성화하려면 아래 cp 6줄 + enable 3줄 주석 해제 후 sudo 재실행.
-#   (SHADOW 채널이라 기본 OFF — 사용자가 발송 시작을 명시할 때 켠다.)
-#   close(09:35)는 발송이 없으므로 send(am/open)와 무관하게 단독으로 켜도 안전:
-#   record 가 쌓인 ledger 의 open 행을 매일 실현해 SHADOW→ADOPT 평가 데이터를 만든다.
+# [SUPERSEDED — 설치하지 말 것] v-next 추천 레이더 timer 3종.
+#   ★ R1 레이더 발송/기록/청산은 이제 기존 timer 스크립트에 통합됨:
+#     - 08:50 prelude-preopen → daily_run_preopen.sh: preopen 발송 OFF + recommend_send(preopen)
+#     - 09:05 prelude-distribution → daily_run_distribution.sh: distribution 발송 OFF + recommend_send(open) + recommend_today
+#     - 09:30 prelude-close → daily_close_distribution.sh: + close_recommend_ledger (R1 실현)
+#   따라서 아래 recommend-am/open/close timer 는 불필요하며, 설치하면 같은 시각 중복 발송됨.
+#   기존 7 timer 만 활성(아래 enable). 별도 sudo 재실행 불필요 — 스크립트 내용만 바뀜.
 # cp "$REPO/deploy/prelude-recommend-am.service"      "$UNIT_DIR/prelude-recommend-am.service"
 # cp "$REPO/deploy/prelude-recommend-am.timer"        "$UNIT_DIR/prelude-recommend-am.timer"
 # cp "$REPO/deploy/prelude-recommend-open.service"    "$UNIT_DIR/prelude-recommend-open.service"
