@@ -59,6 +59,61 @@ BACKTEST_PUMPS = [
 ]
 
 
+def build_champion_leaderboard() -> dict:
+    """champion/challenger 리더보드 — 각 등록 모델의 forward 성과 + 현 champion 표시.
+
+    ★ 단일 정본 재사용: ops.champion_selector.compute_metric 가 셀렉터가 쓰는 바로 그
+      하방-우선 metric(P(≤-5%)·net mean·hit·n_days, 왕복 0.15% 차감)을 산출한다. 여기서
+      재계산하지 않는다 (대시보드 ↔ 셀렉터 숫자 불일치 방지). champion 마킹은
+      get_champion(slot). 데이터 없으면(forward 0행) graceful — 빈 metric.
+
+    leak 무관: compute_metric 은 CLOSED(실현된 과거) 행만 본다 (champion_selector docstring)."""
+    import pandas as pd
+
+    from ops.champion_selector import compute_metric, get_champion
+    from signals.model_registry import MODELS
+
+    asof = pd.Timestamp.now().normalize()
+    # slot 별 현 champion id (없으면 None).
+    champ_by_slot = {}
+    for slot in ("open", "preopen"):
+        entry = get_champion(slot)
+        champ_by_slot[slot] = entry.get("champion_id") if entry else None
+
+    rows = []
+    for spec in MODELS:
+        mm = compute_metric(spec, asof)
+        # 이 모델이 어느 slot 의 현 champion 인가 (open 우선 표기).
+        champ_slots = [s for s in spec.slots if champ_by_slot.get(s) == spec.id]
+        rows.append({
+            "model_id": spec.id,
+            "name": spec.name,
+            "slots": list(spec.slots),
+            "is_champion_slots": champ_slots,           # [] 면 챔피언 아님
+            "challenger_only": bool(spec.challenger_only),
+            "n_days": int(mm.n_days),                    # 독립 forward 관측(거래일)
+            "n_closed": int(mm.n_closed),
+            "deep_loss_freq_pct": (None if (mm.deep_loss_freq != mm.deep_loss_freq)
+                                   else round(mm.deep_loss_freq * 100.0, 1)),  # P(≤-5%)
+            "net_mean_pct": (None if (mm.net_mean_pct != mm.net_mean_pct)
+                             else round(mm.net_mean_pct, 2)),                  # net (비용차감)
+            "hit_rate_pct": (None if (mm.hit_rate is None or mm.hit_rate != mm.hit_rate)
+                             else round(mm.hit_rate * 100.0, 1)),
+            "gate_pass": bool(mm.gate_pass),
+            "last_date": mm.last_date,
+            "reason": mm.reason,
+        })
+    return {
+        "current_champion": champ_by_slot,
+        "deep_loss_threshold_pct": -5.0,
+        "rows": rows,
+        "note": ("하방-우선 자동선정(unattended): 1순위 P(≤-5%)↓ · 2순위 net(왕복0.15%차감)↑ · "
+                 "3순위 hit↑. forward CLOSED 거래일 n≥30 게이트 통과 + 챌린저 아님 모델만 "
+                 "챔피언 후보. 미달이면 백테스트-최선(R1) SHADOW fallback."),
+        "source": "ops.champion_selector.compute_metric (셀렉터 정본 재사용) · champion_state.json",
+    }
+
+
 def verify_backtest_pumps(db_path: str) -> list[dict]:
     """DB 일봉에서 high/open−1 을 직접 계산 (창작 X, 실측)."""
     out = []
@@ -93,9 +148,20 @@ def build_payload(db_path: str) -> dict:
     pumps = verify_backtest_pumps(db_path)
     log.info("backtest pumps verified: %d", len(pumps))
 
+    try:
+        leaderboard = build_champion_leaderboard()
+        log.info("champion leaderboard: %d models, champion(open)=%s preopen=%s",
+                 len(leaderboard["rows"]),
+                 leaderboard["current_champion"].get("open"),
+                 leaderboard["current_champion"].get("preopen"))
+    except Exception as exc:  # noqa: BLE001 — 리더보드 실패해도 나머지 findings 는 빌드.
+        log.warning("champion leaderboard build failed: %s", exc)
+        leaderboard = None
+
     return {
         "asof": datetime.now(timezone.utc).date().isoformat(),
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "champion_leaderboard": leaderboard,
         "honest_caption": (
             "레이더 정직성 차트 — 큰 펌프 *포착* 능력 + 하방 관리 + 정직한 확률. "
             "수익기 아님: 일중 최고가는 포착 크기지 실현수익 X (사람이 +5% TP 청산). "

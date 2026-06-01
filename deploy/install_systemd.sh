@@ -38,21 +38,11 @@ cp "$REPO/deploy/prelude-backup.timer"              "$UNIT_DIR/prelude-backup.ti
 cp "$REPO/deploy/prelude-heartbeat.service"         "$UNIT_DIR/prelude-heartbeat.service"
 cp "$REPO/deploy/prelude-heartbeat.timer"           "$UNIT_DIR/prelude-heartbeat.timer"
 
-# -----------------------------------------------------------------------------
-# [SUPERSEDED — 설치하지 말 것] v-next 추천 레이더 timer 3종.
-#   ★ R1 레이더 발송/기록/청산은 이제 기존 timer 스크립트에 통합됨:
-#     - 08:50 prelude-preopen → daily_run_preopen.sh: preopen 발송 OFF + recommend_send(preopen)
-#     - 09:05 prelude-distribution → daily_run_distribution.sh: distribution 발송 OFF + recommend_send(open) + recommend_today
-#     - 09:30 prelude-close → daily_close_distribution.sh: + close_recommend_ledger (R1 실현)
-#   따라서 아래 recommend-am/open/close timer 는 불필요하며, 설치하면 같은 시각 중복 발송됨.
-#   기존 7 timer 만 활성(아래 enable). 별도 sudo 재실행 불필요 — 스크립트 내용만 바뀜.
-# cp "$REPO/deploy/prelude-recommend-am.service"      "$UNIT_DIR/prelude-recommend-am.service"
-# cp "$REPO/deploy/prelude-recommend-am.timer"        "$UNIT_DIR/prelude-recommend-am.timer"
-# cp "$REPO/deploy/prelude-recommend-open.service"    "$UNIT_DIR/prelude-recommend-open.service"
-# cp "$REPO/deploy/prelude-recommend-open.timer"      "$UNIT_DIR/prelude-recommend-open.timer"
-# cp "$REPO/deploy/prelude-recommend-close.service"   "$UNIT_DIR/prelude-recommend-close.service"
-# cp "$REPO/deploy/prelude-recommend-close.timer"     "$UNIT_DIR/prelude-recommend-close.timer"
-# -----------------------------------------------------------------------------
+# ★ R1 risk-reward 레이더(champion-aware) 발송/기록/청산/셀렉터는 위 7 timer 스크립트에 통합:
+#     - 08:50 prelude-preopen → daily_run_preopen.sh: recommend_send --slot preopen
+#     - 09:05 prelude-distribution → daily_run_distribution.sh: recommend_send --slot open + recommend_today
+#     - 09:30 prelude-close → daily_close_distribution.sh: close_recommend_ledger + champion_selector
+#   별도 recommend timer 불필요 (있으면 같은 시각 중복 발송). 7 timer 만 활성.
 
 systemctl daemon-reload
 systemctl enable --now prelude-distribution.timer
@@ -62,10 +52,6 @@ systemctl enable --now prelude-preopen-close.timer
 systemctl enable --now prelude-publish-dashboard.timer
 systemctl enable --now prelude-backup.timer
 systemctl enable --now prelude-heartbeat.timer
-# [OPTIONAL] 추천 레이더 (SHADOW) — 위 cp 블록과 함께 주석 해제 시 활성화.
-# systemctl enable --now prelude-recommend-am.timer
-# systemctl enable --now prelude-recommend-open.timer
-# systemctl enable --now prelude-recommend-close.timer
 
 echo ""
 echo "=== Installed timers ==="

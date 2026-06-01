@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Pre-open trigger cron entry — KST 08:55.
-# Telegram sends every day: ACTIVE recommendation or concise silence/status.
+# Pre-open trigger cron entry — KST 08:50 (timer: 23:50 UTC).
+# Telegram: R1 risk-reward radar via recommend_send --slot preopen (champion-aware).
 
 set -euo pipefail
 

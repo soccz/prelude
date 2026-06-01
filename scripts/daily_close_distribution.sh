@@ -39,6 +39,11 @@ EXIT=$?
 echo "[2b/3] close_recommend_ledger (R1 SHADOW 실현)" >> "$LOG"
 python scripts/close_recommend_ledger.py >> "$LOG" 2>&1 || echo "  recommend close warn" >> "$LOG"
 
+# champion/challenger 재선정 (unattended). 위 close 들이 forward CLOSED 행을 갱신한 *뒤*
+# 돌려야 rolling 윈도가 최신 → 다음날 발송(08:50/09:05)이 새 champion 을 쓴다. 별도 timer 불필요.
+echo "[2c/3] champion_selector (forward 갱신 후 재선정 — 다음날 발송용)" >> "$LOG"
+python -m ops.champion_selector >> "$LOG" 2>&1 || echo "  champion_selector warn" >> "$LOG"
+
 echo "[3/4] train_recommendation_meta (shadow-gated)" >> "$LOG"
 python scripts/train_recommendation_meta.py >> "$LOG" 2>&1 || echo "  recommendation meta train warn" >> "$LOG"
 
