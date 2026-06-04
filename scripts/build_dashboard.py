@@ -1589,6 +1589,7 @@ def main():
     idea_validation = _load_optional_json("output/idea_validation_summary.json")
     meta_model = _load_optional_json("output/recommendation_meta_validation.json")
     policy_competition = _load_optional_json("output/policy_competition_summary.json")
+    pump_hunter = _build_pump_hunter_payload("output/shadow_ledger_pump_hunter.csv")
 
     summary = {
         "asof": asof.isoformat(),
@@ -1617,6 +1618,7 @@ def main():
         "idea_validation": idea_validation,  # full summary (model_card / quality / replay / gate)
         "meta_model": meta_model,  # recommendation_quality_meta_label_v1 학습 결과
         "policy_competition": policy_competition,  # model + send-policy CLOSED forward audit
+        "pump_hunter": pump_hunter,  # PUMP detector SHADOW — 오늘 watchlist + 일별 capture
     }
     _write_json(out_dir / "summary.json", summary, passphrase=pin)
     log.info(f"saved summary.json (idea_validation={bool(idea_validation)}, meta_model={bool(meta_model)})")
@@ -1708,6 +1710,81 @@ def _load_or_empty(path: str | Path) -> pd.DataFrame:
     if "status" in df.columns:
         df["status"] = df["status"].fillna("").astype(str)
     return df
+
+
+def _build_pump_hunter_payload(ledger_path: str) -> dict | None:
+    """PUMP hunter SHADOW dashboard payload — 오늘 watchlist + 일별 capture 시계열.
+
+    shadow_ledger_pump_hunter.csv 가 아직 없으면 None (cron 1회 후 생성).
+    challenger_only — Telegram/ACTIVE 승격 금지가 코드 레벨에서 보장됨.
+    """
+    p = Path(ledger_path)
+    if not p.exists():
+        return {
+            "status": "pending_first_cron",
+            "note": "shadow_ledger_pump_hunter.csv 가 아직 없음 — 내일 09:05 cron 후 첫 row 생성",
+        }
+    try:
+        df = pd.read_csv(p)
+    except Exception:
+        return None
+    if df.empty or "date" not in df.columns:
+        return {"status": "empty", "note": "ledger empty", "rows_total": 0}
+
+    df = df.copy()
+    df["date"] = df["date"].astype(str)
+    latest_date = df["date"].max()
+
+    # 오늘 (가장 최근 date) 의 watchlist — rank 순으로 표시
+    today_df = df[df["date"] == latest_date].copy()
+    if "rank" in today_df.columns:
+        today_df = today_df.sort_values("rank")
+    watchlist = []
+    for _, r in today_df.iterrows():
+        watchlist.append({
+            "rank": int(r.get("rank")) if pd.notna(r.get("rank")) else None,
+            "coin": str(r.get("coin", "")).replace("KRW-", ""),
+            "score": float(r.get("score")) if pd.notna(r.get("score")) else None,
+            "pump_prob_pct": float(r.get("pump_prob_pct")) if pd.notna(r.get("pump_prob_pct")) else None,
+            "rule_id": str(r.get("rule_id", "")),
+            "roc_7d_rank": float(r.get("roc_7d_rank")) if pd.notna(r.get("roc_7d_rank")) else None,
+            "atr_pct_14": float(r.get("atr_pct_14")) if pd.notna(r.get("atr_pct_14")) else None,
+            "log_return_1d": float(r.get("log_return_1d")) if pd.notna(r.get("log_return_1d")) else None,
+            "status": str(r.get("status", "")),
+        })
+
+    # 일별 capture rate — closed row 만 (pump20_hit 컬럼이 있을 때)
+    daily = []
+    closed = df[df.get("status", "").astype(str) == "closed"] if "status" in df.columns else df.iloc[0:0]
+    if len(closed) and "pump20_hit" in closed.columns:
+        grp = closed.groupby("date").agg(
+            n_picks=("coin", "count"),
+            n_pump20_hit=("pump20_hit", lambda s: int(pd.to_numeric(s, errors="coerce").fillna(0).sum())),
+        ).reset_index()
+        grp["capture_pct"] = (grp["n_pump20_hit"] / grp["n_picks"].clip(lower=1)) * 100.0
+        for _, r in grp.iterrows():
+            daily.append({
+                "date": str(r["date"]),
+                "n_picks": int(r["n_picks"]),
+                "n_pump20_hit": int(r["n_pump20_hit"]),
+                "capture_pct": float(r["capture_pct"]),
+            })
+
+    # 누적 요약
+    total_n = int(len(df))
+    closed_n = int(len(closed))
+    pump_hits = int(pd.to_numeric(closed.get("pump20_hit", pd.Series([])), errors="coerce").fillna(0).sum()) if closed_n else 0
+    return {
+        "status": "live",
+        "latest_date": latest_date,
+        "rows_total": total_n,
+        "rows_closed": closed_n,
+        "pump20_hits_total": pump_hits,
+        "pump20_capture_pct": (pump_hits / closed_n * 100.0) if closed_n else None,
+        "watchlist": watchlist,
+        "daily_capture": daily,
+        "note": "challenger_only — Telegram/ACTIVE 승격 금지 (코드 레벨 차단). record-only.",
+    }
 
 
 def _sanitize_json(obj):

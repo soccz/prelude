@@ -59,6 +59,13 @@ EVENTS: list[PolicyEvent] = [
         category="milestone",
         description="silent fail 방지 (heartbeat 10:30 KST), DB atomic backup (04:00 KST). 대시보드는 hardcoded narrative 제거, 데이터 기반 자동 렌더로 전환.",
     ),
+    PolicyEvent(
+        date="2026-06-04",
+        label="PUMP hunter SHADOW + policy_competition",
+        headline="아이디어 확장 — model × send-policy 25 조합 record-only 감사 + PUMP detector",
+        category="policy",
+        description="기존 R1/R2/A1/distribution_engine 만으로는 +20% 급등 capture 0%~17% 천장. pump_rule_discovery 의 D-1 leak-free 룰 (roc_7d > 0.85 등) 을 별도 detector 로 배선해 매일 15 watchlist 를 shadow_ledger 에 기록. challenger_only=True 라 Telegram/ACTIVE 승격은 코드 레벨 차단. policy_competition 표가 누적 후 pump_hunter vs 기존 모델을 자동 비교. + publish_dashboard 에 preflight guard (충돌 site repo 차단).",
+    ),
 ]
 
 
