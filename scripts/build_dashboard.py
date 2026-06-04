@@ -1588,6 +1588,7 @@ def main():
 
     idea_validation = _load_optional_json("output/idea_validation_summary.json")
     meta_model = _load_optional_json("output/recommendation_meta_validation.json")
+    policy_competition = _load_optional_json("output/policy_competition_summary.json")
 
     summary = {
         "asof": asof.isoformat(),
@@ -1615,6 +1616,7 @@ def main():
         },
         "idea_validation": idea_validation,  # full summary (model_card / quality / replay / gate)
         "meta_model": meta_model,  # recommendation_quality_meta_label_v1 학습 결과
+        "policy_competition": policy_competition,  # model + send-policy CLOSED forward audit
     }
     _write_json(out_dir / "summary.json", summary, passphrase=pin)
     log.info(f"saved summary.json (idea_validation={bool(idea_validation)}, meta_model={bool(meta_model)})")
@@ -1679,6 +1681,7 @@ def main():
     idea_candidates = load_idea_candidate_ledger(args)
     _, idea_payload = build_idea_validation_report(idea_candidates)
     idea_payload["asof"] = asof.isoformat()
+    idea_payload["policy_competition"] = policy_competition
     _write_json(out_dir / "idea_validation.json", idea_payload, passphrase=pin)
     log.info(f"saved idea_validation.json ({idea_payload.get('n_candidates', 0)} candidates)")
 

@@ -542,6 +542,7 @@ def build_model_card(enriched: pd.DataFrame) -> dict:
         "decision_layers": [
             "XGBoost candidate generation",
             "setup/regime decision policy",
+            "model + send-policy competition audit",
             "historical recommendation-quality meta-filter",
             "paper/shadow ledger validation",
             "policy gate for promotion/demotion",
@@ -583,6 +584,17 @@ def build_model_card(enriched: pd.DataFrame) -> dict:
     }
 
 
+def _load_policy_competition(path: str | Path = "output/policy_competition_summary.json") -> dict | None:
+    p = Path(path)
+    if not p.exists():
+        return None
+    try:
+        with open(p) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def build_report(candidates: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     enriched = add_result_columns(candidates)
     replay_active = enriched[enriched.get("policy_decision_v1", pd.Series(dtype=str)).astype(str) == ACTIVE]
@@ -617,6 +629,7 @@ def build_report(candidates: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
         "recommendation_quality": build_recommendation_quality(enriched),
         "policy_replay": build_policy_replay(enriched),
         "policy_recommendations": build_policy_recommendations(enriched),
+        "policy_competition": _load_policy_competition(),
         "tables": {
             "summary": summary_df.to_dict(orient="records"),
         },

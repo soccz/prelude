@@ -44,6 +44,42 @@ notify_fail() {
         >> "$LOG" 2>&1 || true
 }
 
+preflight_site_repo() {
+    if [ ! -d "$SITE_ROOT/.git" ]; then
+        echo "[fail] site repo missing: $SITE_ROOT" >> "$LOG"
+        notify_fail "preflight" "site repo missing: $SITE_ROOT"
+        exit 2
+    fi
+
+    cd "$SITE_ROOT"
+
+    UNMERGED=$(git diff --name-only --diff-filter=U)
+    if [ -n "$UNMERGED" ]; then
+        echo "[fail] site repo has unresolved conflicts before publish" >> "$LOG"
+        echo "$UNMERGED" | sed 's/^/  /' >> "$LOG"
+        notify_fail "preflight" "site repo has unresolved conflicts; publish skipped"
+        exit 2
+    fi
+
+    DIRTY=$(git status --porcelain --untracked-files=no)
+    if [ -n "$DIRTY" ]; then
+        echo "[fail] site repo dirty before publish" >> "$LOG"
+        echo "$DIRTY" | sed 's/^/  /' >> "$LOG"
+        notify_fail "preflight" "site repo dirty before publish; publish skipped"
+        exit 2
+    fi
+
+    cd "$PROJ_ROOT"
+}
+
+preflight_site_repo
+
+# 0) policy competition audit — dashboard 가 stale summary 를 읽지 않게 publish 직전 갱신.
+#    record-only 이므로 Telegram/champion state 는 건드리지 않는다.
+echo "[0/3] policy_competition (dashboard audit refresh)" >> "$LOG"
+python -m ops.policy_competition >> "$LOG" 2>&1 \
+    || echo "[warn] policy_competition 실패 (기존 competition summary 로 publish 계속)" >> "$LOG"
+
 # 1) build JSON
 echo "[1/3] build_dashboard.py" >> "$LOG"
 python scripts/build_dashboard.py --out-dir "$DATA_DIR" >> "$LOG" 2>&1

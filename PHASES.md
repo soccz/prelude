@@ -25,8 +25,21 @@
 - [ ] **Stage 3** (NOTES 기반 사용자 실제 매매 vs system 추천 비교)
 - [x] **Phase X+1 초안** — Distribution head (multi-target) + pre-open trigger 운영 후보
 - [x] **Phase X+4** — 정책 채택 (distribution PROMOTE_PAPER + preopen DEMOTE) 2026-05-26 사용자 컨펌
+- [x] **Phase X+5** — PUMP hunter rule detector SHADOW 배선 2026-06-04
 - [ ] [Research] Downside guard / 4h confirmation tier (병렬)
 - [ ] [Later] MTF features / regime split / Optuna
+
+### Phase X+5 — PUMP hunter rule detector SHADOW 배선 (2026-06-04)
+
+**의도**: pump_rule_discovery_v1 에서 찾은 급등 선행 rule 을 실제 daily record-only detector 로 배선.
+
+- `signals/pump_detector_v1.py` — D-1 `roc_7d_rank`, `atr_pct_14`, `log_return_1d` rule 적용.
+- `scripts/pump_detector_today.py` — `output/shadow_ledger_pump_hunter.csv` 에 max 20 watchlist 기록.
+- `signals/model_registry.py` — `pump_hunter` 추가. `challenger_only=True`, Telegram/ACTIVE 승격 금지.
+- `scripts/daily_run_distribution.sh` / `scripts/daily_close_distribution.sh` — 매일 기록 + 기존 15m close path 로 CLOSED 전환.
+- `ops.policy_competition` 이 CLOSED forward rows 누적 후 기존 모델들과 pump20 recall / net / downside 를 자동 비교.
+
+**게이트**: 새 detector 는 SHADOW only. 별도 Telegram 채널/ACTIVE 통합은 forward 표본 + evaluator 판정 + 사용자 컨펌 전까지 금지.
 
 ### Phase X+4 — 정책 채택 (2026-05-26 사용자 컨펌)
 

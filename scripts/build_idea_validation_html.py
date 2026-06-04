@@ -247,6 +247,69 @@ def _accuracy_section(payload: dict) -> str:
     """
 
 
+def _policy_competition_table(payload: dict) -> str:
+    pc = payload.get("policy_competition") or {}
+    rows = [r for r in pc.get("rows", []) if (r.get("n_closed") or 0) > 0]
+    if not rows:
+        return "<tr><td colspan=\"9\" class=\"muted\">No closed policy competition rows yet.</td></tr>"
+    rows.sort(
+        key=lambda r: (
+            float(r.get("pump20_recall_pct") or -1),
+            float(r.get("net_mean_pct") or -999),
+            int(r.get("n_closed") or 0),
+        ),
+        reverse=True,
+    )
+    body = []
+    for row in rows[:16]:
+        body.append(
+            "<tr>"
+            f"<td>{html.escape(str(row.get('participant_id')))}</td>"
+            f"<td>{html.escape(str(row.get('objective')))}</td>"
+            f"<td>{_fmt(row.get('n_closed'), digits=0)}</td>"
+            f"<td>{_fmt(row.get('n_days'), digits=0)}</td>"
+            f"<td>{_fmt(row.get('net_mean_pct'), '%p')}</td>"
+            f"<td>{_fmt(row.get('deep_loss_freq_pct'), '%')}</td>"
+            f"<td>{_fmt(row.get('pump20_precision_pct'), '%')}</td>"
+            f"<td>{_fmt(row.get('pump20_recall_pct'), '%')}</td>"
+            f"<td>{_fmt(row.get('pump20_captured'), digits=0)} / {_fmt(row.get('pump20_actual'), digits=0)}</td>"
+            "</tr>"
+        )
+    return "\n".join(body)
+
+
+def _policy_competition_section(payload: dict) -> str:
+    pc = payload.get("policy_competition") or {}
+    if not pc:
+        return """
+        <section class="block">
+          <h2>Policy Competition</h2>
+          <p class="muted">No policy competition artifact yet.</p>
+        </section>
+        """
+    cfg = pc.get("config", {})
+    return f"""
+    <section class="block">
+      <h2>Policy Competition</h2>
+      <p class="muted">
+        Model + send-policy audit · asof {html.escape(str(pc.get('asof', '')))}
+        · P(+20%) threshold {_fmt(cfg.get('pump20_threshold'), digits=2)}
+        · record-only, no Telegram promotion.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>participant</th><th>objective</th><th>closed</th><th>days</th>
+            <th>net avg</th><th>deep loss</th><th>pump precision</th>
+            <th>pump recall</th><th>captured</th>
+          </tr>
+        </thead>
+        <tbody>{_policy_competition_table(payload)}</tbody>
+      </table>
+    </section>
+    """
+
+
 def render_html(payload: dict) -> str:
     generated = html.escape(str(payload.get("generated_at", "")))
     now = datetime.now().isoformat(timespec="seconds")
@@ -323,6 +386,7 @@ def render_html(payload: dict) -> str:
   <main>
     {_model_card(payload)}
     {_accuracy_section(payload)}
+    {_policy_competition_section(payload)}
     <div class="grid">
       {_gate_cards(payload)}
     </div>
@@ -353,9 +417,15 @@ def render_html(payload: dict) -> str:
 """
 
 
-def build_html(input_json: str | Path, out_html: str | Path) -> None:
+def build_html(input_json: str | Path, out_html: str | Path,
+               policy_competition_json: str | Path | None = None) -> None:
     with open(input_json) as f:
         payload = json.load(f)
+    if policy_competition_json is not None and "policy_competition" not in payload:
+        pc_path = Path(policy_competition_json)
+        if pc_path.exists():
+            with open(pc_path) as f:
+                payload["policy_competition"] = json.load(f)
     out = Path(out_html)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(render_html(payload), encoding="utf-8")
@@ -365,8 +435,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-json", default="output/idea_validation_summary.json")
     parser.add_argument("--out-html", default="output/idea_validation_report.html")
+    parser.add_argument("--policy-competition-json", default="output/policy_competition_summary.json")
     args = parser.parse_args()
-    build_html(args.input_json, args.out_html)
+    build_html(args.input_json, args.out_html, args.policy_competition_json)
     print(f"saved {args.out_html}")
 
 

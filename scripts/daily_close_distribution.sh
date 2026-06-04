@@ -55,10 +55,18 @@ python scripts/close_recommend_ledger.py --ledger output/shadow_ledger_recommend
 # R1 vs A1 을 forward CLOSED 로 비교하려면 A1 도 매일 청산돼야 함. 실패해도 R1/champion 무관(가드).
 python scripts/close_recommend_ledger.py --ledger output/shadow_ledger_recommend_sustain.csv >> "$LOG" 2>&1 || echo "  A1 recommend close warn" >> "$LOG"
 
+# PUMP hunter rule detector ledger 실현 (동일 -3%SL/+5%TP 15m 경로 + pump20_hit).
+# policy_competition 이 pump20 recall / net / downside 를 기존 모델들과 비교하려면
+# 별도 shadow ledger 도 매일 CLOSED 로 전환돼야 한다. 실패해도 R1/champion 무관(가드).
+python scripts/close_recommend_ledger.py --ledger output/shadow_ledger_pump_hunter.csv >> "$LOG" 2>&1 || echo "  PUMP hunter close warn" >> "$LOG"
+
 # champion/challenger 재선정 (unattended). 위 close 들이 forward CLOSED 행을 갱신한 *뒤*
 # 돌려야 rolling 윈도가 최신 → 다음날 발송(08:50/09:05)이 새 champion 을 쓴다. 별도 timer 불필요.
 echo "[2c/3] champion_selector (forward 갱신 후 재선정 — 다음날 발송용)" >> "$LOG"
 python -m ops.champion_selector >> "$LOG" 2>&1 || echo "  champion_selector warn" >> "$LOG"
+
+echo "[2d/3] policy_competition (model + send-policy forward audit)" >> "$LOG"
+python -m ops.policy_competition >> "$LOG" 2>&1 || echo "  policy_competition warn" >> "$LOG"
 
 echo "[3/4] train_recommendation_meta (shadow-gated)" >> "$LOG"
 python scripts/train_recommendation_meta.py >> "$LOG" 2>&1 || echo "  recommendation meta train warn" >> "$LOG"

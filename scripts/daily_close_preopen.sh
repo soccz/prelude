@@ -41,6 +41,9 @@ fi
 echo "[3/4] train_recommendation_meta (shadow-gated)" >> "$LOG"
 python scripts/train_recommendation_meta.py >> "$LOG" 2>&1 || echo "  recommendation meta train warn" >> "$LOG"
 
+echo "[3b/4] policy_competition (model + send-policy forward audit)" >> "$LOG"
+python -m ops.policy_competition >> "$LOG" 2>&1 || echo "  policy_competition warn" >> "$LOG"
+
 echo "[4/4] idea_validation_report" >> "$LOG"
 python scripts/idea_validation_report.py >> "$LOG" 2>&1 || echo "  idea validation warn" >> "$LOG"
 python scripts/build_idea_validation_html.py >> "$LOG" 2>&1 || echo "  idea validation html warn" >> "$LOG"

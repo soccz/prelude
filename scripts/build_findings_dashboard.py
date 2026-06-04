@@ -45,6 +45,8 @@ from scripts.build_dashboard import (  # noqa: E402
 log = logging.getLogger("findings")
 
 DB_PATH = "data/upbit_d1.db"
+POLICY_COMPETITION_JSON = "output/policy_competition_summary.json"
+POLICY_COMPETITION_DB = "data/policy_competition.db"
 
 # ── 5월 backtest top-3 가 포착한 펌프 (일중 최고가 = high/open − 1, DB 재검증) ──
 # ★ 포착 크기지 실현수익 아님. 사람이 +5% TP 청산.
@@ -114,6 +116,99 @@ def build_champion_leaderboard() -> dict:
     }
 
 
+def build_policy_competition_panel(
+    summary_path: str = POLICY_COMPETITION_JSON,
+    db_path: str = POLICY_COMPETITION_DB,
+) -> dict | None:
+    """Model + send-policy competition panel for dashboard findings.
+
+    This consumes the record-only artifact produced after close-out. It does
+    not promote or demote anything; it makes the send/no-send policy measurable.
+    """
+    path = Path(summary_path)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        log.warning("policy competition json invalid: %s", summary_path)
+        return None
+
+    rows = [r for r in payload.get("rows", []) if int(r.get("n_closed") or 0) > 0]
+    rows.sort(
+        key=lambda r: (
+            float(r.get("pump20_recall_pct") or -1),
+            float(r.get("net_mean_pct") or -999),
+            int(r.get("n_closed") or 0),
+        ),
+        reverse=True,
+    )
+
+    def _top(metric: str) -> dict | None:
+        valid = [r for r in rows if r.get(metric) is not None]
+        if not valid:
+            return None
+        return max(
+            valid,
+            key=lambda r: (
+                float(r.get(metric) or -999),
+                float(r.get("net_mean_pct") or -999),
+                int(r.get("n_closed") or 0),
+            ),
+        )
+
+    db_info = {"path": db_path, "exists": Path(db_path).exists()}
+    if db_info["exists"]:
+        con = sqlite3.connect(db_path)
+        try:
+            latest = con.execute(
+                "SELECT asof, row_count, best_pump_participant, best_net_participant "
+                "FROM policy_competition_runs ORDER BY asof DESC LIMIT 1"
+            ).fetchone()
+            db_info.update({
+                "latest_asof": latest[0] if latest else None,
+                "latest_row_count": latest[1] if latest else 0,
+                "best_pump_participant": latest[2] if latest else None,
+                "best_net_participant": latest[3] if latest else None,
+            })
+        finally:
+            con.close()
+
+    r1_like = [
+        r for r in rows
+        if str(r.get("source_id")) in {
+            "recommend_r1_open",
+            "recommend_r2_open",
+            "recommend_r1_sustain_open",
+            "R1/R2/A1",
+        }
+    ]
+    r1_captured = sum(int(r.get("pump20_captured") or 0) for r in r1_like)
+
+    return {
+        "asof": payload.get("asof"),
+        "generated_at_utc": payload.get("generated_at_utc"),
+        "config": payload.get("config", {}),
+        "best_pump_recall": _top("pump20_recall_pct"),
+        "best_net_mean": _top("net_mean_pct"),
+        "rows": rows[:16],
+        "database": db_info,
+        "diagnosis": {
+            "r1_r2_a1_pump20_captured_total": int(r1_captured),
+            "message": (
+                "R1/R2/A1 계열은 현 forward 표본에서 +20% 급등 recall 이 낮다. "
+                "실전 알림 전환 전, PUMP/WATCH 후보 생성기와 send/no-send policy 를 "
+                "분리해 경쟁시켜야 한다."
+            ),
+        },
+        "note": (
+            "Record-only model + send-policy competition. CLOSED forward rows only; "
+            "pump20_recall denominator is all KRW +20% daily high/open events for the same dates."
+        ),
+        "source": "output/policy_competition_summary.json + data/policy_competition.db",
+    }
+
+
 def verify_backtest_pumps(db_path: str) -> list[dict]:
     """DB 일봉에서 high/open−1 을 직접 계산 (창작 X, 실측)."""
     out = []
@@ -158,10 +253,19 @@ def build_payload(db_path: str) -> dict:
         log.warning("champion leaderboard build failed: %s", exc)
         leaderboard = None
 
+    try:
+        policy_competition = build_policy_competition_panel()
+        log.info("policy competition panel: %s",
+                 policy_competition.get("asof") if policy_competition else "none")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("policy competition panel failed: %s", exc)
+        policy_competition = None
+
     return {
         "asof": datetime.now(timezone.utc).date().isoformat(),
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "champion_leaderboard": leaderboard,
+        "policy_competition": policy_competition,
         "honest_caption": (
             "레이더 정직성 차트 — 큰 펌프 *포착* 능력 + 하방 관리 + 정직한 확률. "
             "수익기 아님: 일중 최고가는 포착 크기지 실현수익 X (사람이 +5% TP 청산). "
@@ -284,6 +388,14 @@ def main():
     print("\n=== findings.json ===")
     for p in payload["backtest_pumps"]["pumps"]:
         print(f"  {p['coin']:<8} {p['date']}  +{p['pump_pct']:.1f}% (포착)")
+    pc = payload.get("policy_competition") or {}
+    best = pc.get("best_pump_recall") or {}
+    if best:
+        print(
+            "  policy competition best pump recall: "
+            f"{best.get('participant_id')} "
+            f"{best.get('pump20_captured')}/{best.get('pump20_actual')}"
+        )
     print(f"\nout_dir: {out_dir}")
 
 

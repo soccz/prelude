@@ -81,6 +81,24 @@ def _payload():
                 }
             ]
         },
+        "policy_competition": {
+            "asof": "2026-06-04",
+            "config": {"pump20_threshold": 0.20},
+            "rows": [
+                {
+                    "participant_id": "distribution_engine:top_all",
+                    "objective": "baseline",
+                    "n_closed": 147,
+                    "n_days": 24,
+                    "net_mean_pct": -0.7157,
+                    "deep_loss_freq_pct": 31.2925,
+                    "pump20_precision_pct": 10.2041,
+                    "pump20_recall_pct": 17.8571,
+                    "pump20_captured": 15,
+                    "pump20_actual": 84,
+                }
+            ],
+        },
         "tables": {
             "summary": [
                 {
@@ -113,6 +131,9 @@ def test_render_html_contains_gate_and_idea_table():
     assert "cat__setup_quality_A_TRIPLE" in html
     assert "Recommendation Quality" in html
     assert "EVIDENCE_OK" in html
+    assert "Policy Competition" in html
+    assert "distribution_engine:top_all" in html
+    assert "15 / 84" in html
 
 
 def test_build_html_writes_file(tmp_path):

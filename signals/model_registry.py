@@ -164,6 +164,30 @@ MODELS: list[ModelSpec] = [
               "비교. 기록: scripts/recommend_today.py --ranking A1 (record-only). "
               "trade-off 관측: 하방 개선의 대가로 prec20 도 깎임 → forward 로 재현 확인.",
     ),
+    # --- PUMP hunter rule detector (post-open, 별도 shadow ledger) ------------
+    #   pump_rule_discovery_v1 에서 채굴한 일봉 급등 rule 을 실제 daily detector 로
+    #   배선한다. ML detector/promoted model 이 아니라 해석 가능한 rule-fire watchlist.
+    #   forward 표본이 쌓일 때까지 challenger_only=True 로 record-only.
+    ModelSpec(
+        id="pump_hunter",
+        name="PUMP hunter rule detector (challenger), post-open 09:05",
+        ledger_path="output/shadow_ledger_pump_hunter.csv",
+        slots=["open"],
+        metric=MetricSource(
+            status_col="status", closed_value="closed", date_col="date",
+            realized_pct_col="realized_pct",
+            hit_col="pump20_hit", cost_already_deducted=True),
+        predict_ref="signals.pump_detector_v1:score_pump_candidates",
+        is_backtest_fallback=False,
+        challenger_only=True,
+        hypothesis="D-1 roc_7d 횡단 rank 상위권(>0.85)과 ATR/과열 제한 rule 이 "
+                   "day-D 장중 +20%/+15% 급등 후보를 기존 R1/R2보다 넓게 포착한다. "
+                   "룰은 pump_rule_discovery_v1 의 leak-free feature_date=D-1 mining 결과.",
+        notes="별도 shadow ledger 에 max 20 watchlist 를 기록. Telegram/ACTIVE 발송 없음. "
+              "policy_competition 이 CLOSED forward rows 에서 pump20_recall/net/downside 를 "
+              "기존 5개 모델과 자동 비교한다. 충분한 표본 + evaluator 판정 + 사용자 컨펌 "
+              "전까지 승격 금지.",
+    ),
     # --- R1 pre-open 변형 (08:50 예고, 같은 스코어러 preopen slot) -------------
     ModelSpec(
         id="recommend_r1_preopen",
@@ -229,6 +253,11 @@ PREDICT_INTERFACES = {
         "DistributionEngine.load(ckpt_dir).score_panel(panel: DataFrame) -> DataFrame\n"
         "  panel 은 build_*_features 산출(leak-free D-1 feature). 반환: p_<head> 컬럼 부착.\n"
         "  open slot 전용 (paper_ledger 파이프)."
+    ),
+    "signals.pump_detector_v1:score_pump_candidates": (
+        "score_pump_candidates(asof_date, top_universe=100, max_candidates=20) -> dict\n"
+        "  open slot 전용 rule detector. D-1 roc_7d_rank/atr/log_return rule-fire 후보를 "
+        "별도 shadow ledger 에 record-only 로 남긴다."
     ),
 }
 

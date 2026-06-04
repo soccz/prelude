@@ -70,15 +70,29 @@ for ledger in "$PROJ_ROOT/output/paper_ledger.csv" "$PROJ_ROOT/output/paper_ledg
     fi
 done
 
-# 2) DB integrity (빠른 점검 — d1 만)
-DB="$PROJ_ROOT/data/upbit_d1.db"
-if [ -f "$DB" ]; then
+# 2) DB integrity (빠른 점검)
+for DB in "$PROJ_ROOT/data/upbit_d1.db" "$PROJ_ROOT/data/policy_competition.db"; do
+    [ -f "$DB" ] || continue
+    db_name=$(basename "$DB")
     result=$(sqlite3 "$DB" "PRAGMA integrity_check(1);" 2>>"$LOG")
     if [ "$result" != "ok" ]; then
-        WARN "upbit_d1.db integrity FAIL: $result"
+        WARN "$db_name integrity FAIL: $result"
     else
-        echo "  upbit_d1.db integrity ok" >> "$LOG"
+        echo "  $db_name integrity ok" >> "$LOG"
     fi
+done
+
+# 2b) policy competition JSON — dashboard/publish 가 strict JSON.parse 가능해야 함.
+POLICY_JSON="$PROJ_ROOT/output/policy_competition_summary.json"
+if [ -f "$POLICY_JSON" ]; then
+    json_result=$(python -c "import json,sys; json.load(open(sys.argv[1])); print('ok')" "$POLICY_JSON" 2>>"$LOG")
+    if [ "$json_result" != "ok" ]; then
+        WARN "policy_competition_summary.json parse FAIL"
+    else
+        echo "  policy_competition_summary.json parse ok" >> "$LOG"
+    fi
+else
+    WARN "policy_competition_summary.json 없음"
 fi
 
 # 3) disk 사용량

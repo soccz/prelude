@@ -63,8 +63,15 @@ python scripts/recommend_today.py --ranking R2 >> "$LOG" 2>&1 || echo "  R2 reco
 #    dump head 로 dump-prone 픽 강등→교체. 자기 ledger(shadow_ledger_recommend_sustain.csv)
 #    에만 기록. challenger_only=True 라 champion_selector 가 영구 차단(절대 발송 안 됨).
 #    30거래일 후 R1 과 하방-우선 비교. 실패해도 R1 운영과 무관(가드).
-echo "[6/6] recommend_today --ranking A1 (A1 sustainability ledger, record-only)" >> "$LOG"
+echo "[6/7] recommend_today --ranking A1 (A1 sustainability ledger, record-only)" >> "$LOG"
 python scripts/recommend_today.py --ranking A1 >> "$LOG" 2>&1 || echo "  A1 record warn" >> "$LOG"
+
+# 7) PUMP hunter rule detector — SHADOW · record-only (텔레그램 X). pump_rule_discovery_v1
+#    에서 채굴한 D-1 roc_7d/ATR/log_return 룰을 매일 별도 ledger 에 기록한다.
+#    challenger_only=True 라 champion_selector 가 발송 승격하지 않음. policy_competition 이
+#    CLOSED forward rows 로 기존 모델들과 pump20 recall/net/downside 를 비교.
+echo "[7/7] pump_detector_today (PUMP hunter ledger, record-only)" >> "$LOG"
+python scripts/pump_detector_today.py >> "$LOG" 2>&1 || echo "  PUMP hunter record warn" >> "$LOG"
 
 # 1h/15m incremental update 는 별도 research cron 으로 분리 (Phase B/C 용, 운영 critical X)
 
