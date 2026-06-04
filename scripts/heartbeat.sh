@@ -95,11 +95,11 @@ else
     WARN "policy_competition_summary.json 없음"
 fi
 
-# 3) disk 사용량
-USAGE=$(df /mnt/20t 2>/dev/null | awk 'NR==2 {print $5}' | tr -d '%')
-echo "  /mnt/20t disk 사용 ${USAGE}%" >> "$LOG"
+# 3) disk 사용량 — /home/soccz/22tb (= /mnt/20t symlink, CLAUDE.md 규칙 준수)
+USAGE=$(df /home/soccz/22tb 2>/dev/null | awk 'NR==2 {print $5}' | tr -d '%')
+echo "  /home/soccz/22tb disk 사용 ${USAGE}%" >> "$LOG"
 if [ -n "$USAGE" ] && [ "$USAGE" -ge 90 ]; then
-    WARN "/mnt/20t disk ${USAGE}% (≥90%)"
+    WARN "/home/soccz/22tb disk ${USAGE}% (≥90%)"
 fi
 
 # 4) publish.log 최근 line
