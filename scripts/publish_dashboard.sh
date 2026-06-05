@@ -53,6 +53,7 @@ preflight_site_repo() {
 
     cd "$SITE_ROOT"
 
+    # 진짜 병합충돌(unmerged)만 하드 실패 — 사람 개입 필요.
     UNMERGED=$(git diff --name-only --diff-filter=U)
     if [ -n "$UNMERGED" ]; then
         echo "[fail] site repo has unresolved conflicts before publish" >> "$LOG"
@@ -61,12 +62,16 @@ preflight_site_repo() {
         exit 2
     fi
 
-    DIRTY=$(git status --porcelain --untracked-files=no)
-    if [ -n "$DIRTY" ]; then
-        echo "[fail] site repo dirty before publish" >> "$LOG"
-        echo "$DIRTY" | sed 's/^/  /' >> "$LOG"
-        notify_fail "preflight" "site repo dirty before publish; publish skipped"
-        exit 2
+    # ★ self-heal (2026-06-05): 우리 소유(재생성 가능) data 디렉토리에 남은 dirty/untracked 를
+    #   origin 상태로 되돌린다. 이전 run 이 build 후 commit 전에 죽으면 data 가 dirty 로 남아
+    #   예전엔 "dirty before publish" 로 다음 run 들이 영구 차단됐다 → 이제 자가복구하고 계속.
+    #   data 밖의 dirty(다른 프로젝트 WIP 등)는 우리가 안 건드린다(commit 은 data/ 만 scoped).
+    git checkout -- "projects/prelude/dashboard/data" 2>/dev/null || true
+    git clean -fdq "projects/prelude/dashboard/data" 2>/dev/null || true
+    REMAIN=$(git status --porcelain --untracked-files=no -- "projects/prelude/dashboard/data")
+    if [ -n "$REMAIN" ]; then
+        echo "[warn] data dir self-heal 후에도 dirty (계속 진행):" >> "$LOG"
+        echo "$REMAIN" | sed 's/^/  /' >> "$LOG"
     fi
 
     cd "$PROJ_ROOT"
@@ -116,29 +121,28 @@ if [ $COMMIT_RC -ne 0 ]; then
     exit $COMMIT_RC
 fi
 
-# pull --rebase before push — 같은 site repo 를 다른 project (xsec-alpha 등) 가
-# 동시 publish 시 rejected 방지. local commit 은 rebase 후 origin top 에 push.
-# --autostash: working tree 에 unstaged 변경 있어도 안전 (auto stash → rebase → pop).
-# (2026-05-21 사고: 사용자 papers 작업 unstaged → publish rebase fail)
-git pull --rebase --autostash origin main >> "$LOG" 2>&1
-PULL_RC=$?
-if [ $PULL_RC -ne 0 ]; then
-    echo "[fail] git pull --rebase exit=$PULL_RC (충돌 가능)" >> "$LOG"
-    notify_fail "rebase" "git pull --rebase exit=$PULL_RC (수동 해결 필요)"
-    exit $PULL_RC
-fi
-
-git push >> "$LOG" 2>&1
-PUSH_RC=$?
-if [ $PUSH_RC -ne 0 ]; then
-    # rebase 후에도 push 실패 시 (인증 만료 등 더 심각한 문제)
-    git pull --rebase origin main >> "$LOG" 2>&1 && git push >> "$LOG" 2>&1
-    PUSH_RC=$?
-fi
-if [ $PUSH_RC -ne 0 ]; then
-    echo "[fail] git push exit=$PUSH_RC" >> "$LOG"
-    notify_fail "push" "git push exit=$PUSH_RC (commit 은 local 에 남음, 수동 push 필요)"
-    exit $PUSH_RC
+# push 재시도 루프 — 공유 site repo (다른 project 도 push) 의 동시 push·rejected·전송실패 견고화.
+#   1) 먼저 그냥 push (fast path).
+#   2) rejected 면 pull --rebase --autostash (다른 프로젝트 commit + 사람 unstaged WIP 보호).
+#      rebase 충돌은 거의 우리 data 파일뿐 → 재생성본(rebase 의 --theirs) 우선으로 자동 해소,
+#      실패 시 abort 후 다음 attempt. 최대 4회 → 그래도 안 되면 alert(수동).
+PUSHED=0
+for attempt in 1 2 3 4; do
+    if git push >> "$LOG" 2>&1; then PUSHED=1; break; fi
+    echo "[retry] push $attempt rejected — pull --rebase --autostash 후 재시도" >> "$LOG"
+    if ! git pull --rebase --autostash origin main >> "$LOG" 2>&1; then
+        # 충돌 = 우리 data 파일(재생성본). --theirs(=우리 commit) 로 keep 후 continue, 실패 시 abort.
+        git checkout --theirs -- "projects/prelude/dashboard/data" 2>/dev/null \
+            && git add "projects/prelude/dashboard/data" >> "$LOG" 2>&1 \
+            && git rebase --continue >> "$LOG" 2>&1 \
+            || git rebase --abort 2>/dev/null || true
+    fi
+    sleep 2
+done
+if [ "$PUSHED" -ne 1 ]; then
+    echo "[fail] git push 4회 실패" >> "$LOG"
+    notify_fail "push" "git push 4회 실패 (commit local 보존, 수동 push 필요)"
+    exit 1
 fi
 
 echo "[done] $(date +%H:%M:%S) committed + pushed" >> "$LOG"

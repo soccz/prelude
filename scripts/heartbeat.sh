@@ -102,11 +102,14 @@ if [ -n "$USAGE" ] && [ "$USAGE" -ge 90 ]; then
     WARN "/home/soccz/22tb disk ${USAGE}% (≥90%)"
 fi
 
-# 4) publish.log 최근 line
+# 4) publish.log — ★ 최신 publish 세션의 결과만 검사 (마지막 "=== prelude publish ===" 이후).
+#    예전엔 tail -20 grep [fail] 라, 직전 run 이 성공해도 그 위 옛 [fail] 이 tail 에 남아있으면
+#    매일 재알림했다(2026-06-05 false-alert). 이제 마지막 세션 블록에만 [fail] 있으면 경고.
 PUB_LOG="$PROJ_ROOT/output/cron_publish.log"
 if [ -f "$PUB_LOG" ]; then
-    if tail -20 "$PUB_LOG" | grep -q "\[fail\]"; then
-        last_fail=$(tail -20 "$PUB_LOG" | grep "\[fail\]" | tail -1)
+    LAST_SESSION=$(awk '/=== prelude publish dashboard/{buf=""} {buf=buf $0 "\n"} END{printf "%s", buf}' "$PUB_LOG")
+    if echo "$LAST_SESSION" | grep -q "\[fail\]"; then
+        last_fail=$(echo "$LAST_SESSION" | grep "\[fail\]" | tail -1)
         WARN "publish 최근 fail: $last_fail"
     fi
 fi

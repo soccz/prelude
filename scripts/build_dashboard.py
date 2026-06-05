@@ -1413,7 +1413,13 @@ def history_rows(df_dist: pd.DataFrame, df_preopen: pd.DataFrame) -> list[dict]:
 
 
 def _safe_float(v):
+    """어떤 값이든 안전하게 float 으로. ledger 가 '6.4%'·'1,234'·''·'nan' 같은 문자열을
+    저장해도 크래시 없이 None 또는 숫자 반환 (대시보드 publish 가 한 셀 때문에 죽지 않게)."""
     try:
+        if isinstance(v, str):
+            v = v.replace("%", "").replace(",", "").strip()
+            if v == "" or v.lower() in ("nan", "none", "null", "-"):
+                return None
         f = float(v)
         if not np.isfinite(f):
             return None
@@ -1426,6 +1432,11 @@ def _safe_int(v):
     try:
         if v is None or (isinstance(v, float) and np.isnan(v)):
             return None
+        if isinstance(v, str):
+            v = v.replace("%", "").replace(",", "").strip()
+            if v == "" or v.lower() in ("nan", "none", "null", "-"):
+                return None
+            v = float(v)   # '3.0' / '3%' → 3
         return int(v)
     except (TypeError, ValueError):
         return None
@@ -1741,16 +1752,17 @@ def _build_pump_hunter_payload(ledger_path: str) -> dict | None:
         today_df = today_df.sort_values("rank")
     watchlist = []
     for _, r in today_df.iterrows():
+        # ★ 전부 _safe_float/_safe_int (bare float()/int() 금지) — ledger 가 '6.4%' 같은 % 문자열을
+        #   저장해도 한 셀 때문에 build 가 죽지 않게. (2026-06-05 사고: pump_prob_pct='6.4%' → publish 크래시)
         watchlist.append({
-            "rank": int(r.get("rank")) if pd.notna(r.get("rank")) else None,
+            "rank": _safe_int(r.get("rank")),
             "coin": str(r.get("coin", "")).replace("KRW-", ""),
-            "score": float(r.get("score")) if pd.notna(r.get("score")) else None,
-            # pump_prob_pct 컬럼은 '6.4%' 처럼 % 포함 문자열 → strip 후 float (bare float() 크래시 방지).
-            "pump_prob_pct": _safe_float(str(r.get("pump_prob_pct")).replace("%", "")) if pd.notna(r.get("pump_prob_pct")) else None,
+            "score": _safe_float(r.get("score")),
+            "pump_prob_pct": _safe_float(r.get("pump_prob_pct")),   # '6.4%' → 6.4
             "rule_id": str(r.get("rule_id", "")),
-            "roc_7d_rank": float(r.get("roc_7d_rank")) if pd.notna(r.get("roc_7d_rank")) else None,
-            "atr_pct_14": float(r.get("atr_pct_14")) if pd.notna(r.get("atr_pct_14")) else None,
-            "log_return_1d": float(r.get("log_return_1d")) if pd.notna(r.get("log_return_1d")) else None,
+            "roc_7d_rank": _safe_float(r.get("roc_7d_rank")),
+            "atr_pct_14": _safe_float(r.get("atr_pct_14")),
+            "log_return_1d": _safe_float(r.get("log_return_1d")),
             "status": str(r.get("status", "")),
         })
 
