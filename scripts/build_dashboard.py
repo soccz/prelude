@@ -1745,7 +1745,8 @@ def _build_pump_hunter_payload(ledger_path: str) -> dict | None:
             "rank": int(r.get("rank")) if pd.notna(r.get("rank")) else None,
             "coin": str(r.get("coin", "")).replace("KRW-", ""),
             "score": float(r.get("score")) if pd.notna(r.get("score")) else None,
-            "pump_prob_pct": float(r.get("pump_prob_pct")) if pd.notna(r.get("pump_prob_pct")) else None,
+            # pump_prob_pct 컬럼은 '6.4%' 처럼 % 포함 문자열 → strip 후 float (bare float() 크래시 방지).
+            "pump_prob_pct": _safe_float(str(r.get("pump_prob_pct")).replace("%", "")) if pd.notna(r.get("pump_prob_pct")) else None,
             "rule_id": str(r.get("rule_id", "")),
             "roc_7d_rank": float(r.get("roc_7d_rank")) if pd.notna(r.get("roc_7d_rank")) else None,
             "atr_pct_14": float(r.get("atr_pct_14")) if pd.notna(r.get("atr_pct_14")) else None,
