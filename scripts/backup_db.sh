@@ -38,12 +38,23 @@ notify_fail() {
 }
 
 # 1) .backup + integrity
+#    7일 이상 안 변한 DB (binance_*, upbit_1h 같은 아카이브) 는 매일 복사 생략 —
+#    마지막 백업본이 이미 같은 내용. 디스크/시간 낭비 제거.
 N_OK=0
 N_FAIL=0
+N_SKIP=0
 for db in "$DATA_DIR"/*.db; do
     [ -f "$db" ] || continue
     name=$(basename "$db" .db)
     dest="$BACKUP_DIR/${name}_${DATE}.db"
+    if [ -n "$(find "$db" -mtime +7 2>/dev/null)" ]; then
+        last_backup=$(ls -t "$BACKUP_DIR/${name}"_*.db 2>/dev/null | head -1)
+        if [ -n "$last_backup" ]; then
+            echo "  skip $name (7일+ unchanged, 보관본: $(basename "$last_backup"))" >> "$LOG"
+            N_SKIP=$((N_SKIP + 1))
+            continue
+        fi
+    fi
     echo "  backup $name → $dest" >> "$LOG"
     if sqlite3 "$db" ".backup '$dest'" 2>>"$LOG"; then
         result=$(sqlite3 "$dest" "PRAGMA integrity_check;" 2>>"$LOG")
@@ -63,11 +74,27 @@ for db in "$DATA_DIR"/*.db; do
     fi
 done
 
-# 2) 14일 보관 정책
+# 1b) ledger/상태 CSV·JSON 백업 — paper/shadow ledger 는 gitignore 라 git 에도 없음.
+#     유실되면 forward 검증 (champion gate 누적) 전체 리셋이라 DB 만큼 중요.
+LEDGER_BACKUP="$BACKUP_DIR/ledgers_${DATE}.tar.gz"
+LEDGER_FILES=$(cd "$PROJ_ROOT" && ls output/paper_ledger*.csv output/shadow_ledger*.csv \
+    output/champion_state.json output/ledger*.csv 2>/dev/null || true)
+if [ -n "$LEDGER_FILES" ] && tar -czf "$LEDGER_BACKUP" -C "$PROJ_ROOT" $LEDGER_FILES 2>>"$LOG"; then
+    size=$(du -h "$LEDGER_BACKUP" | cut -f1)
+    n_files=$(tar -tzf "$LEDGER_BACKUP" | wc -l)
+    echo "  ✅ ledger tar: $n_files files, $size" >> "$LOG"
+else
+    echo "  ❌ ledger tar FAIL" >> "$LOG"
+    notify_fail "ledger CSV 백업 실패"
+    N_FAIL=$((N_FAIL + 1))
+fi
+
+# 2) 14일 보관 정책 (DB + ledger tar 동일 적용)
 find "$BACKUP_DIR" -name "*.db" -mtime +14 -delete 2>>"$LOG"
+find "$BACKUP_DIR" -name "ledgers_*.tar.gz" -mtime +14 -delete 2>>"$LOG"
 
 # 3) 결과 요약
-echo "[done] $(date +%H:%M:%S) ok=$N_OK fail=$N_FAIL · 14일 이상 삭제" >> "$LOG"
+echo "[done] $(date +%H:%M:%S) ok=$N_OK skip=$N_SKIP fail=$N_FAIL · 14일 이상 삭제" >> "$LOG"
 echo "" >> "$LOG"
 
 # 전체 실패 시 추가 alert

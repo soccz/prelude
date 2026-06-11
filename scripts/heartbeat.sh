@@ -95,6 +95,41 @@ else
     WARN "policy_competition_summary.json 없음"
 fi
 
+# 2c) ledger CSV 스키마 검증 — 행수만 보면 깨진 컬럼/timestamp 를 못 잡는다.
+#     pandas parse + 필수 컬럼 존재 확인. 깨졌으면 forward 검증 전체가 오염되므로 alert.
+csv_result=$(python - <<'PYEOF' 2>>"$LOG"
+import pandas as pd
+from pathlib import Path
+
+REQUIRED = {
+    "output/paper_ledger.csv": ["date", "coin", "status"],
+    "output/paper_ledger_preopen.csv": ["date", "coin", "status"],
+    "output/shadow_ledger_recommend.csv": ["date", "coin", "status", "realized_pct"],
+    "output/shadow_ledger_recommend_r2.csv": ["date", "coin", "status", "realized_pct"],
+    "output/shadow_ledger_recommend_sustain.csv": ["date", "coin", "status", "realized_pct"],
+    "output/shadow_ledger_pump_hunter.csv": ["date", "coin", "status", "realized_pct"],
+}
+bad = []
+for path, cols in REQUIRED.items():
+    p = Path(path)
+    if not p.exists():
+        continue  # 미생성 ledger 는 정상 (DEMOTE/신규)
+    try:
+        df = pd.read_csv(p)
+        missing = [c for c in cols if c not in df.columns]
+        if missing:
+            bad.append(f"{p.name}: 컬럼 누락 {missing}")
+    except Exception as e:
+        bad.append(f"{p.name}: parse fail ({type(e).__name__})")
+print("; ".join(bad) if bad else "ok")
+PYEOF
+)
+if [ "$csv_result" != "ok" ]; then
+    WARN "ledger CSV 스키마: $csv_result"
+else
+    echo "  ledger CSV 스키마 ok" >> "$LOG"
+fi
+
 # 3) disk 사용량 — /home/soccz/22tb (= /mnt/20t symlink, CLAUDE.md 규칙 준수)
 USAGE=$(df /home/soccz/22tb 2>/dev/null | awk 'NR==2 {print $5}' | tr -d '%')
 echo "  /home/soccz/22tb disk 사용 ${USAGE}%" >> "$LOG"

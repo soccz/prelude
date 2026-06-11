@@ -1601,6 +1601,7 @@ def main():
     meta_model = _load_optional_json("output/recommendation_meta_validation.json")
     policy_competition = _load_optional_json("output/policy_competition_summary.json")
     pump_hunter = _build_pump_hunter_payload("output/shadow_ledger_pump_hunter.csv")
+    champion_gate = _build_champion_gate_payload("output/champion_state.json")
 
     summary = {
         "asof": asof.isoformat(),
@@ -1628,8 +1629,9 @@ def main():
         },
         "idea_validation": idea_validation,  # full summary (model_card / quality / replay / gate)
         "meta_model": meta_model,  # recommendation_quality_meta_label_v1 학습 결과
-        "policy_competition": policy_competition,  # model + send-policy CLOSED forward audit
+        "policy_competition": policy_competition,  # model + send-policy CLOSED forward audit (+exit_lab)
         "pump_hunter": pump_hunter,  # PUMP detector SHADOW — 오늘 watchlist + 일별 capture
+        "champion_gate": champion_gate,  # 슬롯별 forward 검증 진행률 (n_days/MIN_CLOSED)
     }
     _write_json(out_dir / "summary.json", summary, passphrase=pin)
     log.info(f"saved summary.json (idea_validation={bool(idea_validation)}, meta_model={bool(meta_model)})")
@@ -1797,6 +1799,45 @@ def _build_pump_hunter_payload(ledger_path: str) -> dict | None:
         "watchlist": watchlist,
         "daily_capture": daily,
         "note": "challenger_only — Telegram/ACTIVE 승격 금지 (코드 레벨 차단). record-only.",
+    }
+
+
+def _build_champion_gate_payload(state_path: str) -> dict | None:
+    """champion gate 진행률 — output/champion_state.json 에서 슬롯별 n_days/MIN_CLOSED.
+
+    "언제쯤 fallback 을 벗어나 첫 실전 champion 판정이 가능한가" 를 사용자가
+    한눈에 보도록. MIN_CLOSED 등 상수는 state 의 config 에 이미 기록돼 있음.
+    """
+    p = Path(state_path)
+    if not p.exists():
+        return None
+    try:
+        with open(p) as f:
+            state = json.load(f)
+    except Exception:
+        return None
+    cfg = state.get("config", {})
+    min_closed = int(cfg.get("min_closed", 30))
+    slots_out = []
+    for slot, v in (state.get("slots") or {}).items():
+        m = v.get("metric") or {}
+        n_days = int(m.get("n_days") or 0)
+        slots_out.append({
+            "slot": slot,
+            "champion_id": v.get("champion_id"),
+            "is_fallback": bool(v.get("is_fallback")),
+            "since": v.get("since"),
+            "n_days": n_days,
+            "min_closed": min_closed,
+            "progress_pct": round(min(100.0, n_days / min_closed * 100.0), 1) if min_closed else None,
+            "days_remaining": max(0, min_closed - n_days),
+        })
+    return {
+        "asof": state.get("asof"),
+        "updated_at": state.get("updated_at"),
+        "min_closed": min_closed,
+        "hyst_k": cfg.get("hyst_k"),
+        "slots": slots_out,
     }
 
 

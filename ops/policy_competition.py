@@ -28,6 +28,11 @@ _ROOT = Path(__file__).parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from ledger.config import (  # noqa: E402
+    ROUND_TRIP_COST_CONSERVATIVE_PP,
+    ROUND_TRIP_COST_PP,
+)
+from ledger.exit_lab import EXIT_VARIANTS  # noqa: E402
 from signals.model_registry import MODELS, ModelSpec  # noqa: E402
 
 OUT_CSV = _ROOT / "output" / "policy_competition_summary.csv"
@@ -35,7 +40,8 @@ OUT_JSON = _ROOT / "output" / "policy_competition_summary.json"
 D1_DB = _ROOT / "data" / "upbit_d1.db"
 POLICY_DB = _ROOT / "data" / "policy_competition.db"
 
-ROUND_TRIP_COST_PCT = 0.15
+# 왕복 거래비용 (%p 단위) — ledger/config.py 단일 출처 (= 0.15)
+ROUND_TRIP_COST_PCT = ROUND_TRIP_COST_PP
 PUMP20_THRESH = 0.20
 DEEP_LOSS_PCT = -5.0
 
@@ -481,6 +487,49 @@ def _consensus_rows(model_rows: dict[str, pd.DataFrame]) -> pd.DataFrame:
     return out
 
 
+def _exit_lab_summary(model_rows: dict[str, pd.DataFrame]) -> list[dict]:
+    """모델별 exit 변형 비교 (record-only) — ledger/exit_lab.py 가 close 시 기록한
+    병렬 가상 청산 컬럼을 집계한다. 운영 기본 (TP5/SL3) 은 net_pct 그대로.
+
+    보수 비용 (편도 0.2% 슬리피지) net 도 병기 — 표준 가정이 펌프 코인에서
+    낙관적일 수 있어서 (ledger/config.py 참조).
+    """
+    cost_extra_pp = ROUND_TRIP_COST_CONSERVATIVE_PP - ROUND_TRIP_COST_PP
+    variants = [("tp5_sl3", "net_pct", None)] + [
+        (name, f"exit_{name}_pct", f"exit_{name}_reason" if name != "eod" else None)
+        for name in EXIT_VARIANTS
+    ]
+    out: list[dict] = []
+    for model_id, df in model_rows.items():
+        if df is None or df.empty:
+            continue
+        # exit lab 컬럼이 아직 없는 ledger (예: 미배선 채널) 는 기본 변형만 집계
+        for name, pct_col, reason_col in variants:
+            if pct_col not in df.columns:
+                continue
+            vals = pd.to_numeric(df[pct_col], errors="coerce").dropna()
+            if vals.empty:
+                continue
+            row = {
+                "model_id": model_id,
+                "variant": name,
+                "n": int(len(vals)),
+                "net_mean_pct": round(float(vals.mean()), 4),
+                "net_sum_pct": round(float(vals.sum()), 2),
+                "net_mean_conservative_pct": round(float(vals.mean()) - cost_extra_pp, 4),
+                "deep_loss_freq_pct": round(float((vals <= DEEP_LOSS_PCT).mean() * 100), 2),
+            }
+            if reason_col and reason_col in df.columns:
+                reasons = df.loc[vals.index, reason_col].astype(str)
+                row["tp_rate_pct"] = round(float((reasons == "TP").mean() * 100), 2)
+            elif name == "tp5_sl3" and "exit_reason" in df.columns:
+                reasons = df.loc[vals.index, "exit_reason"].astype(str)
+                row["tp_rate_pct"] = round(float((reasons == "TP").mean() * 100), 2)
+                row["sl_rate_pct"] = round(float((reasons == "SL").mean() * 100), 2)
+            out.append(row)
+    return out
+
+
 def run(asof: pd.Timestamp | None = None, *, output_csv: Path = OUT_CSV,
         output_json: Path = OUT_JSON, db_path: Path | None = POLICY_DB) -> dict:
     asof = (asof or pd.Timestamp.now()).normalize()
@@ -546,12 +595,15 @@ def run(asof: pd.Timestamp | None = None, *, output_csv: Path = OUT_CSV,
             "pump20_threshold": PUMP20_THRESH,
             "deep_loss_pct": DEEP_LOSS_PCT,
             "round_trip_cost_pct": ROUND_TRIP_COST_PCT,
+            "round_trip_cost_conservative_pct": ROUND_TRIP_COST_CONSERVATIVE_PP,
             "note": (
                 "Record-only policy competition. It evaluates CLOSED forward rows. "
                 "pump20_recall uses all KRW daily candles in upbit_d1.db for the same dates."
             ),
         },
         "rows": rows_payload,
+        # exit 변형 비교 (ledger/exit_lab.py) — 같은 경로 병렬 가상 청산.
+        "exit_lab": _exit_lab_summary(model_rows),
     }
 
     output_csv.parent.mkdir(parents=True, exist_ok=True)

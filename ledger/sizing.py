@@ -1,5 +1,10 @@
 """가상 포지션 사이징 (LEDGER §2).
 
+★ 운영 미배선 (2026-06-11 확인) — config.SIZING_RULE='equal' 고정이고 prob_weighted
+  / kelly_quarter 경로는 어느 cron 에서도 호출되지 않는다. prelude 는 radar
+  (추천 알림) 이지 자동 전략이 아니므로 의도된 보류 — 사이징은 사용자 본인 판단.
+  사이징 룰 변경은 사용자 결정 사항 (CLAUDE.md §4).
+
 옵션:
   - equal_weight: top-K 균등 1/K
   - prob_weighted: P(≥10%) 비례

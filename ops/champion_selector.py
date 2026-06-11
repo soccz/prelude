@@ -46,6 +46,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from ledger.config import ROUND_TRIP_COST_PP  # noqa: E402
 from signals.model_registry import (  # noqa: E402
     MODELS, ModelSpec, all_slots, models_for_slot, fallback_model,
 )
@@ -59,7 +60,7 @@ STATE_PATH = _ROOT / "output" / "champion_state.json"
 ROLLING_N = 30               # rolling 윈도 = 최근 30 거래일(추천일 기준) CLOSED 행
 MIN_CLOSED = 30              # 게이트: forward closed n>=30 만 챔피언 후보
 DEEP_LOSS = -5.0             # 깊은 손실 임계 (%, realized <= -5% = 사용자 손실 수용 anchor)
-ROUND_TRIP_COST_PCT = 0.15   # 왕복 거래비용 (%, gross ledger 차감용)
+ROUND_TRIP_COST_PCT = ROUND_TRIP_COST_PP   # 왕복 비용 (%p) — ledger/config.py 단일 출처
 
 # 히스테리시스 (flip-flop 방지): 챌린저가 챔피언을 아래 마진 이상 + 연속 K일 이겨야 교체.
 HYST_K = 5                   # 연속 K 거래일 우위

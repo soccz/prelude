@@ -39,6 +39,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 # -3% SL / +5% TP 경로청산 로직 재사용 (self-contained: prelude 내부 모듈만).
 from scripts.recommender_downside_exit_v1 import simulate_path  # noqa: E402
 
+from ledger.config import ROUND_TRIP_COST_PCT  # noqa: E402
+from ledger.exit_lab import EXIT_LAB_COLS, evaluate_exit_variants  # noqa: E402
 from scripts.recommend_today import (  # noqa: E402
     RECOMMEND_LEDGER_COLS,
     SHADOW_RECOMMEND_LEDGER,
@@ -46,7 +48,7 @@ from scripts.recommend_today import (  # noqa: E402
 
 M15_DB = "data/upbit_15m.db"
 D1_DB = "data/upbit_d1.db"
-ROUND_TRIP_COST = 0.0015     # 왕복 0.15% (수수료 0.1% + 슬리피지 0.05%)
+ROUND_TRIP_COST = ROUND_TRIP_COST_PCT  # 왕복 0.15% — ledger/config.py 단일 출처
 PUMP20_THRESH = 0.20         # 일봉 라벨: (high_D/open_D - 1) >= 0.20
 
 # 청산 플랜 절대값 (사용자 확정 — 변경 금지). ledger 에 음수 sl_pct/양수 tp_pct 로
@@ -106,6 +108,11 @@ def close_recommend_ledger(ledger_path: str, asof: pd.Timestamp,
     # FutureWarning. object 로 캐스트해서 in-place 대입을 안전하게 한다.
     for c in ["exit_reason", "closed_at", "exit_price", "realized_pct", "pump20_hit"]:
         ledger[c] = ledger[c].astype(object)
+    # exit lab 변형 컬럼 (TP10/noSL 등) — 같은 경로의 병렬 가상 평가 (record-only).
+    for c in EXIT_LAB_COLS:
+        if c not in ledger.columns:
+            ledger[c] = pd.NA
+        ledger[c] = ledger[c].astype(object)
     log.info("ledger: %d rows total", len(ledger))
 
     cutoff_date = (asof - pd.Timedelta(days=1)).date()
@@ -160,6 +167,11 @@ def close_recommend_ledger(ledger_path: str, asof: pd.Timestamp,
         ledger.at[idx, "pump20_hit"] = pump20
         ledger.at[idx, "closed_at"] = now_iso
         ledger.at[idx, "status"] = "closed"
+        # exit lab — 같은 bars 로 TP10/noSL 등 변형 병렬 기록 (record-only).
+        lab = evaluate_exit_variants(bars, round_trip_cost=ROUND_TRIP_COST)
+        if lab is not None:
+            for k, v in lab.items():
+                ledger.at[idx, k] = v
         n_closed += 1
         closed_rows.append({
             "date": r["date"], "coin": coin, "rank": r["rank"],

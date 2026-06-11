@@ -1,5 +1,10 @@
 """업비트 KRW 1h 봉 수집기 (Phase B Pre-open Trigger Discovery 용).
 
+★ ARCHIVED (2026-06-11) — cron/systemd 미등록, upbit_1h.db 는 2026-05-04 이후 정지.
+  현재 운영 경로 (d1/4h/15m) 어디서도 사용하지 않음. 1h 해상도가 다시 필요해지면
+  (예: cold-start 장중 연구 확장) 재가동 — 코드는 동작 상태로 보존.
+  backup_db.sh 는 7일+ unchanged DB 를 자동 skip 하므로 매일 백업 낭비 없음.
+
 설계: collector_4h.py 와 동일 패턴, interval='minute60' (= 1h).
 용도: 08:00 KST snapshot precursor 분석 — 사용자 가설 "08:30 직전 trigger" 검증의 첫 번째 실증.
 

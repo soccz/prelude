@@ -26,8 +26,33 @@
 - [x] **Phase X+1 초안** — Distribution head (multi-target) + pre-open trigger 운영 후보
 - [x] **Phase X+4** — 정책 채택 (distribution PROMOTE_PAPER + preopen DEMOTE) 2026-05-26 사용자 컨펌
 - [x] **Phase X+5** — PUMP hunter rule detector SHADOW 배선 2026-06-04
+- [x] **Phase X+6** — exit lab (멀티 청산 잣대) + 운영 강화 (ledger 백업·비용 단일화·CSV 검증) 2026-06-11
+- [ ] [Research] Cold-start 장중 펌프 (15m 거래량 미세동학) — coldstart_pump_v1 진행 중
 - [ ] [Research] Downside guard / 4h confirmation tier (병렬)
 - [ ] [Later] MTF features / regime split / Optuna
+
+### Phase X+6 — exit lab + 운영 강화 (2026-06-11)
+
+**의도**: "lever 는 exit/하방 규율" 진단을 가정이 아니라 forward 데이터로 결판 + P0 운영 구멍 fix.
+
+**exit lab (핵심)**:
+- `ledger/exit_lab.py` — 같은 15m 경로에 청산 변형 3개 (TP10/noSL, TP5/noSL, EOD) + path 극값을
+  병렬 가상 평가. close 시 자동 기록 (`scripts/close_recommend_ledger.py` 배선). record-only.
+- `scripts/backfill_exit_lab.py` — 기존 closed 192 rows 소급. **첫 결과 (forward 6/4~6/10)**:
+  bear_quiet 연구 가설 (TP10/noSL 최적) 과 반대 — pump_hunter 에서 TP5/SL3 -1.26% vs
+  TP10/noSL -3.72% (deep loss 0→37). 라이브 진입 집합에선 SL-3% 가 하방을 지키는 중.
+  표본 1주 (시간 집중) 라 판정은 계속 누적 후 — 매일 자동 기록이 결판.
+- `ops/policy_competition.py` 에 `exit_lab` 섹션 — 모델 × 변형 비교 + 보수 비용 (편도 0.2%) net 병기.
+- dashboard ⑨ 에 exit lab 표 + ⑦ 에 champion gate 진행률 bar (n_days/30, D-카운트다운).
+
+**운영 강화 (P0/P1)**:
+- `backup_db.sh` — ledger CSV·champion_state tar 백업 추가 (gitignore 라 git 에도 없던 유실 위험 fix)
+  + 7일+ unchanged DB 자동 skip (stale binance/1h 매일 중복 백업 제거).
+- 비용 상수 단일화 — `ledger/config.py` 가 유일 출처 (decimal `*_PCT` / %p `*_PP` 구분).
+  ops 2곳의 동명·다른단위 (0.15 %p) 재정의 제거. 보수 tier (왕복 0.5%) 신설.
+- `heartbeat.sh` — ledger CSV pandas parse + 필수 컬럼 스키마 검증 (행수만 보던 구멍 fix).
+- 아카이브 명시 — collector_1h (37일 stale·미사용), collector_binance_d1 (주간 retrain 전용),
+  ledger/sizing.py·risk.py (radar 철학상 의도된 미배선) 헤더 주석.
 
 ### Phase X+5 — PUMP hunter rule detector SHADOW 배선 (2026-06-04)
 

@@ -1,5 +1,9 @@
 """바이낸스 USDT 일봉 수집기 — 학습 panel 다양성 확보용.
 
+★ ARCHIVED-ISH (2026-06-11) — 일일 cron 미등록 (주간 retrain_run.sh 에서만 호출).
+  binance_d1.db 는 retrain 주기 외엔 정지 상태가 정상. backup_db.sh 가 7일+
+  unchanged DB 를 자동 skip 하므로 매일 백업 낭비 없음.
+
 설계: collector_binance.py (1h) 와 동일 패턴, timeframe='1d'.
 용도: 학습 panel 에 바이낸스 USDT 전체 코인 일봉 추가 (업비트 KRW 와 함께 학습)
       → 추론은 KRW only, 학습은 KRW + BINANCE 둘 다.
