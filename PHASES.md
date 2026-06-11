@@ -28,6 +28,8 @@
 - [x] **Phase X+5** — PUMP hunter rule detector SHADOW 배선 2026-06-04
 - [x] **Phase X+6** — exit lab (멀티 청산 잣대) + 운영 강화 (ledger 백업·비용 단일화·CSV 검증) 2026-06-11
 - [x] [Research] Cold-start 장중 펌프 (15m 미세동학) — **REJECT** 2026-06-11 (OOS allpick net 전부 음수, robust root 0; _workspace/coldstart_signal-researcher_pump_v1.md)
+- [x] [Research] Day-quality gate (죽은 날 침묵) — **REJECT** 2026-06-11 (죽은날 2.8%뿐, replay 개선 permutation p=0.43 noise; 클러스터링 corr 0.52 는 진짜 — pump20 axis 재고 조건)
+- [x] [Research] Binance lead-lag (volsurge) — **lift 진짜·배선 보류** 2026-06-11. researcher lift 4.34x (5/5 fold) → evaluator 가 "+1.24% net" 을 일봉 낙관 근사 환상으로 REJECT → 15m 정직 경로 재계산: 전기간 -0.11% (CI 0 포함), **최근 7개월 순수 OOS -0.357% (CI 0 제외), bear_quiet -0.19%**. hit 8.1% vs baseline 5.6% — 증분 피처로는 유효. 다음 주간 retrain 시 b_vol_surge 피처 후보 (모델 변경 = 사용자 컨펌 사안). 독립 룰 배선은 net 양수 확인 전 보류.
 - [ ] [Research] Downside guard / 4h confirmation tier (병렬)
 - [ ] [Later] MTF features / regime split / Optuna
 
