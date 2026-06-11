@@ -1601,6 +1601,7 @@ def main():
     meta_model = _load_optional_json("output/recommendation_meta_validation.json")
     policy_competition = _load_optional_json("output/policy_competition_summary.json")
     pump_hunter = _build_pump_hunter_payload("output/shadow_ledger_pump_hunter.csv")
+    pump_hunter_v2 = _build_pump_hunter_payload("output/shadow_ledger_pump_hunter_v2.csv")
     champion_gate = _build_champion_gate_payload("output/champion_state.json")
 
     summary = {
@@ -1631,6 +1632,7 @@ def main():
         "meta_model": meta_model,  # recommendation_quality_meta_label_v1 학습 결과
         "policy_competition": policy_competition,  # model + send-policy CLOSED forward audit (+exit_lab)
         "pump_hunter": pump_hunter,  # PUMP detector SHADOW — 오늘 watchlist + 일별 capture
+        "pump_hunter_v2": pump_hunter_v2,  # 🎯 v2 radar (Binance volsurge) — watchlist + capture
         "champion_gate": champion_gate,  # 슬롯별 forward 검증 진행률 (n_days/MIN_CLOSED)
     }
     _write_json(out_dir / "summary.json", summary, passphrase=pin)
@@ -1756,7 +1758,7 @@ def _build_pump_hunter_payload(ledger_path: str) -> dict | None:
     for _, r in today_df.iterrows():
         # ★ 전부 _safe_float/_safe_int (bare float()/int() 금지) — ledger 가 '6.4%' 같은 % 문자열을
         #   저장해도 한 셀 때문에 build 가 죽지 않게. (2026-06-05 사고: pump_prob_pct='6.4%' → publish 크래시)
-        watchlist.append({
+        item = {
             "rank": _safe_int(r.get("rank")),
             "coin": str(r.get("coin", "")).replace("KRW-", ""),
             "score": _safe_float(r.get("score")),
@@ -1766,7 +1768,11 @@ def _build_pump_hunter_payload(ledger_path: str) -> dict | None:
             "atr_pct_14": _safe_float(r.get("atr_pct_14")),
             "log_return_1d": _safe_float(r.get("log_return_1d")),
             "status": str(r.get("status", "")),
-        })
+        }
+        # v2 전용 — Binance 거래량 surge (컬럼 있을 때만)
+        if "b_vol_surge" in today_df.columns:
+            item["b_vol_surge"] = _safe_float(r.get("b_vol_surge"))
+        watchlist.append(item)
 
     # 일별 capture rate — closed row 만 (pump20_hit 컬럼이 있을 때)
     daily = []

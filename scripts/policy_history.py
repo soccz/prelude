@@ -66,6 +66,13 @@ EVENTS: list[PolicyEvent] = [
         category="policy",
         description="기존 R1/R2/A1/distribution_engine 만으로는 +20% 급등 capture 0%~17% 천장. pump_rule_discovery 의 D-1 leak-free 룰 (roc_7d > 0.85 등) 을 별도 detector 로 배선해 매일 15 watchlist 를 shadow_ledger 에 기록. challenger_only=True 라 Telegram/ACTIVE 승격은 코드 레벨 차단. policy_competition 표가 누적 후 pump_hunter vs 기존 모델을 자동 비교. + publish_dashboard 에 preflight guard (충돌 site repo 차단).",
     ),
+    PolicyEvent(
+        date="2026-06-11",
+        label="exit lab + 🎯 PUMP v2 radar",
+        headline="청산 잣대 7개 병렬 기록 + Binance volsurge 융합 radar 텔레그램 (사용자 컨펌)",
+        category="policy",
+        description="exit lab: 같은 15m 경로에 청산 변형 7개 (noSL 군·비대칭 bracket) 병렬 가상 평가 — 1차 결과 SL 이 하방을 지킴 (noSL 군 전부 악화), tp5_sl2 가 개선 후보. 연구 3종 (cold-start 장중·day-quality gate REJECT, binance lead-lag 는 evaluator 가 가짜 +1.24% 적발 후 15m 재검증). 살아남은 hit 엣지 (roc7+volsurge, 최근 7개월 OOS hit 8.1% ≈ base 6배) 를 🎯 PUMP v2 radar 로 배선 — 자동 net 음수 정직 고지 포함, champion 승격은 차단 유지.",
+    ),
 ]
 
 
