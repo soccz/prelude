@@ -27,7 +27,7 @@
 - [x] **Phase X+4** — 정책 채택 (distribution PROMOTE_PAPER + preopen DEMOTE) 2026-05-26 사용자 컨펌
 - [x] **Phase X+5** — PUMP hunter rule detector SHADOW 배선 2026-06-04
 - [x] **Phase X+6** — exit lab (멀티 청산 잣대) + 운영 강화 (ledger 백업·비용 단일화·CSV 검증) 2026-06-11
-- [ ] [Research] Cold-start 장중 펌프 (15m 거래량 미세동학) — coldstart_pump_v1 진행 중
+- [x] [Research] Cold-start 장중 펌프 (15m 미세동학) — **REJECT** 2026-06-11 (OOS allpick net 전부 음수, robust root 0; _workspace/coldstart_signal-researcher_pump_v1.md)
 - [ ] [Research] Downside guard / 4h confirmation tier (병렬)
 - [ ] [Later] MTF features / regime split / Optuna
 
