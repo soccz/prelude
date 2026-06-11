@@ -108,6 +108,7 @@ REQUIRED = {
     "output/shadow_ledger_recommend_r2.csv": ["date", "coin", "status", "realized_pct"],
     "output/shadow_ledger_recommend_sustain.csv": ["date", "coin", "status", "realized_pct"],
     "output/shadow_ledger_pump_hunter.csv": ["date", "coin", "status", "realized_pct"],
+    "output/shadow_ledger_pump_hunter_v2.csv": ["date", "coin", "status", "realized_pct"],
 }
 bad = []
 for path, cols in REQUIRED.items():

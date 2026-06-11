@@ -33,6 +33,25 @@
 - [ ] [Research] Downside guard / 4h confirmation tier (병렬)
 - [ ] [Later] MTF features / regime split / Optuna
 
+### Phase X+7 — PUMP hunter v2 (Binance volsurge) 🎯 radar 텔레그램 (2026-06-11 사용자 컨펌)
+
+**의도**: "텔레그램까지 제대로 완성" (사용자 명시 요청). 검증 체인 (researcher → evaluator
+적대감사 → 15m 정직 재계산 → 최근 7개월 순수 OOS) 에서 살아남은 가장 강한 hit 엣지를
+radar 로 배선 — 정직 고지 (자동 net 음수) 포함.
+
+- **룰**: `roc_7d_rank > 0.85 (Upbit D-1) AND b_vol_surge > 1.5 (Binance D-1)`.
+  최근 7개월 OOS hit 8.1% (113/1390) vs baseline 5.6% vs base 1.4% — ~6x. 5/5 fold.
+  자동 룰 (TP5/SL3) net -0.36% (음수) — 메시지에 정직 고지, exit 은 사용자 판단.
+- `signals/pump_detector_v2.py` — v1 frame 재사용 + Binance volsurge join (D-1 경계 검증:
+  BTC ret corr lag0 0.962). binance stale 시 후보 0 + 사유 (조용한 오신호 방지).
+- `scripts/pump_detector_v2_today.py` — shadow ledger (`shadow_ledger_pump_hunter_v2.csv`)
+  + 🎯 텔레그램. 발사 정책: 후보 ≥1 만 발사 / stale 시 경고 1줄 / 후보 0 정상 = 무소음.
+- cron: daily_run_distribution [8/9] binance --days 3 refresh (메인 알림 뒤라 무영향)
+  + [9/9] v2 발사. close: v2 ledger 청산 (exit lab 7 잣대 자동).
+- registry: `pump_hunter_v2` challenger_only=True — champion 승격 차단 유지 (radar 와 별개).
+  policy_competition 자동 편입 (7 모델). heartbeat schema 검증에 v2 ledger 추가.
+- 첫 발사: 2026-06-11 23:14 테스트 1통 (KAT surge 10.6× 외 4건) + ledger 5 rows.
+
 ### Phase X+6 — exit lab + 운영 강화 (2026-06-11)
 
 **의도**: "lever 는 exit/하방 규율" 진단을 가정이 아니라 forward 데이터로 결판 + P0 운영 구멍 fix.

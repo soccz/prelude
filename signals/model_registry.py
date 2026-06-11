@@ -188,6 +188,31 @@ MODELS: list[ModelSpec] = [
               "기존 5개 모델과 자동 비교한다. 충분한 표본 + evaluator 판정 + 사용자 컨펌 "
               "전까지 승격 금지.",
     ),
+    # --- PUMP hunter v2 — Binance volsurge 융합 (2026-06-11 사용자 컨펌 radar) --
+    #   researcher→evaluator→15m 재검증 체인 통과한 hit 엣지 (최근 7개월 OOS
+    #   hit 8.1% vs base 1.4%, lift 4.34x 5/5 fold). 자동 net 은 음수라
+    #   champion 승격은 challenger_only 로 차단 — 단 사용자 명시 컨펌으로
+    #   🎯 radar 텔레그램은 별도 발사 (메시지에 net 음수 정직 고지 포함).
+    ModelSpec(
+        id="pump_hunter_v2",
+        name="PUMP hunter v2 (Upbit roc7 + Binance volsurge), post-open 09:05",
+        ledger_path="output/shadow_ledger_pump_hunter_v2.csv",
+        slots=["open"],
+        metric=MetricSource(
+            status_col="status", closed_value="closed", date_col="date",
+            realized_pct_col="realized_pct",
+            hit_col="pump20_hit", cost_already_deducted=True),
+        predict_ref="signals.pump_detector_v2:score_pump_v2_candidates",
+        is_backtest_fallback=False,
+        challenger_only=True,
+        hypothesis="Upbit roc_7d_rank>0.85 AND Binance D-1 거래량 surge>1.5 가 "
+                   "pump20 hit 를 baseline 5.6%→8.1% (base 1.4%) 로 올린다 — "
+                   "scripts/binance_leadlag_v1.py 검증 + evaluator 감사 + 15m 재계산.",
+        notes="매일 max 5 watchlist + 🎯 텔레그램 radar (사용자 컨펌 2026-06-11). "
+              "자동매매 룰 net 음수 — 메시지에 정직 고지, exit 은 사용자 판단. "
+              "binance_d1.db daily refresh 필요 (daily_run_distribution [8/9]). "
+              "champion 승격은 challenger_only 차단 유지.",
+    ),
     # --- R1 pre-open 변형 (08:50 예고, 같은 스코어러 preopen slot) -------------
     ModelSpec(
         id="recommend_r1_preopen",

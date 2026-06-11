@@ -70,8 +70,20 @@ python scripts/recommend_today.py --ranking A1 >> "$LOG" 2>&1 || echo "  A1 reco
 #    에서 채굴한 D-1 roc_7d/ATR/log_return 룰을 매일 별도 ledger 에 기록한다.
 #    challenger_only=True 라 champion_selector 가 발송 승격하지 않음. policy_competition 이
 #    CLOSED forward rows 로 기존 모델들과 pump20 recall/net/downside 를 비교.
-echo "[7/7] pump_detector_today (PUMP hunter ledger, record-only)" >> "$LOG"
+echo "[7/9] pump_detector_today (PUMP hunter ledger, record-only)" >> "$LOG"
 python scripts/pump_detector_today.py >> "$LOG" 2>&1 || echo "  PUMP hunter record warn" >> "$LOG"
+
+# 8) Binance d1 incremental refresh — v2 detector 의 b_vol_surge 용. Binance D-1 일봉은
+#    00:00 UTC = KST 09:00 마감이라 이 시점 (09:10+) 에 fresh 하게 받는다.
+#    메인 알림 (위 1-4) 이 모두 끝난 뒤라 실패/지연해도 기존 운영 무영향 (가드).
+echo "[8/9] collector_binance_d1 --days 3 (v2 feature incremental)" >> "$LOG"
+python -m data.collector_binance_d1 --all --days 3 >> "$LOG" 2>&1 || echo "  binance refresh warn" >> "$LOG"
+
+# 9) PUMP hunter v2 — Binance volsurge 융합 radar. 사용자 컨펌 (2026-06-11) 으로
+#    🎯 텔레그램 발사 (후보 있을 때만 / binance stale 시 경고 1줄 / 후보 0 + 정상 = 무소음).
+#    shadow ledger 기록. champion 승격은 challenger_only 차단 — 별도 radar 채널.
+echo "[9/9] pump_detector_v2_today (🎯 radar telegram + shadow ledger)" >> "$LOG"
+python scripts/pump_detector_v2_today.py --send-telegram >> "$LOG" 2>&1 || echo "  PUMP v2 warn" >> "$LOG"
 
 # 1h/15m incremental update 는 별도 research cron 으로 분리 (Phase B/C 용, 운영 critical X)
 

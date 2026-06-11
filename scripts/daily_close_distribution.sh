@@ -60,6 +60,9 @@ python scripts/close_recommend_ledger.py --ledger output/shadow_ledger_recommend
 # 별도 shadow ledger 도 매일 CLOSED 로 전환돼야 한다. 실패해도 R1/champion 무관(가드).
 python scripts/close_recommend_ledger.py --ledger output/shadow_ledger_pump_hunter.csv >> "$LOG" 2>&1 || echo "  PUMP hunter close warn" >> "$LOG"
 
+# PUMP hunter v2 (Binance volsurge radar) ledger 실현 — 동일 경로 + exit lab 7 잣대.
+python scripts/close_recommend_ledger.py --ledger output/shadow_ledger_pump_hunter_v2.csv >> "$LOG" 2>&1 || echo "  PUMP v2 close warn" >> "$LOG"
+
 # champion/challenger 재선정 (unattended). 위 close 들이 forward CLOSED 행을 갱신한 *뒤*
 # 돌려야 rolling 윈도가 최신 → 다음날 발송(08:50/09:05)이 새 champion 을 쓴다. 별도 timer 불필요.
 echo "[2c/3] champion_selector (forward 갱신 후 재선정 — 다음날 발송용)" >> "$LOG"
