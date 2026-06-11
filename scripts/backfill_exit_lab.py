@@ -65,7 +65,8 @@ def backfill_ledger(name: str, path: str, conn: sqlite3.Connection, dry_run: boo
         df[c] = df[c].astype(object)
 
     closed = df["status"].astype(str) == "closed"
-    missing = closed & df["exit_tp10_nosl_pct"].isna()
+    # 변형이 추가되면 (EXIT_LAB_COLS 확장) 기존 행도 새 컬럼만 비어있음 → any-NA 로 재채움.
+    missing = closed & df[EXIT_LAB_COLS].isna().any(axis=1)
     n_target = int(missing.sum())
     n_filled = 0
     n_no_bars = 0
@@ -93,7 +94,7 @@ def backfill_ledger(name: str, path: str, conn: sqlite3.Connection, dry_run: boo
     base = pd.to_numeric(have["realized_pct"], errors="coerce")
     summary["tp5_sl3_net_mean"] = round(float(base.mean()), 3)
     summary["tp5_sl3_net_sum"] = round(float(base.sum()), 2)
-    for v in ["tp10_nosl", "tp5_nosl", "eod"]:
+    for v in ["tp10_nosl", "tp5_nosl", "eod", "tp5_sl2", "tp10_sl5", "tp8_sl3"]:
         col = pd.to_numeric(have[f"exit_{v}_pct"], errors="coerce")
         summary[f"{v}_net_mean"] = round(float(col.mean()), 3)
         summary[f"{v}_net_sum"] = round(float(col.sum()), 2)
@@ -117,15 +118,17 @@ def main():
 
     if summaries:
         out = pd.DataFrame(summaries)
-        cols = ["model", "n",
-                "tp5_sl3_net_mean", "tp10_nosl_net_mean", "tp5_nosl_net_mean", "eod_net_mean",
-                "tp5_sl3_net_sum", "tp10_nosl_net_sum", "tp5_nosl_net_sum", "eod_net_sum",
-                "tp5_sl3_deep_loss_n", "tp10_nosl_deep_loss_n", "tp5_nosl_deep_loss_n", "eod_deep_loss_n"]
+        variants = ["tp5_sl3", "tp10_nosl", "tp5_nosl", "eod", "tp5_sl2", "tp10_sl5", "tp8_sl3"]
+        cols = (["model", "n"]
+                + [f"{v}_net_mean" for v in variants]
+                + [f"{v}_net_sum" for v in variants]
+                + [f"{v}_deep_loss_n" for v in variants])
         out = out[[c for c in cols if c in out.columns]]
         print("\n=== exit lab 변형 비교 (net %, 왕복 0.15% 차감) ===")
-        print(out.to_string(index=False))
+        mean_cols = ["model", "n"] + [f"{v}_net_mean" for v in variants if f"{v}_net_mean" in out.columns]
+        print(out[mean_cols].to_string(index=False))
         out.to_csv("output/exit_lab_backfill_summary.csv", index=False)
-        print("\nsaved output/exit_lab_backfill_summary.csv")
+        print("\nsaved output/exit_lab_backfill_summary.csv (전체 컬럼)")
 
 
 if __name__ == "__main__":

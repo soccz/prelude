@@ -32,11 +32,16 @@ class ExitSpec:
 
 
 # 기록할 변형 (운영 기본 TP5/SL3 는 realized_pct/exit_reason 에 이미 있음 — 중복 X).
-# 모든 숫자 placeholder — bear_quiet 연구 결과 기반 초기값 (§2.5).
+# 모든 숫자 placeholder — bear_quiet 연구 + 비대칭 bracket sweep 초기값 (§2.5).
+# 2026-06-11 1차 backfill 결과 noSL 군이 전부 더 나빴음 (SL 이 하방을 지킴) →
+# 2차로 bracket 비대칭 (SL 더 타이트 / 더 와이드 / TP 연장) 을 라이브로 결판.
 EXIT_VARIANTS: dict[str, ExitSpec] = {
     "tp10_nosl": ExitSpec(tp=0.10, sl=None, label="TP+10% / SL없음 / EOD (bear_quiet 연구 최적)"),
     "tp5_nosl": ExitSpec(tp=0.05, sl=None, label="TP+5% / SL없음 / EOD"),
     "eod": ExitSpec(tp=None, sl=None, label="순수 EOD hold (기준선)"),
+    "tp5_sl2": ExitSpec(tp=0.05, sl=0.02, label="TP+5% / SL-2% (출혈 더 빨리 절단)"),
+    "tp10_sl5": ExitSpec(tp=0.10, sl=0.05, label="TP+10% / SL-5% (사용자 -5% 수용 anchor + 늦은 펌프 여유)"),
+    "tp8_sl3": ExitSpec(tp=0.08, sl=0.03, label="TP+8% / SL-3% (같은 SL, 승자 더 끌기)"),
 }
 
 # ledger 에 추가되는 컬럼 (close 시점에 채움; open row 는 NA).
@@ -44,6 +49,9 @@ EXIT_LAB_COLS = [
     "exit_tp10_nosl_pct", "exit_tp10_nosl_reason",
     "exit_tp5_nosl_pct", "exit_tp5_nosl_reason",
     "exit_eod_pct",
+    "exit_tp5_sl2_pct", "exit_tp5_sl2_reason",
+    "exit_tp10_sl5_pct", "exit_tp10_sl5_reason",
+    "exit_tp8_sl3_pct", "exit_tp8_sl3_reason",
     "path_max_pct", "path_min_pct",
 ]
 

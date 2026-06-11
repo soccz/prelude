@@ -97,4 +97,25 @@ def test_exit_lab_cols_match_evaluate_keys():
     out = evaluate_exit_variants(bars)
     assert out is not None
     assert set(out.keys()) == set(EXIT_LAB_COLS)
-    assert set(EXIT_VARIANTS.keys()) == {"tp10_nosl", "tp5_nosl", "eod"}
+    assert set(EXIT_VARIANTS.keys()) == {
+        "tp10_nosl", "tp5_nosl", "eod", "tp5_sl2", "tp10_sl5", "tp8_sl3",
+    }
+
+
+def test_bracket_variants_asymmetry():
+    """비대칭 bracket semantics: 같은 경로에서 SL 폭이 결과를 가른다.
+    경로: -2.5% 터치 후 +9% 펌프 — SL2 는 -2% 절단, SL3/SL5 는 생존."""
+    bars = [
+        _bar(100, 100.8, 97.5, 98),      # low 97.5 → SL2 (-2%) 만 터치
+        _bar(98, 105, 97.6, 104),
+        _bar(104, 109.2, 103, 108),       # high 109.2 → TP8 도달, TP10 미달
+    ]
+    out = evaluate_exit_variants(bars, round_trip_cost=0.0015)
+    assert out is not None
+    assert out["exit_tp5_sl2_reason"] == "SL"
+    assert out["exit_tp5_sl2_pct"] == pytest.approx((-0.02 - 0.0015) * 100, abs=1e-6)
+    assert out["exit_tp8_sl3_reason"] == "TP"
+    assert out["exit_tp8_sl3_pct"] == pytest.approx((0.08 - 0.0015) * 100, abs=1e-6)
+    # tp10_sl5: SL5 미터치 (-2.5% 가 최저), TP10 미도달 → EOD (108/100-1 = +8%)
+    assert out["exit_tp10_sl5_reason"] == "EOD"
+    assert out["exit_tp10_sl5_pct"] == pytest.approx((0.08 - 0.0015) * 100, abs=1e-6)
