@@ -17,7 +17,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from ledger.exit_lab import (  # noqa: E402
     EXIT_LAB_COLS,
     EXIT_VARIANTS,
+    LADDER_OUTCOME_MAP,
+    ROUND_TRIP_COST_PCT,
     evaluate_exit_variants,
+    evaluate_ladder_variant,
+    ladder_cost,
+    walk_ladder_path,
     walk_path,
 )
 
@@ -119,3 +124,95 @@ def test_bracket_variants_asymmetry():
     # tp10_sl5: SL5 미터치 (-2.5% 가 최저), TP10 미도달 → EOD (108/100-1 = +8%)
     assert out["exit_tp10_sl5_reason"] == "EOD"
     assert out["exit_tp10_sl5_pct"] == pytest.approx((0.08 - 0.0015) * 100, abs=1e-6)
+
+
+# ============================================================================
+# 델타-사다리 (walk_ladder_path) 검증
+# ============================================================================
+def test_ladder_single_arm_reduces_to_walk_path():
+    """핵심 회귀: 단일-arm 사다리(arms=(tp,), fractions=(1.0,), floor=sl) 의 gross 는
+    walk_path(bars, sl, tp) 와 비트동일, reason 은 LADDER_OUTCOME_MAP 으로 동치."""
+    grid = [(0.03, 0.05), (None, 0.05), (0.05, 0.10)]  # tp 必 (단일 arm)
+    for bars, desc in SCENARIOS:
+        for sl, tp in grid:
+            g_ref, o_ref = walk_path(bars, sl, tp)
+            g_lad, o_lad, n_sell = walk_ladder_path(
+                bars, arms=(tp,), fractions=(1.0,), floor=sl)
+            assert g_lad == pytest.approx(g_ref), \
+                f"{desc} sl={sl} tp={tp}: gross {g_lad} != {g_ref}"
+            assert LADDER_OUTCOME_MAP[o_lad] == o_ref, \
+                f"{desc} sl={sl} tp={tp}: outcome {o_lad}->{LADDER_OUTCOME_MAP[o_lad]} != {o_ref}"
+            assert n_sell == 1
+
+
+def test_ladder_multi_arm_one_bar_locks_exact_arm_not_bar_high():
+    """한 봉 high +7% 가 arm 2/4/6 동시 교차 → 각 tranche 자기 arm 비율로 잠금.
+    gross=(0.02+0.04+0.06)/3=0.04 (봉 high +7% 일괄청산 아님 — 룩어헤드 차단)."""
+    bars = [_bar(100, 107, 99.5, 106)]
+    g, reason, n_sell = walk_ladder_path(bars, arms=(0.02, 0.04, 0.06),
+                                         fractions=(1 / 3, 1 / 3, 1 / 3), floor=0.05)
+    assert g == pytest.approx(0.04)
+    assert reason == "tp_full"
+    assert n_sell == 3
+
+
+def test_ladder_floor_first_ignores_same_bar_arm():
+    """같은 봉 floor+arm 동시(low<-5%, high>+2%) → floor 먼저, 잔여 전량 -floor, arm 무시."""
+    bars = [_bar(100, 103, 94, 96)]  # low 94 ≤ floor_px 95, high 103 ≥ arm0 102
+    g, reason, n_sell = walk_ladder_path(bars, arms=(0.02, 0.04, 0.06),
+                                         fractions=(1 / 3, 1 / 3, 1 / 3), floor=0.05)
+    assert g == pytest.approx(-0.05)
+    assert reason == "floor"
+    assert n_sell == 1
+
+
+def test_ladder_partial_then_eod():
+    """+2/+4 체결 후 미청산 잔여는 EOD close(+3%) — reason=partial_eod."""
+    bars = [_bar(100, 102.5, 99, 101), _bar(101, 104.5, 100, 103)]
+    g, reason, n_sell = walk_ladder_path(bars, arms=(0.02, 0.04, 0.06),
+                                         fractions=(1 / 3, 1 / 3, 1 / 3), floor=0.05)
+    assert g == pytest.approx((0.02 + 0.04 + 0.03) / 3)
+    assert reason == "partial_eod"
+    assert n_sell == 3  # bar1 arm + bar2 arm + EOD 잔여
+
+
+def test_ladder_no_arm_no_floor_is_eod():
+    """arm 미도달·floor 없음 → 전량 EOD close. any_armed False → reason eod."""
+    bars = [_bar(100, 101, 99, 100.5), _bar(100.5, 101.5, 99.5, 101)]
+    g, reason, n_sell = walk_ladder_path(bars, arms=(0.02, 0.04, 0.06),
+                                         fractions=(1 / 3, 1 / 3, 1 / 3), floor=None)
+    assert g == pytest.approx(0.01)  # 101/100 - 1
+    assert reason == "eod"
+    assert n_sell == 1
+
+
+def test_ladder_cost_model_notional_proportional():
+    """비용 정직성: 분할이 수수료를 늘리지 않음. extra=0 → 왕복=ROUND_TRIP_COST_PCT(분할 무관).
+    slip_extra 만 n_sell 의존."""
+    rt = ROUND_TRIP_COST_PCT
+    assert ladder_cost(1, extra_slip_per_tranche_pct=0.0) == pytest.approx(rt)
+    assert ladder_cost(3, extra_slip_per_tranche_pct=0.0) == pytest.approx(rt)  # 분할 무관
+    assert ladder_cost(3, extra_slip_per_tranche_pct=0.0002) == pytest.approx(rt + 2 * 0.0002)
+    assert ladder_cost(1, extra_slip_per_tranche_pct=0.0002) == pytest.approx(rt)  # n_sell-1=0
+
+
+def test_ladder_evaluate_net_and_bad_input():
+    """evaluate_ladder_variant: net=gross-비용, bad input → None."""
+    bars = [_bar(100, 107, 99.5, 106)]  # 3 arm 전부 체결 gross 0.04
+    out = evaluate_ladder_variant(bars, arms=(0.02, 0.04, 0.06),
+                                  fractions=(1 / 3, 1 / 3, 1 / 3), floor=0.05)
+    assert out is not None
+    assert out["net"] == pytest.approx(0.04 - ROUND_TRIP_COST_PCT)
+    assert out["n_sell"] == 3
+    assert out["reason"] == "tp_full"
+    assert evaluate_ladder_variant([]) is None
+    assert evaluate_ladder_variant([_bar(0, 0, 0, 0)]) is None
+
+
+def test_ladder_invalid_spec_raises():
+    """arms 비오름차순·fractions 합≠1 → ValueError (조용한 오작동 방지)."""
+    bars = [_bar(100, 107, 99, 106)]
+    with pytest.raises(ValueError):
+        walk_ladder_path(bars, arms=(0.04, 0.02), fractions=(0.5, 0.5), floor=0.05)
+    with pytest.raises(ValueError):
+        walk_ladder_path(bars, arms=(0.02, 0.04), fractions=(0.5, 0.4), floor=0.05)

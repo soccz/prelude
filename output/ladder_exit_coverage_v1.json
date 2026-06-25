@@ -1,0 +1,190 @@
+{
+  "design_doc": "_workspace/ladder_exit_design_v1.md",
+  "picks_total": 11315,
+  "picks_with_15m_path": 6220,
+  "days": 420,
+  "date_range_15m": [
+    "2023-05-03 18:45:00",
+    "2026-06-25 10:00:00"
+  ],
+  "regime_dist": {
+    "bull_quiet": 2610,
+    "bear_volatile": 2525,
+    "bear_quiet": 915,
+    "bull_volatile": 170
+  },
+  "embargo_days_in_picks": 5,
+  "n_folds": 4,
+  "arms": [
+    0.02,
+    0.04,
+    0.06
+  ],
+  "fractions": [
+    0.3333,
+    0.3333,
+    0.3333
+  ],
+  "cost_model": {
+    "fee_pct_per_side": 0.0005,
+    "base_slippage_pct_per_side": 0.00025,
+    "round_trip_base": 0.0015,
+    "conservative_slippage_pct_per_side": 0.002,
+    "extra_slip_per_tranche_grid": [
+      0.0,
+      0.0002,
+      0.0005
+    ],
+    "note": "수수료 명목비례 — tranche 분할이 fee 안 늘림. single-exit cell 은 n_sell=1 → 챔피언과 비트동일 비용."
+  },
+  "trials_note": "primary 1셀(arms 2/4/6, fractions thirds) 고정. DSR trials 누적 산정 시 본 12셀 + prior 96(recommender_downside_exit) + 8(ch_sustainability) ≥ 116 (사후 deflation 보고용, §2.3 게이트 강제 X).",
+  "comparison_K3_base": {
+    "convexity_L3_vs_A": {
+      "net_mean": -0.00031,
+      "hit": 0.05064,
+      "mean_win": -0.01691,
+      "p90_net": -0.01,
+      "mdd": -0.00948,
+      "h_-5_to_0": -0.05064,
+      "cvar95": 0.0,
+      "p_loss_lt_5": 0.0
+    },
+    "convexity_L5_vs_S5": {
+      "net_mean": 0.0001,
+      "hit": 0.06404,
+      "mean_win": -0.01701,
+      "p90_net": -0.01,
+      "mdd": 0.01168,
+      "h_-5_to_0": 0.12326,
+      "cvar95": 0.0,
+      "p_loss_lt_5": -0.1873
+    },
+    "floor_L5_vs_L3": {
+      "p_loss_lt_5": 0.30332,
+      "cvar95": -0.02,
+      "worst": -0.02,
+      "net_mean": 0.00085,
+      "mdd": 0.02459
+    },
+    "floor_S5_vs_A": {
+      "p_loss_lt_5": 0.49062,
+      "cvar95": -0.02,
+      "worst": -0.02,
+      "net_mean": 0.00044,
+      "mdd": 0.00343
+    },
+    "levels_K3_base": {
+      "A": {
+        "n": 3732.0,
+        "p_loss_lt_5": 0.0,
+        "cvar95": -0.0315,
+        "worst": -0.0315,
+        "mdd": -0.88957,
+        "net_mean": -0.00467,
+        "cum": -0.87808,
+        "hit": 0.33735,
+        "sortino": -3.50136,
+        "mean_win": 0.04741,
+        "p90_net": 0.0485,
+        "h_lt_-10": 0.0,
+        "h_-10_to_-5": 0.0,
+        "h_-5_to_0": 0.66265,
+        "h_0_to_+5": 0.33735,
+        "h_gt_+5": 0.0
+      },
+      "L3": {
+        "n": 3732.0,
+        "p_loss_lt_5": 0.0,
+        "cvar95": -0.0315,
+        "worst": -0.0315,
+        "mdd": -0.89905,
+        "net_mean": -0.00497,
+        "cum": -0.88918,
+        "hit": 0.388,
+        "sortino": -4.27384,
+        "mean_win": 0.0305,
+        "p90_net": 0.0385,
+        "h_lt_-10": 0.0,
+        "h_-10_to_-5": 0.0,
+        "h_-5_to_0": 0.612,
+        "h_0_to_+5": 0.388,
+        "h_gt_+5": 0.0
+      },
+      "L5": {
+        "n": 3732.0,
+        "p_loss_lt_5": 0.30332,
+        "cvar95": -0.0515,
+        "worst": -0.0515,
+        "mdd": -0.87446,
+        "net_mean": -0.00413,
+        "cum": -0.84944,
+        "hit": 0.52947,
+        "sortino": -2.59497,
+        "mean_win": 0.02988,
+        "p90_net": 0.0385,
+        "h_lt_-10": 0.0,
+        "h_-10_to_-5": 0.30332,
+        "h_-5_to_0": 0.1672,
+        "h_0_to_+5": 0.52947,
+        "h_gt_+5": 0.0
+      },
+      "S5": {
+        "n": 3732.0,
+        "p_loss_lt_5": 0.49062,
+        "cvar95": -0.0515,
+        "worst": -0.0515,
+        "mdd": -0.88614,
+        "net_mean": -0.00422,
+        "cum": -0.86696,
+        "hit": 0.46543,
+        "sortino": -2.22122,
+        "mean_win": 0.04689,
+        "p90_net": 0.0485,
+        "h_lt_-10": 0.0,
+        "h_-10_to_-5": 0.49062,
+        "h_-5_to_0": 0.04394,
+        "h_0_to_+5": 0.46543,
+        "h_gt_+5": 0.0
+      }
+    }
+  },
+  "fold_sign_K3": {
+    "A": {
+      "net_mean_by_fold": [
+        -0.00449,
+        -0.00473,
+        -0.00473,
+        -0.00459
+      ],
+      "n_pos_folds": 0
+    },
+    "L3": {
+      "net_mean_by_fold": [
+        -0.00508,
+        -0.00504,
+        -0.00501,
+        -0.00466
+      ],
+      "n_pos_folds": 0
+    },
+    "L5": {
+      "net_mean_by_fold": [
+        -0.005,
+        -0.0042,
+        -0.0041,
+        -0.00314
+      ],
+      "n_pos_folds": 0
+    },
+    "S5": {
+      "net_mean_by_fold": [
+        -0.00514,
+        -0.00431,
+        -0.00422,
+        -0.0031
+      ],
+      "n_pos_folds": 0
+    }
+  },
+  "verdict_axis": "net 음수 픽셋 — 'convexity(L3 vs A): net 비악화로 하방 재분배?' + 'floor(L5 vs L3): whipsaw 이득 vs worst 악화'. record-only."
+}

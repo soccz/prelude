@@ -1,0 +1,35 @@
+{
+  "ledger": "output/shadow_ledger_distribution.csv",
+  "n_rows": 254,
+  "date_range": [
+    "2026-05-27",
+    "2026-06-25"
+  ],
+  "regime_dist": {
+    "bear_volatile": 164,
+    "bear_quiet": 90
+  },
+  "decision_dist": {
+    "SILENCE": 164,
+    "WATCH_ONLY": 70,
+    "ACTIVE": 20
+  },
+  "naive_att_a_triple": -0.03411025267131301,
+  "conf_gap_a_triple": 47.138000000000005,
+  "active_n": 20,
+  "watch_atriple_n": 5,
+  "bull_n": 0,
+  "gate": {
+    "min_active": 50,
+    "min_watch_atriple": 30,
+    "sufficient": false
+  },
+  "verdict": "INSUFFICIENT_SAMPLE",
+  "caveats": [
+    "selection bias: ACTIVE 는 더 강한 후보로 선택(conf_gap>0) → naive ATT 은 self-impact(음)와 혼재",
+    "전 구간 bear regime — bull 일반화 불가",
+    "intraday 슬립 미기록 → mechanical(진입가 밀림) vs crowding 분리 불가",
+    "forward=발사일 일봉 EOD(09:00 open→close). 실제 사용자 진입 타이밍/사이징 미반영"
+  ],
+  "next_step": "라이브 누적 → 게이트 충족 시 (1)conf-매칭 또는 (2)RD around hit≥cut 으로 selection 통제 후 ATT 재추정."
+}
