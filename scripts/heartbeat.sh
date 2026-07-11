@@ -150,6 +150,15 @@ if [ -f "$PUB_LOG" ]; then
     fi
 fi
 
+# 4.5) v2 시한부 판정 일일 채점 (2026-07-12 신설 — 사전등록 09-01 판정·조기킬 무인 감시).
+#      exit 21 = 조기킬(누적 mean<0) 발동 → 경고 합류. 그 외엔 로그에 한 줄만 (silent 원칙 유지).
+V2_LINE=$(python scripts/v2_scoreboard.py 2>>"$LOG")
+V2_RC=$?
+echo "$V2_LINE" >> "$LOG"
+if [ "$V2_RC" -eq 21 ]; then
+    WARN "v2 조기 KILL 조건 발동: $V2_LINE"
+fi
+
 # 5) 결과 — 이상 시만 텔레그램
 if [ ${#ALERTS[@]} -gt 0 ]; then
     MSG="⚠️ prelude heartbeat ($(date +%m-%d\ %H:%M))"$'\n'$'\n'
