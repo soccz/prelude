@@ -47,9 +47,11 @@ python scripts/predict_preopen_trigger.py \
     --no-telegram \
     >> "$LOG" 2>&1 || echo "  preopen predict warn (record only)" >> "$LOG"
 
-# 4) R1 risk-reward 레이더 — 이 채널의 유일한 텔레그램 발송 (downside-first, SHADOW)
-echo "[4/4] recommend_send (R1 radar, preopen slot)" >> "$LOG"
-python scripts/recommend_send.py --slot preopen >> "$LOG" 2>&1
+# 4) R1 risk-reward 레이더 — 최소관심 모드로 record-only 강등 (2026-07-11 집행,
+#    사전등록 블록 PHASES.md "recommend record-only 강등" 조항 · DECISIONS #2 비준 2026-07-08).
+#    --dry-run = 텔레그램 발송 X, 포맷·챔피언 dispatch 로그는 유지. 09-01 판정 후 GO면 플래그 제거.
+echo "[4/4] recommend_send (R1 radar, preopen slot — record-only/최소관심)" >> "$LOG"
+python scripts/recommend_send.py --slot preopen --dry-run >> "$LOG" 2>&1
 EXIT=$?
 
 echo "[done] $(date +%H:%M:%S) exit=$EXIT" >> "$LOG"

@@ -482,3 +482,12 @@ Distribution head (multiple binary XGBoost):
 - **최소관심 모드(즉시 적용):** ACTIVE 외 텔레그램 음소거 · recommend·distribution record-only 강등 · **09-01까지 신규 연구 모라토리엄**(착수 시 관심누수 증거 = KILL).
 - **LVG-XS futures:** 기각(4후보 감사서 WEAK·repro 아티팩트 0). 09-01 안건에서 repro 스크립트 재실행 아티팩트 제시 못 하면 영구 기각.
 - **데드맨스위치:** 이 블록이 커밋된 시점부터 유효. 09-01에 사람이 판정 안 해도 위 기준으로 자동 KILL.
+
+### 집행 노트 (블록 밖 — 동결 블록 무수정)
+
+| 날짜 | 집행 | 근거 |
+|------|------|------|
+| 2026-07-11 | 블록 git 커밋 1d46a9c (07-08 작성분, 커밋 지각 = 형식요건 수리, 자동 킬 미발동 판정) | 커밋 메시지에 판정문·v2 실측(n=133, net +0.353%, 조기KILL 미충족) 기록 |
+| 2026-07-11 | 최소관심 모드 실집행: R1 recommend_send 2건(preopen·open) `--dry-run` 강등 — 텔레그램 발송 X, R1 ledger 기록은 유지 | 블록 "recommend record-only 강등" 조항 |
+| 2026-07-11 | **해석 명문화**: pump v2 radar 텔레그램(distribution [9/9])은 음소거 대상 아님 — v2는 09-01 판정 대상 실험 그 자체이며, 블록의 "ACTIVE 외 음소거"에서 v2가 유일한 판정 대상 채널. R2·A1·PUMP-rule 등 challenger는 종전대로 record-only(champion_selector 영구 차단) | 블록 취지 = 죽은 정책 관심누수 차단, 실험 관찰 채널 유지 |
+| 2026-07-11 | heartbeat 이상시 알림·backup·dashboard publish는 운영 채널로 유지 | 판정과 무관한 위생 |
