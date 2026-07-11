@@ -462,4 +462,23 @@ Distribution head (multiple binary XGBoost):
 | 2026-05-03 | Phase 1.3 | Filter alpha X — baseline_full random 이 모든 family 이김 |
 | 2026-05-03 | Phase 1.3 | 진단: 일봉 long 대부분 손해, 드문 +15% 꼬리 펌프만 알파 가능성 |
 | 2026-05-03 | Phase 1.4 | 핵심 검증: TP15_only execution + binary 모델 vs random (진행 중) |
+| 2026-07-08 | 사전등록 | GO/KILL 패널 비준 → 아래 시한부 판정 블록 박제 (DECISIONS.md #2) |
 | | | |
+
+---
+
+## 🔒 사전등록 판정 블록 (2026-07-08 비준, 수정 금지 — 결과 보기 전 동결)
+
+**프로젝트 상태: radar-not-strategy (전 정책 net 음수). "유지"가 아니라 시한부 실험으로 전환.**
+
+- **판정일: 2026-09-01.** UNDECIDED 불허 — 그날 무조건 GO 또는 KILL.
+- **v2 승격 기준 (전부 충족해야 champion 승격 + radar GO):**
+  - closed 누적 n ≥ 200
+  - per-trade mean net > 0 AND 95% CI가 0 제외
+  - 2개 이상 레짐에서 관측 OR per-day t ≥ 2
+  - n < 200이면 신호 생산률 자체가 판정 근거 → 그래도 KILL (UNDECIDED 불허)
+- **미달 시:** v2 KILL + self_impact 재추정(ACTIVE n≥50 & WATCH n≥30)도 ADOPT 불가면 **radar 전체 KILL**(타이머 정지·아카이브).
+- **조기 KILL:** 09-01 이전이라도 v2 closed 누적 net 평균이 0 미만 전환 시 즉시 radar 전체 KILL.
+- **최소관심 모드(즉시 적용):** ACTIVE 외 텔레그램 음소거 · recommend·distribution record-only 강등 · **09-01까지 신규 연구 모라토리엄**(착수 시 관심누수 증거 = KILL).
+- **LVG-XS futures:** 기각(4후보 감사서 WEAK·repro 아티팩트 0). 09-01 안건에서 repro 스크립트 재실행 아티팩트 제시 못 하면 영구 기각.
+- **데드맨스위치:** 이 블록이 커밋된 시점부터 유효. 09-01에 사람이 판정 안 해도 위 기준으로 자동 KILL.
