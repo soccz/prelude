@@ -1,87 +1,131 @@
 # prelude
 
-> 업비트 KRW 코인 중 **하락 가능성은 낮고 상승 가능성은 높은 후보**를 찾아
+> **업비트 KRW 코인 중 하락 가능성은 낮고 상승 가능성은 높은 후보**를 찾아
 > KST 08:50·09:05에 알려 주는 개인 트레이딩 보조 레이더.
-> 사용자가 직접 판단·매매하며 자동 주문은 없다.
+> 사용자가 직접 판단·매매하며 **자동 주문은 없다.**
+
+![tests](https://img.shields.io/badge/tests-1273%20passed-brightgreen)
+![status](https://img.shields.io/badge/verdict-radar--not--strategy-orange)
+![evidence](https://img.shields.io/badge/evidence-snapshot→receipt→label-blue)
+![judgment](https://img.shields.io/badge/v2%20GO%2FKILL-2026--09--01%20(frozen)-red)
+
+**전체 여정(실패 포함) 공개 보고서** → [soccz.github.io/projects/prelude](https://soccz.github.io/projects/prelude/) ·
+**일일 대시보드** → [/dashboard](https://soccz.github.io/projects/prelude/dashboard/) (매일 KST 10:10, PIN 암호화)
+
+---
+
+## 이 프로젝트가 다른 "코인 봇 레포"와 다른 점
+
+수익률 스크린샷이 없다. 대신 이것들이 있다:
+
+1. **박제된 negative result 22건+** — 12실험 exhaustive, 검증 사슬 4가설, 옵션이론 팬아웃 6트랙,
+   최후 챌린저 5축(7후보) — 채택 기준을 통과 못 한 모든 가설이 재현 가능한 형태로 남아 있다.
+   "좋아 보이는 백테스트"는 여기서 살아남지 못했다.
+2. **증거 사슬** — 성과 주장은 전부 `불변 snapshot → Telegram 서버수락 영수증 → 실제 발송시각 이후
+   96봉 라벨 → 감사 평가기`를 통과한 forward 표본에서만 나온다. 09:10 알림이 09:00 봉을
+   소급 적중하는 류의 왜곡은 구조적으로 불가능하다.
+3. **자기 자신도 못 믿는다는 전제** — 모든 산출물은 content-addressed(SHA-256) + 코드 계보 해시로
+   봉인되고, pump v2의 생사는 **2026-09-01 사전등록 동결 판정**(GO/KILL, 불변 터미널 상태,
+   코드로도 뒤집기 불가)이 결정한다. 판정에 불리해도 기준은 안 바꾼다.
+4. **정직한 자기 강등** — 신형 forward 측정에서 상방 head AUC 0.477(무작위 이하)이 나오자
+   시스템 스스로 주장을 "우수 추천기"에서 **radar-not-strategy**로 낮췄다. 살아있는 것은
+   진입 농축(base 대비 ~6배)과 하방 head(AUC 0.721)뿐이라고 문서 전체가 말한다.
+
+---
+
+## 무엇을 하나
 
 ```
-active KRW - stablecoin 5종 + D1 PIT 거래대금
+active KRW − stablecoin 5종 + D1 PIT 거래대금
               ↓ Top100 exact-boundary freshness gate
-슬롯당 단일 R1 inference snapshot ─→ Telegram delivery receipt
+슬롯당 단일 R1 inference snapshot ──→ Telegram delivery receipt
               ↓                              ↓
-      전 유니버스 score 기록       다음 실행 15분봉부터 새 96봉
-              └──────────→ forward label/evaluator
+      전 유니버스 score 기록        다음 실행 15분봉부터 새 96봉
+              └──────────→ forward label / evaluator
 ```
 
-**현재 상태 (2026-07-26)**:
+**하루 시간표 (KST, systemd 7 timer, 무인)**
 
-- 상태: **radar-not-strategy**. R1 preopen/open과 pump v2 알림 운영, R2/A1 등은 record-only
-- R1 진단: `p_dn5` 판별력은 살아 있으나 `p_up10` AUC가 `0.477`; 현재 추천 순위가
-  무작위보다 낫다고 주장할 수 없음
-- Track 1 + 적대 감사 완료: 단일 snapshot/receipt, 실행시각 이후 경로, 원자적 ledger,
-  PIT universe, exact freshness, source provenance, terminal verdict, versioned backup
-- 추가 challenger 완료: downside veto·upside·safe-up·first-passage·downside
-  semivol 전부 REJECT, 채택 0·SHADOW 0·활성 R1 변경 없음
-- 실데이터: signal-eligible KRW 266개(USD1/USDC/USDE/USDS/USDT 제외),
-  open PIT Top100 D1·4h exact `100/100`
-- 검증: 전체 `609 passed`, SQLite 7개 `quick_check=ok`, 변경 production Python
-  mypy 52파일·Ruff·compile·shell syntax 통과
-- 실제 forward 상태: 2026-07-26 open R1/R2/A1 snapshot 각 100행, R1 receipt 성공,
-  새 계약의 complete label은 아직 0개
-- pump v2: 기존 scorecard 205행은 digest로 동결했고 2026-07-27부터
-  decision→receipt→ledger strict provenance를 강제
-- 확률 주의: 현재 독립 head는 포함관계 위반이 있고 R1의 `p_up10`은 과대,
-  `p_dn5`는 과소 추정돼 RR를 calibrated probability로 해석하면 안 됨
-- 운영 반영 차단: 저장소 unit은 검증됐지만 `/etc/systemd/system` 설치본 15개가
-  전부 stale/missing이다. sudo preflight·재설치 전에는 내일 운영에 반영되지 않음
+| 시각 | 동작 |
+|---|---|
+| 08:50 | R1 **예고** 발송 (진입가 09:00 확정) |
+| 09:05 | R1 **확정** 발송 + 🎯 pump v2 radar (후보 있는 날만) + shadow ledger |
+| 09:30 | 전일 청산 (−3%SL/+5%TP/EOD, 왕복 0.15% 차감) + 챔피언 재선정 |
+| 10:05 | 전 유니버스 forward 라벨 + 감사 평가 |
+| 10:10 | 암호화 대시보드 publish |
+| 10:30 | heartbeat (이상 시만 알림) · 04:00 content-addressed DB 백업 |
 
-**핵심 원칙 (운영 안전장치)**:
+어떤 유닛이든 죽으면 `OnFailure` 경보가 즉시 텔레그램으로 날아온다 — **조용한 실패는 없다.**
 
-- 시스템은 **알림 + reference ledger**만 제공. 실거래 자동 주문 X
-- look-ahead·유니버스 시간 불일치·거래비용 누락은 허용하지 않음
-- 발송 성공 시각 이후의 실행 가능한 가격 경로만 forward 성과로 사용
-- 같은 날 추천은 equal-weight, 무추천일은 cash 0%, 수익은 비용 차감 후 복리로 집계
-- 활성 정렬·라벨·모델 구조·알림 문구 변경은 사용자 승인 후
-- 결과가 최우선이지만 현재 약한 모델을 강한 추천기로 포장하지 않음
-- 모든 코드는 이 폴더 안에 self-contained (gan_t / xsec_alpha import X)
-- 상세 진단과 발전안은 [`ADDITIONAL_IDEAS.md`](ADDITIONAL_IDEAS.md) 참조
-- 이번 후보별 최종 결과는
-  [`_workspace/challenger_completion_orchestrator_v1.md`](_workspace/challenger_completion_orchestrator_v1.md)
-  및 독립 재계산 판정서
-  [`_workspace/challenger_quant_evaluator_verdict_v1.md`](_workspace/challenger_quant_evaluator_verdict_v1.md)
-  참조
+---
+
+## 정직한 성적표 (2026-07-28)
+
+| 주장 | 증거 | 판정 |
+|---|---|---|
+| 진입 농축(lift)은 진짜 | pump20 hit 8.1% vs base 1.4% (~6×), 전 fold 일관 | ✅ 생존 |
+| 하방 판별력은 진짜 | p_dn5 AUC 0.721 | ✅ 생존 |
+| 상방 랭킹이 우수하다 | p_up10 AUC **0.477**, 실측 −0.624%/픽 (몽키 −0.424%) | ❌ 주장 철회 |
+| 자동 청산 net 흑자 | 12실험 + 챌린저 7후보 전부 net ≤ 0 | ❌ 구조적 미달 |
+| 확률은 calibrated | 독립 head 포함관계 위반 36/100, RR 낙관 편향 | ❌ 정렬용 score일 뿐 |
+
+그래서 결론은 하나다: **이 시스템은 자동 수익기가 아니라 하방-규율 추천 레이더이며,
+수익은 사용자의 진입·청산 판단이 결정한다.** 이 문장을 부정하는 지표가 나오면 문서가 먼저 바뀐다.
+
+---
+
+## 연구 연대기 — 실패가 자산이다
+
+| 기간 | 트랙 | 결과 |
+|---|---|---|
+| 05-31 | 펌프 선행패턴 역분석 → R1 risk-reward 랭커 탄생 | lift 4~4.7× 확인 |
+| 06-01 | 12실험 exhaustive (랭킹·청산·필터·regime·멀티데이·라벨·엔진 sweep) | **net 흑자 0개** — 천장 확정 |
+| 06-04→11 | 적대 검증 사슬 (researcher → evaluator → 15m 실경로) | 가짜 "+1.24%" 적발 · hit 엣지만 생존 → 🎯 v2 |
+| 06-25 | 옵션이론 팬아웃 (델타-사다리·군중쏠림·exit autopsy·PRPC) | 사다리 deep-loss −38% SHADOW · **exit/entry-timing 소진** |
+| 07-25 | 최후 챌린저 5축 + 별도 seed 독립 재검산 | **7후보 전원 REJECT** — "상방을 올리면 하방이 따라온다" 정량 확인 |
+| 07-25→26 | Track 1 측정 무결성 (증거 사슬 전면 재건) | historical 탐색 **공식 종료** — 이후 판단은 forward만 |
+| 07-27→28 | 3중 장애 (발송 사망·close 마비·침묵) → 적대 리뷰 2×2회전 복구 | CRITICAL 7건 적발·해소 · v2 소생(소급 0/53→**53/53 ok**) |
+
+상세 서사와 각 판정의 원자료: [프로젝트 보고서](https://soccz.github.io/projects/prelude/) ·
+[`_workspace/`](_workspace/) (연구 노트·독립 재검산 판정서 40여 건) · [`PHASES.md`](PHASES.md)
+
+---
+
+## 아키텍처 — 신뢰를 코드로 강제하는 장치들
+
+- **단일 불변 snapshot**: 슬롯당 점수 계산은 정확히 1회. 발송·원장·평가가 같은 바이트를 읽는다.
+- **delivery receipt**: 발송은 bool이 아니라 서버 수락 영수증(message_id 대조, ambiguous 분류, exactly-once).
+- **fail-closed + fail-loud**: 수집기 빈 페이지, 손상 state, 부분 백업, DB 재구축 — 전부 시끄러운 실패.
+  ("조용한 fail-closed는 조용한 fail-open과 같은 얼굴을 하고 있다" — 07-27 장애의 교훈)
+- **provenance 봉인**: champion 상태·정책 비교·메타 모델 전부 payload SHA-256 + 입력 manifest.
+  입력이 한 바이트 바뀌면 아티팩트가 무효화된다. pickle은 승인 digest 일치 시에만 실행.
+- **시한부 판정 박제**: v2의 GO/KILL(2026-09-01)은 불변 터미널 상태 + 독립 anchor.
+  KILL이면 전송 API 직전에서 차단된다. 참고로 현재 산술은 KILL 확정 경로다(상한 175 < 필요 200) —
+  그래도 기준은 동결 그대로 간다. **무증거로 죽는 실험과 데이터로 판정받는 실험은 다르다.**
+- **위생 4원칙 (유일한 비타협)**: look-ahead 차단 · 유니버스 시간정합 · 거래비용 상시 차감 · 자동주문 금지.
 
 ---
 
 ## 빠른 시작
 
-### 1. 환경 셋업
 ```bash
 cd /home/soccz/22tb/prelude
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-```
 
-### 2. 매 세션 컨텍스트 잡기 (30초)
-```bash
-head -60 PHASES.md                              # 현재 단계·동결 경계
-tail -30 NOTES.md                               # 사용자 새 항목
-tail -10 output/ledger.csv 2>/dev/null          # 최근 가상 결과
-git log --oneline -5                            # 최근 커밋
-```
+# 상태 잡기 (30초)
+head -60 PHASES.md                                    # 현재 단계·동결 경계
+tail -10 output/shadow_ledger_recommend.csv           # 최근 R1 forward 결과
+git log --oneline -5
 
-### 3. 안전한 수동 점검
-```bash
+# 안전한 수동 점검 (기록·발송 없음)
 python scripts/health_check.py --channel recommend --no-telegram
-python scripts/health_check.py --channel distribution --no-telegram
-# 08:45~08:59 KST에만 preopen D1 gate 점검
-python scripts/health_check.py --channel recommend-preopen --no-telegram
 python scripts/recommend_today.py --slot open --dry-run
-sudo bash deploy/install_systemd.sh --check-only
-```
+sudo bash deploy/install_systemd.sh --check-only      # 설치본-저장소 정합 검사
 
-### 4. 자주 쓰는 명령
-`CLAUDE.md §5` 참조.
+# 전체 검증
+python -m pytest -q tests/                            # 1273 passed 기대
+```
 
 ---
 
@@ -89,90 +133,50 @@ sudo bash deploy/install_systemd.sh --check-only
 
 ```
 prelude/
-├── README.md         # ← 지금 이 파일
-├── CLAUDE.md         # Claude 작업 규칙 (매 세션 시작 시 자동 적용)
-├── SIGNAL.md         # 시그널 생성 (라벨, 피처, 모델, 추론)
-├── LEDGER.md         # 가상 ledger (사이징, 추적, 성과)
-├── OPS.md            # 매일 자동 운영 (systemd, freshness, 텔레그램, drift)
-├── ASSETS.md         # 다른 폴더 (gan_t/xsec_alpha/fin/APF) 참조 매핑
-├── PHASES.md         # Phase 1/2/3 액션 + 체크박스
-├── NOTES.md          # 사용자 손글 (실제 매매 일지, 시스템 외 관찰)
-├── ADDITIONAL_IDEAS.md # 검증된 결함·추가 개선 로드맵·구현 현황
-├── .claude/          # Claude Code 세팅 (권한, 환경)
-├── data/             # 업비트 KRW 일봉 / 4h 수집 + DB
-├── signals/          # 라벨 / 피처 / 모델 / 추론
-├── ledger/           # 가상 포지션 추적
-├── ops/              # preflight / drift / ic_gate / retrain
-├── notifier/         # 텔레그램
-├── scripts/          # 백테스트 / sweep / 일일 추론 등 실행
-├── notebooks/        # EDA / 실험
-├── output/           # 결과물 (예측 CSV, ledger, drift state)
-├── tests/            # pytest
-├── deploy/           # systemd 단일 scheduler
-├── requirements.txt
-└── .gitignore
+├── README.md          # ← 지금 이 파일
+├── CLAUDE.md          # 작업 규칙 · SIGNAL.md 시그널 · LEDGER.md 원장 · OPS.md 운영
+├── PHASES.md          # 단계·판정 기록 (변경 이력 정본) · NOTES.md 사용자 손글
+├── ASSETS.md          # 외부 참조 매핑 · ADDITIONAL_IDEAS.md 검증된 결함·로드맵
+├── data/              # D1/4h/15m/Binance 수집 + DB (fail-closed collectors)
+├── signals/           # 라벨·피처·모델·snapshot·score 라벨러
+├── ledger/            # 경로 판정(path_quality)·원자 CSV·포트폴리오 정본 지표
+├── ops/               # 승격 게이트·챔피언·provenance·radar verdict·file lock
+├── notifier/          # Telegram + delivery receipt
+├── scripts/           # 일일 러너·백테스트·챌린저·감사 평가기
+├── deploy/            # systemd 15유닛 + 트랜잭션 installer (실패 시 롤백)
+├── tests/             # pytest 1273 (warnings=error)
+├── _workspace/        # 연구 노트·설계·독립 재검산 판정서 (negative results 박제)
+└── output/            # 산출물 (증거 아티팩트는 gitignore + versioned backup)
 ```
 
 ---
 
-## 어디서부터 읽을지 (역할별)
+## 어디서부터 읽을지
 
 | 누구냐 | 어디부터 |
 |---|---|
-| **새 세션 시작 Claude** | CLAUDE.md (§0 매 세션 시작 의례) → PHASES.md |
-| **6 개월 후 돌아온 사용자** | 이 README → PHASES.md (현재 단계) |
-| **시그널 만지려는 Claude** | SIGNAL.md → ASSETS.md (참조 자산) |
-| **가상 ledger 보고 싶은 사용자** | LEDGER.md → `output/ledger.csv` |
-| **매일 timer 디버깅** | OPS.md → `output/cron_*.log` |
-| **실제 매매 일지 적기** | NOTES.md (사용자 직접 적는 곳) |
-| **누적 회고 / 시각화** | [soccz.github.io/projects/prelude/dashboard](https://soccz.github.io/projects/prelude/dashboard/) (매일 KST 10:10 자동 갱신) |
+| 처음 온 사람 | 이 README → [공개 보고서](https://soccz.github.io/projects/prelude/) |
+| 새 세션 시작 Claude | `CLAUDE.md` §0 → `PHASES.md` head |
+| "진짜 성과 어때?" | `output/shadow_ledger_recommend.csv` + 평가기 리포트 (forward만 믿는다) |
+| 시그널 만지려는 사람 | `SIGNAL.md` (§7.4 확률 정합성 제한 필독) |
+| 매일 timer 디버깅 | `OPS.md` → `output/cron_*.log` → `journalctl -u prelude-*` |
+| 연구 판정 원자료 | `_workspace/challenger_quant_evaluator_verdict_v1.md` 외 40여 건 |
 
 ---
 
-## 핵심 8개 MD + 추가 아이디어
+## 현재 작업 경계 (2026-07-28)
 
-| MD | 한 줄 | 갱신 빈도 |
-|---|---|---|
-| README.md | 폴더 안내판 + 핵심 요약 | 큰 변경 시 |
-| **CLAUDE.md** | Claude 가 따라야 할 규칙 | 작업 규칙 변경 시 |
-| **SIGNAL.md** | 어떤 코인이 오를 것 같다 (라벨 / 피처 / 모델) | 모델·라벨 변경 시 |
-| **LEDGER.md** | 가상 자본 어떻게 배분 / 추적 | 사이징 룰 변경 시 |
-| **OPS.md** | 매일 자동으로 어떻게 돌고 추적 | 운영 변경 시 |
-| **ASSETS.md** | gan_t / xsec_alpha / fin / APF 참조 매핑 | 새 자산 발견 시 |
-| **PHASES.md** | Phase 1/2/3 단계별 체크리스트 | 매 작업 단위 (자주) |
-| **NOTES.md** | 사용자 손글 (실매매 / 관찰) | 사용자 자유 (자주) |
-| **ADDITIONAL_IDEAS.md** | 저하방·고상방 추천을 위한 검증 진단과 발전 로드맵 | 큰 검증·구현 시 |
-
----
-
-## 현재 작업 경계
-
-- [x] Track 1: 추천 성과를 믿을 수 있게 만드는 측정·재현·운영 수리
-- [x] R1 preopen/open 발송과 전용 원장, 전 유니버스 forward 축적 경로
-- [x] 신규상장 자동 편입과 PIT Top100 exact-boundary coverage gate
-- [x] v2 과거 205행 scorecard digest 동결 + 2026-07-27 strict evidence 전환
-- [ ] systemd root preflight·`/etc` 재설치: `sudo bash deploy/install_systemd.sh`
-- [ ] 2026-09-01 동결 판정
-- [ ] GO 및 사용자 승인 시 expanding OOF → 상방 head → paired downside veto 순으로 진행
-
-상세 진행은 `PHASES.md`, 모델 발전안은 `ADDITIONAL_IDEAS.md`를 기준으로 한다.
-
----
-
-## Stage 진행
-
-```
-Track 1 측정 정상화 ─ 완료
-   ↓
-전 유니버스 forward 축적 ─ open 1일 시작, complete label 대기
-   ↓
-2026-09-01 기존 v2 GO/KILL 판정
-   ↓ GO + 사용자 승인
-진짜 OOF calibration → 상방 head 재구축 → paired downside veto
-```
+- [x] Track 1 측정 무결성 + 적대 감사·보강
+- [x] 챌린저 5축 종결 (전원 REJECT) — historical 탐색 공식 종료
+- [x] 07-27 3중 장애 수리 + v2 후보 생산 회귀 수리 (적대 리뷰 "신뢰 가능")
+- [x] systemd 15유닛 재설치 + failure-alert 가동 (2026-07-28)
+- [ ] forward 표본 축적 (새 계약 하 매일 자동)
+- [ ] **2026-09-01 v2 동결 판정** (기준 불변)
+- [ ] 사용자 승인 대기: OOF calibration 재구축 → 상방 head 재건 → paired downside veto
 
 ---
 
 ## 라이선스
 
 개인 사용. 투자 조언 아님. 실거래 손실 책임은 사용자 본인.
+이 레포의 가장 큰 자산은 수익률이 아니라 **"무엇이 안 되는지"의 재현 가능한 기록**이다.
