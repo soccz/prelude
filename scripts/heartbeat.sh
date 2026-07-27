@@ -300,6 +300,35 @@ else
     WARN "disk usage 검사 실행 실패"
 fi
 
+# 3b) close no-decision markers — 무결정일(발송 파이프 사망일) 가시화.
+#     무추천일(zero-pick)과 달리 표본 자체가 사라진 날이므로 커버리지 분모
+#     보정 근거로 최근 7일 개수를 상시 기록하고, 최근 2일 마커는 경고 승격.
+ND_DIR="$PROJ_ROOT/output/close_no_decision"
+ND_FILES=0
+ND_DAYS=0
+ND_FRESH=""
+if [ -d "$ND_DIR" ]; then
+    for day_offset in 0 1 2 3 4 5 6; do
+        nd_date=$(date -d "-${day_offset} day" +%F)
+        nd_matches=$(find "$ND_DIR" -maxdepth 2 -name "${nd_date}.json" \
+            2>>"$LOG" | wc -l)
+        ND_FILES=$((ND_FILES + nd_matches))
+        if [ "$nd_matches" -gt 0 ]; then
+            # 분모 보정은 "일수" 기준 — 하루에 여러 cohort 가 죽어도 1일.
+            ND_DAYS=$((ND_DAYS + 1))
+        fi
+        if [ "$day_offset" -le 1 ] && [ "$nd_matches" -gt 0 ]; then
+            ND_FRESH="$ND_FRESH ${nd_date}(cohorts=${nd_matches})"
+        fi
+    done
+    echo "  close no-decision (7d): days=$ND_DAYS cohort-files=$ND_FILES" >> "$LOG"
+    if [ -n "$ND_FRESH" ]; then
+        WARN "close no-decision day 감지:$ND_FRESH — 발송 파이프 사망일(무추천일 아님), 커버리지 분모 보정 필요"
+    fi
+else
+    echo "  close no-decision (7d): days=0 (marker dir 없음)" >> "$LOG"
+fi
+
 # 4) publish.log — 예정 시각 뒤에는 오늘 최신 세션의 명시적 성공 marker를 요구한다.
 #    파일 없음/어제 성공/오늘 시작만 하고 중단/오늘 fail 모두 fail-closed. 예정 시각
 #    전 수동 heartbeat만 예외로 두어 아직 실행되지 않은 publish를 오탐하지 않는다.
@@ -352,6 +381,9 @@ if [ ${#ALERTS[@]} -gt 0 ]; then
     for a in "${ALERTS[@]}"; do
         MSG="${MSG}- ${a}"$'\n'
     done
+    # Telegram은 앞뒤 공백/개행을 strip해 에코하므로 trailing newline을 남기면
+    # 에코 검증이 ambiguous로 오분류된다(2026-07-27 거짓 FAIL). 방어적 제거.
+    MSG="${MSG%$'\n'}"
     cd "$PROJ_ROOT"
     if HEARTBEAT_MESSAGE="$MSG" python -c \
         "import os,sys; from notifier.telegram import send_telegram; sys.exit(0 if send_telegram(os.environ['HEARTBEAT_MESSAGE']) else 1)" \

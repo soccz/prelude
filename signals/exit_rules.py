@@ -82,16 +82,16 @@ def simulate_exit(bars, *, hard_sl=None, tp=None, trail_arm=None, trail=None,
     running_high = entry
     running_low = entry
     armed = (trail is not None and trail_arm is None)
-    for i, (o, h, l, c) in enumerate(bars):
-        running_low = min(running_low, l)
+    for i, (o, h, low, c) in enumerate(bars):
+        running_low = min(running_low, low)
         if h > running_high:
             running_high = h
         if arm_px is not None and not armed and h >= arm_px:
             armed = True
         trail_px = running_high * (1 - trail) if (trail is not None and armed) else None
-        if sl_px is not None and l <= sl_px:
+        if sl_px is not None and low <= sl_px:
             return -hard_sl, "sl", (i + 1) / BARS_PER_HOUR, running_low / entry - 1.0
-        if trail_px is not None and l <= trail_px:
+        if trail_px is not None and low <= trail_px:
             return trail_px / entry - 1.0, "trail", (i + 1) / BARS_PER_HOUR, running_low / entry - 1.0
         if tp_px is not None and h >= tp_px:
             return tp, "tp", (i + 1) / BARS_PER_HOUR, running_low / entry - 1.0

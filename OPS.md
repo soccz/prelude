@@ -103,6 +103,14 @@ sudo bash deploy/install_systemd.sh
   close로 flat-fill한다. 평가기는 complete artifact만 기본 forward 통계에 사용한다.
 - 과거 재생은 `scheduled_replay`, 실제 목표일 생성은 `forward_observed`로 분리한다.
   사용자가 실제로 받은 성과는 그중 `delivery_ok=True` cohort를 따로 본다.
+- close 게이트 모드는 4종: `close`(정상 청산) / `skip-zero-pick`(검증된 무추천일) /
+  `skip-legacy-unverifiable`(계약 이전) / `skip-no-decision`(발송 파이프 자체가 죽어
+  snapshot·receipt·원장 행이 전부 없는 날 — 2026-07-28 신설). skip-no-decision은
+  plan과 락 하 재검증이 같은 술어(`is_no_decision_day`)를 쓰고, 검증 시
+  `output/close_no_decision/{cohort}/{asof}.json` 감사 마커를 남긴다(백업 포함).
+  원장 행(상태 무관)이나 receipt가 하나라도 남아 있으면 조용한 skip이 아니라
+  무결성 실패로 fail-closed 한다. 이 마커 일수는 커버리지 분모 보정에 쓴다
+  (무추천일과 무결정일은 다르다 — MNAR 방지).
 
 ### 1.5 pump v2 evidence와 terminal 판정
 

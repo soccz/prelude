@@ -16,17 +16,15 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from data.database import latest_timestamp, list_markets, load_candles
+from data.database import list_markets, load_candles
 from data.market_universe import (
     is_excluded_signal_market,
     signal_eligible_markets,
@@ -34,8 +32,6 @@ from data.market_universe import (
 from signals.calibration import IsotonicCalibrator
 from signals.features import assemble_training_panel
 from signals.labels import (
-    DEFAULT_BIN_CENTERS,
-    DEFAULT_BINS,
     approx_ci_from_bins,
     cumulative_probs,
     expected_max_return,

@@ -27,13 +27,11 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
-import numpy as np
 import pandas as pd
 import xgboost as xgb
 
-from signals.setups import SETUP_LIBRARY, detect_setups, get_setup_summary
+from signals.setups import SETUP_LIBRARY, detect_setups
 
 logger = logging.getLogger("dist_engine")
 
@@ -141,8 +139,10 @@ class DistributionEngine:
             lambda lst: [s for s in lst if s != "S04"]
         )
 
-        setup_counts = {sid: int(sub_filt["setups"].apply(lambda l: sid in l).sum())
-                        for sid in SETUP_LIBRARY}
+        setup_counts = {
+            sid: int(sub_filt["setups"].apply(lambda ids: sid in ids).sum())
+            for sid in SETUP_LIBRARY
+        }
 
         return {
             "n_universe": n_universe,

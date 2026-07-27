@@ -11,7 +11,6 @@ S04 는 setup 이 아니라 BTC context (regime) — get_btc_context() 사용.
 """
 from __future__ import annotations
 
-from typing import Callable
 
 # ============================================================================
 # Setup definitions

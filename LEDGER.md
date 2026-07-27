@@ -282,8 +282,9 @@ delivery receipt, 전용 ledger identity를 쓰기·청산 단계에서 fail clo
 | `output/shadow_ledger_recommend.csv` | 현재 R1 open 전용 원장 |
 | `output/shadow_ledger_recommend_preopen.csv` | 현재 R1 preopen 전용 원장 (첫 실행 전 미생성 가능) |
 | `output/shadow_ledger_pump_hunter_v2.csv` | 현재 pump v2 원장 |
-| `scripts/close_recommend_ledger.py` | receipt 이후 15m 경로 청산 |
-| `ledger/path_quality.py` | 15m 경로 완전성 판정 |
+| `scripts/close_recommend_ledger.py` | receipt 이후 15m 경로 청산 + `skip-no-decision` 검증·마커 기록 |
+| `ledger/path_quality.py` | 15m 경로 완전성 판정 (`assess_15m_window` 단건 = `assess_15m_windows` 날짜별 벌크 로더, 동등성 테스트 고정) |
+| `output/close_no_decision/{cohort}/{asof}.json` | 발송 파이프가 아예 죽어 증거·원장 행이 전무했던 날의 감사 마커 (커버리지 분모 보정용, 백업 포함) |
 | `ledger/portfolio_metrics.py` | day-equal/cash-day 포트폴리오 지표 |
 | `ledger/exit_lab.py` | record-only 청산 변형 |
 | `ops/champion_selector.py` | 채널별 forward champion 판정 |

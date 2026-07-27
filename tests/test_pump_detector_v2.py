@@ -358,3 +358,196 @@ def test_binance_feature_date_normalizes_aware_kst_business_day(
 def test_score_rejects_nonpositive_limits_before_loading_data(kwargs):
     with pytest.raises(ValueError):
         score_pump_v2_candidates("2026-07-26", **kwargs)
+
+
+def test_binance_not_listed_symbol_is_excluded_not_fail_closed(monkeypatch):
+    # DB 0 rows = Binance 미상장(업비트 단독 상장) — 수집 장애가 아니므로
+    # ready 심볼로 진행한다 (07-26 강화의 후보 영구 사멸 회귀 수리).
+    frames = {
+        "BINANCE-BTCUSDT": _binance_daily("2026-07-25"),
+        "BINANCE-VVVUSDT": pd.DataFrame(
+            columns=["timestamp", "close", "quote_volume"]
+        ),
+    }
+    monkeypatch.setattr(
+        pump_detector_v2,
+        "load_candles",
+        lambda _db, market: frames[market],
+    )
+
+    result, status = binance_volsurge_for_date(
+        "2026-07-25",
+        set(frames),
+        "unused.db",
+    )
+
+    assert status == "ok"
+    assert set(result["bn_market"]) == {"BINANCE-BTCUSDT"}
+
+
+def test_binance_newly_listed_symbol_is_excluded_not_fail_closed(
+    monkeypatch,
+):
+    # 전체 이력이 lookback 창 이후 시작 = Binance 신규 상장 — 구조적 제외.
+    frames = {
+        "BINANCE-BTCUSDT": _binance_daily("2026-07-25"),
+        "BINANCE-NEWUSDT": _binance_daily("2026-07-25", periods=5),
+    }
+    monkeypatch.setattr(
+        pump_detector_v2,
+        "load_candles",
+        lambda _db, market: frames[market],
+    )
+
+    result, status = binance_volsurge_for_date(
+        "2026-07-25",
+        set(frames),
+        "unused.db",
+    )
+
+    assert status == "ok"
+    assert set(result["bn_market"]) == {"BINANCE-BTCUSDT"}
+
+
+def test_binance_established_symbol_gap_still_fails_closed(monkeypatch):
+    # 상장 이력이 lookback 창보다 오래된 심볼의 내부 결손은 수집 장애 —
+    # 종전대로 전량 fail-closed 유지.
+    gapped = _binance_daily("2026-07-25", periods=BN_VOL_LOOKBACK + 10)
+    gapped = gapped[
+        gapped["timestamp"] != pd.Timestamp("2026-07-20")
+    ].reset_index(drop=True)
+    frames = {
+        "BINANCE-BTCUSDT": _binance_daily("2026-07-25"),
+        "BINANCE-GAPUSDT": gapped,
+    }
+    monkeypatch.setattr(
+        pump_detector_v2,
+        "load_candles",
+        lambda _db, market: frames[market],
+    )
+
+    result, status = binance_volsurge_for_date(
+        "2026-07-25",
+        set(frames),
+        "unused.db",
+    )
+
+    assert result.empty
+    assert status.startswith("binance_partial")
+    assert "BINANCE-GAPUSDT:history_gap" in status
+
+
+def test_binance_symbol_listed_after_feature_date_is_excluded(monkeypatch):
+    # 이력 전체가 f_day 이후 시작 = 그 시점엔 미상장 (feature_date_missing
+    # 분기의 잔존 회귀 — 소급 10/53일 사멸 원인) — 구조적 제외.
+    future_only = _binance_daily("2026-07-30", periods=5)
+    frames = {
+        "BINANCE-BTCUSDT": _binance_daily("2026-07-25"),
+        "BINANCE-AEROUSDT": future_only,
+    }
+    monkeypatch.setattr(
+        pump_detector_v2,
+        "load_candles",
+        lambda _db, market: frames[market],
+    )
+
+    result, status = binance_volsurge_for_date(
+        "2026-07-25",
+        set(frames),
+        "unused.db",
+    )
+
+    assert status == "ok"
+    assert set(result["bn_market"]) == {"BINANCE-BTCUSDT"}
+
+
+def test_binance_long_stale_symbol_is_excluded_as_delisted(monkeypatch):
+    # 앵커가 신선한데 개별 심볼만 8일+ stale = 상폐/거래정지 — 구조적 제외.
+    frames = {
+        "BINANCE-BTCUSDT": _binance_daily("2026-07-25"),
+        "BINANCE-ARDRUSDT": _binance_daily("2026-07-15"),
+    }
+    monkeypatch.setattr(
+        pump_detector_v2,
+        "load_candles",
+        lambda _db, market: frames[market],
+    )
+
+    result, status = binance_volsurge_for_date(
+        "2026-07-25",
+        set(frames),
+        "unused.db",
+    )
+
+    assert status == "ok"
+    assert set(result["bn_market"]) == {"BINANCE-BTCUSDT"}
+    assert result.attrs["binance_excluded"] == [
+        "BINANCE-ARDRUSDT:delisted_asof[last=2026-07-15]"
+    ]
+
+
+def test_binance_recent_stale_symbol_still_fails_closed(monkeypatch):
+    # grace(7일) 이내 stale 은 일시 수집 장애일 수 있으므로 종전대로 fail-closed.
+    frames = {
+        "BINANCE-BTCUSDT": _binance_daily("2026-07-25"),
+        "BINANCE-ETHUSDT": _binance_daily("2026-07-22"),
+    }
+    monkeypatch.setattr(
+        pump_detector_v2,
+        "load_candles",
+        lambda _db, market: frames[market],
+    )
+
+    result, status = binance_volsurge_for_date(
+        "2026-07-25",
+        set(frames),
+        "unused.db",
+    )
+
+    assert result.empty
+    assert status.startswith("binance_partial")
+    assert "BINANCE-ETHUSDT:feature_date_missing" in status
+
+
+def test_binance_anchor_incomplete_fails_closed_not_ok(monkeypatch):
+    # DB 유실 후 빈 스키마 자동생성 / --days 3 재구축 시 전 심볼이 구조적
+    # 제외로 위장되던 fail-open 차단 — 앵커 불완전이면 무조건 fail-closed.
+    empty_frame = pd.DataFrame(columns=["timestamp", "close", "quote_volume"])
+    frames = {
+        "BINANCE-BTCUSDT": _binance_daily("2026-07-25", periods=3),
+        "BINANCE-ETHUSDT": _binance_daily("2026-07-25", periods=3),
+    }
+    monkeypatch.setattr(
+        pump_detector_v2,
+        "load_candles",
+        lambda _db, market: frames.get(market, empty_frame),
+    )
+
+    result, status = binance_volsurge_for_date(
+        "2026-07-25",
+        {"BINANCE-ETHUSDT"},
+        "unused.db",
+    )
+
+    assert result.empty
+    assert status.startswith("binance_anchor_incomplete")
+
+
+def test_binance_all_excluded_is_no_ready_not_ok(monkeypatch):
+    # 전량 구조적 제외는 "ok 무추천일"이 아니라 binance_no_ready 로 시끄럽게.
+    empty_frame = pd.DataFrame(columns=["timestamp", "close", "quote_volume"])
+    frames = {"BINANCE-BTCUSDT": _binance_daily("2026-07-25")}
+    monkeypatch.setattr(
+        pump_detector_v2,
+        "load_candles",
+        lambda _db, market: frames.get(market, empty_frame),
+    )
+
+    result, status = binance_volsurge_for_date(
+        "2026-07-25",
+        {"BINANCE-ONLYUPBITUSDT"},
+        "unused.db",
+    )
+
+    assert result.empty
+    assert status == "binance_no_ready (excluded=1/1)"

@@ -19,6 +19,7 @@ stale 이면 후보 0 + meta 에 사유 기록 (조용히 잘못된 신호 내�
 """
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -33,7 +34,16 @@ from signals.pump_detector_v1 import (
     build_feature_frame,
 )
 
+log = logging.getLogger(__name__)
+
 BINANCE_DB = str(Path(__file__).resolve().parent.parent / "data" / "binance_d1.db")
+# 상시 상장 앵커: 이 심볼의 f_day 봉 + 연속 lookback 이력이 없으면 DB 자체가
+# 유실/재구축/수집장애 상태다 — 구조적 제외 판정(0 rows = 미상장 등)의 전제.
+BN_ANCHOR = "BINANCE-BTCUSDT"
+# 개별 심볼만 장기 stale = 상폐/거래정지 추정 임계 (초기값; 앵커 신선이 전제.
+# 수집기는 심볼 실패 시 run exit code 가 실패로 승격돼 그날 시끄럽게 알려지므로
+# grace 를 넘긴 개별 stale 은 상장 이탈 신호로 본다)
+DELIST_GRACE_DAYS = 7
 
 # 검증된 룰 임계 (placeholder §2.5 — scripts/binance_leadlag_v1.py 의 고정 임계)
 ROC7_RANK_MIN = 0.85
@@ -71,6 +81,14 @@ def binance_volsurge_for_date(feature_date, needed_bn: set[str],
     symbol 하나라도 feature_date candle 또는 직전 연속 20일 history가 없으면
     부분 frame을 반환하지 않는다. inner join으로 누락 자산만 조용히 제거되는 선택편향을
     막기 위한 fail-closed 계약이다.
+
+    단, 구조적 미상장은 수집 장애가 아니다 (2026-07-28 정정): 일일 수집기가
+    live active USDT 상장 목록 기준 --all 로 돌므로 DB 0 rows = Binance 미상장
+    (업비트 단독 상장), 그리고 전체 이력이 lookback 창 이후에 시작하면 신규
+    상장이다. 이 둘은 제외 목록으로 분리해 나머지 ready 심볼로 진행한다 —
+    07-26 강화가 이 구분 없이 원자 fail-closed 를 적용해 roc 상위에 업비트
+    단독 코인 1개만 섞여도 후보 생산이 영구 0이 되던 회귀의 수리. 기존 상장
+    심볼의 stale/gap/read_error 는 종전대로 전량 fail-closed.
     """
     feature_timestamp = pd.Timestamp(feature_date)
     if pd.isna(feature_timestamp):
@@ -81,11 +99,48 @@ def binance_volsurge_for_date(feature_date, needed_bn: set[str],
         ).tz_localize(None)
     f_day = feature_timestamp.normalize()
     empty = pd.DataFrame(columns=_BINANCE_FEATURE_COLUMNS)
+    empty.attrs["binance_excluded"] = []
     if not needed_bn:
         return empty, "ok"
 
+    lookback_start = f_day - pd.Timedelta(days=BN_VOL_LOOKBACK)
+
+    # 앵커 프로브 — DB 유실 후 빈 스키마 자동생성, --days 3 증분만으로 재구축된
+    # DB 등에서 전 심볼이 not_listed/newly_listed 로 오분류되어 "ok 무추천일"로
+    # 위장되는 fail-open 을 차단한다. 앵커가 불완전하면 무조건 fail-closed.
+    try:
+        anchor_raw = load_candles(binance_db, BN_ANCHOR)
+    except Exception as exc:
+        return empty, f"binance_anchor_unreadable[{type(exc).__name__}]"
+    anchor_ok = False
+    if anchor_raw is not None and not anchor_raw.empty:
+        anchor = anchor_raw.sort_values("timestamp").copy()
+        anchor["day"] = pd.to_datetime(anchor["timestamp"]).dt.normalize()
+        anchor_through = anchor[anchor["day"] <= f_day]
+        anchor_history = anchor_through[
+            anchor_through["day"] < f_day
+        ].tail(BN_VOL_LOOKBACK)
+        anchor_ok = (
+            int((anchor_through["day"] == f_day).sum()) == 1
+            and len(anchor_history) == BN_VOL_LOOKBACK
+            and pd.DatetimeIndex(anchor_history["day"]).equals(
+                pd.date_range(
+                    lookback_start,
+                    f_day - pd.Timedelta(days=1),
+                    freq="D",
+                )
+            )
+        )
+    if not anchor_ok:
+        return empty, (
+            f"binance_anchor_incomplete (need {BN_ANCHOR} candle at "
+            f"{f_day.date()} + {BN_VOL_LOOKBACK}d continuous history — "
+            "DB loss/rebuild/collector outage suspected)"
+        )
+
     rows: list[dict] = []
     issues: list[str] = []
+    excluded: list[str] = []
     for bm in sorted(needed_bn):
         try:
             raw = load_candles(binance_db, bm)
@@ -93,7 +148,7 @@ def binance_volsurge_for_date(feature_date, needed_bn: set[str],
             issues.append(f"{bm}:read_error[{type(exc).__name__}]")
             continue
         if raw is None or raw.empty:
-            issues.append(f"{bm}:missing")
+            excluded.append(f"{bm}:not_listed")
             continue
 
         d = raw.sort_values("timestamp").copy()
@@ -102,6 +157,29 @@ def binance_volsurge_for_date(feature_date, needed_bn: set[str],
         through_feature = d[d["day"] <= f_day]
         feature_rows = through_feature[through_feature["day"] == f_day]
         if len(feature_rows) != 1:
+            first_day = d["day"].min()
+            if first_day > f_day:
+                # 이력 전체가 f_day 이후 시작 = 그 시점엔 Binance 미상장.
+                excluded.append(
+                    f"{bm}:not_listed_asof[first={first_day.date()}]"
+                )
+                continue
+            last_day = (
+                through_feature["day"].max()
+                if not through_feature.empty
+                else None
+            )
+            if (
+                last_day is not None
+                and last_day
+                < f_day - pd.Timedelta(days=DELIST_GRACE_DAYS)
+            ):
+                # 앵커 신선이 위에서 보증된 상태에서 개별 심볼만 장기 stale
+                # = 상폐/거래정지 (예: ARDRUSDT 2026-07-10 정지) — 구조적 제외.
+                excluded.append(
+                    f"{bm}:delisted_asof[last={last_day.date()}]"
+                )
+                continue
             latest = (
                 through_feature["day"].max().date()
                 if not through_feature.empty
@@ -116,6 +194,12 @@ def binance_volsurge_for_date(feature_date, needed_bn: set[str],
             BN_VOL_LOOKBACK
         )
         if len(history) != BN_VOL_LOOKBACK:
+            first_day = d["day"].min()
+            if first_day > lookback_start:
+                excluded.append(
+                    f"{bm}:newly_listed[first={first_day.date()}]"
+                )
+                continue
             issues.append(
                 f"{bm}:history_short[{len(history)}/{BN_VOL_LOOKBACK}]"
             )
@@ -176,11 +260,42 @@ def binance_volsurge_for_date(feature_date, needed_bn: set[str],
         shown = ",".join(issues[:8])
         if len(issues) > 8:
             shown += f",+{len(issues) - 8}"
+        if excluded:
+            shown += f"; excluded={len(excluded)}"
+        frame = empty.copy()
+        frame.attrs["binance_excluded"] = sorted(excluded)
+        frame.attrs["binance_ready_n"] = len(rows)
         return (
-            empty,
+            frame,
             f"binance_partial (ready={len(rows)}/{len(needed_bn)}; {shown})",
         )
-    return pd.DataFrame(rows, columns=_BINANCE_FEATURE_COLUMNS), "ok"
+    if not rows:
+        # 전량 구조적 제외를 "ok 무추천일"로 위장하지 않는다 — 룰이 정상적으로
+        # 안 걸린 날(healthy zero-pick)과 판정 자체가 불가능했던 날은 다르다.
+        frame = empty.copy()
+        frame.attrs["binance_excluded"] = sorted(excluded)
+        frame.attrs["binance_ready_n"] = 0
+        return (
+            frame,
+            f"binance_no_ready (excluded={len(excluded)}/{len(needed_bn)})",
+        )
+    if excluded:
+        # status 는 소비자 계약("ok" 정확 일치: 후보 검증·알림 문구·stale 판정)
+        # 을 지키기 위해 그대로 두고, 구조적 제외는 decision meta(caller)와
+        # 로그로 감사 가시화한다.
+        log.warning(
+            "binance volsurge structural exclusions %d/%d (proceeding with "
+            "ready=%d): %s",
+            len(excluded),
+            len(needed_bn),
+            len(rows),
+            ",".join(excluded[:8])
+            + (f",+{len(excluded) - 8}" if len(excluded) > 8 else ""),
+        )
+    frame = pd.DataFrame(rows, columns=_BINANCE_FEATURE_COLUMNS)
+    frame.attrs["binance_excluded"] = sorted(excluded)
+    frame.attrs["binance_ready_n"] = len(rows)
+    return frame, "ok"
 
 
 def score_pump_v2_candidates(asof_date, *, db_path: str | None = None,
@@ -245,6 +360,11 @@ def score_pump_v2_candidates(asof_date, *, db_path: str | None = None,
     needed = set(frame.loc[base_mask, "bn_market"].dropna())
     bn, status = binance_volsurge_for_date(meta["feature_date"], needed, binance_db)
     meta["binance_status"] = status
+    # 구조적 제외를 decision manifest 에 박제 — ready=15/15 였던 날과 8/15 였던
+    # 날을 사후 구분할 수 있어야 한다 (로그는 로테이트되지만 manifest 는 불변).
+    meta["binance_needed_n"] = int(len(needed))
+    meta["binance_ready_n"] = int(bn.attrs.get("binance_ready_n", len(bn)))
+    meta["binance_excluded"] = list(bn.attrs.get("binance_excluded", []))
     if status != "ok" or bn.empty:
         return meta
 

@@ -744,3 +744,51 @@ def test_permanent_http_rejection_is_never_retried(
     assert not telegram_error_is_ambiguous(result.error)
     assert posts == 1
     assert sleeps == []
+
+
+def test_server_trimmed_echo_of_trailing_whitespace_is_accepted(monkeypatch):
+    # Telegram은 앞뒤 공백/개행을 strip해 에코한다 — trailing newline 메시지가
+    # ambiguous로 오분류돼 heartbeat가 거짓 FAIL 나던 2026-07-27 회귀 방지.
+    message = "heartbeat alert\n- issue one\n"
+
+    monkeypatch.setattr(
+        telegram.requests,
+        "post",
+        lambda *_args, **kwargs: _Response(
+            200,
+            _ok_payload(kwargs["data"]["text"].strip()),
+        ),
+    )
+
+    result = send_telegram_with_receipt(
+        message,
+        token="123:SECRET",
+        chat_id="456",
+        retries=1,
+    )
+
+    assert result.delivery_ok is True
+    assert result.error is None
+
+
+def test_interior_text_mismatch_stays_ambiguous_after_trim_allowance(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        telegram.requests,
+        "post",
+        lambda *_args, **_kwargs: _Response(
+            200,
+            _ok_payload("heartbeat alert\n- tampered"),
+        ),
+    )
+
+    result = send_telegram_with_receipt(
+        "heartbeat alert\n- issue one\n",
+        token="123:SECRET",
+        chat_id="456",
+        retries=1,
+    )
+
+    assert result.delivery_ok is False
+    assert telegram_error_is_ambiguous(result.error)

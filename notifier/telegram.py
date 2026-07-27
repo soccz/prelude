@@ -178,9 +178,20 @@ def _validated_server_message(
     # With parse_mode Telegram returns rendered text plus entities, not the
     # original markup bytes. The successful response still binds the request
     # through this call's payload, chat id, message id, and server date; exact
-    # echo comparison is valid only for plain-text sends.
+    # echo comparison is valid only for plain-text sends.  Telegram strips
+    # leading/trailing whitespace before echoing, so a chunk that ends in a
+    # newline comes back stripped even though it was accepted verbatim —
+    # treat the server-trimmed echo as a match (2026-07-27 heartbeat false
+    # ambiguous), while any interior mismatch stays ambiguous.
     if (
-        (parse_mode is None and response_text != expected_text)
+        (
+            parse_mode is None
+            and response_text != expected_text
+            and (
+                not isinstance(response_text, str)
+                or response_text != expected_text.strip()
+            )
+        )
         or (parse_mode is not None and not isinstance(response_text, str))
     ):
         raise _TelegramResponseError(

@@ -29,10 +29,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
 from data.market_universe import signal_eligible_markets
-from signals.calibration import calibration_report
 from signals.features import assemble_training_panel
 from signals.models.xgb_phase1 import (
-    XGBPhase1, evaluate, prepare_features, train_full, tune_with_optuna,
+    XGBPhase1, evaluate, prepare_features, tune_with_optuna,
 )
 
 logger = logging.getLogger("retrain")

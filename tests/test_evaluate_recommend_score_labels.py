@@ -444,3 +444,48 @@ def test_scheduled_replay_is_excluded_from_forward_and_reported_separately(tmp_p
         if item["asof"] == "2026-07-07"
     )
     assert inferred["provenance_source"] == "inferred_from_execution_time_basis"
+
+
+def test_path_quality_summary_and_complete_only_cohort(tmp_path):
+    # flat_filled 행은 경로 의존 지표가 0 쪽으로 축소 편향되므로,
+    # 비중을 상시 노출하고 complete-only 코호트를 별도 보고한다.
+    root = tmp_path / "labels"
+    for day in range(1, 9):
+        path = _write_artifact(root, f"2026-07-{day:02d}")
+        document = json.loads(path.read_text(encoding="utf-8"))
+        document.pop("label_payload_sha256")
+        for row in document["rows"]:
+            if row["rank"] > 15:
+                row["path_quality"] = "flat_filled"
+        document["label_payload_sha256"] = _artifact_digest(document)
+        path.write_text(
+            json.dumps(document, ensure_ascii=False, sort_keys=True),
+            encoding="utf-8",
+        )
+    output = tmp_path / "evaluation.json"
+
+    report = evaluator.evaluate_label_root(
+        root,
+        output_path=output,
+        top_ns=(3,),
+        n_boot=200,
+        min_rows=30,
+        min_days=5,
+    )
+
+    channel = report["channels"]["open:R1"]
+    summary = channel["path_quality"]
+    assert summary["status"] == "available"
+    assert summary["counts"] == {"complete": 120, "flat_filled": 40}
+    assert summary["flat_filled_share"] == 0.25
+    assert summary["flat_filled_bars_mean"] is None
+    assert "biased toward zero" in summary["bias_note"]
+
+    complete_only = channel["cohorts"]["complete_path_only"]
+    assert complete_only["selection"] == "path_quality_complete_only"
+    assert complete_only["n_rows"] == 120
+    assert complete_only["heads"]["p_up10"]["status"] == "ok"
+    assert (
+        channel["cohorts"]["all_scores"]["n_rows"]
+        == complete_only["n_rows"] + 40
+    )

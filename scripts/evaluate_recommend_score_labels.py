@@ -766,6 +766,65 @@ def _delivery_cohort(frame: pd.DataFrame) -> tuple[pd.DataFrame | None, dict]:
     }
 
 
+def _path_quality_summary(frame: pd.DataFrame) -> dict:
+    """flat_filled 비중을 보고서에 상시 노출한다.
+
+    flat_filled 행은 무체결 gap 을 flat 봉으로 재구성한 것이라 MFE/MAE 와
+    TP/SL first-passage 가 0 쪽으로 축소 편향된다.  경로 의존 주장은
+    complete_path_only 코호트로만 할 것.
+    """
+    if "path_quality" not in frame or not len(frame):
+        return {
+            "status": "unavailable",
+            "reason": "path_quality_field_absent_or_no_rows",
+        }
+    quality = frame["path_quality"].fillna("unknown").astype(str)
+    flat = frame[quality == "flat_filled"]
+    flat_bars = (
+        pd.to_numeric(flat["flat_filled_bars"], errors="coerce").dropna()
+        if len(flat) and "flat_filled_bars" in flat
+        else pd.Series(dtype=float)
+    )
+    return {
+        "status": "available",
+        "counts": {
+            str(key): int(value)
+            for key, value in quality.value_counts().items()
+        },
+        "flat_filled_share": round(float((quality == "flat_filled").mean()), 6),
+        "flat_filled_bars_mean": (
+            round(float(flat_bars.mean()), 4) if len(flat_bars) else None
+        ),
+        "bias_note": (
+            "flat_filled rows reconstruct no-trade gaps as flat bars; "
+            "MFE/MAE and TP/SL first-passage are biased toward zero on those "
+            "rows. cohorts.complete_path_only removes them, but flat-fill is "
+            "a liquidity proxy so that cohort systematically drops the "
+            "thinnest names and is optimistically biased the other way — "
+            "always report both cohorts together, never cite either alone "
+            "for path-dependent claims"
+        ),
+    }
+
+
+def _path_quality_cohort(
+    frame: pd.DataFrame,
+) -> tuple[pd.DataFrame | None, dict]:
+    if "path_quality" not in frame or not frame["path_quality"].notna().any():
+        return None, {
+            "status": "unavailable",
+            "selection": None,
+            "reason": "path_quality_field_absent_in_label_artifacts",
+        }
+    mask = frame["path_quality"].astype(str) == "complete"
+    selected = frame[mask].copy()
+    return selected, {
+        "status": "available" if len(selected) else "empty",
+        "selection": "path_quality_complete_only",
+        "reason": None if len(selected) else "no_complete_path_rows",
+    }
+
+
 def _cohort_report(
     frame: pd.DataFrame | None,
     *,
@@ -1092,6 +1151,7 @@ def _evaluate_channel(
         "reason": None if len(frame) else "no_forward_observed_rows",
     }
     delivered, delivery_availability = _delivery_cohort(frame)
+    complete_path, path_quality_availability = _path_quality_cohort(frame)
     provenance_counts = {
         cohort: {
             "n_rows": int(len(group)),
@@ -1146,6 +1206,7 @@ def _evaluate_channel(
         "input_n_rows": int(len(input_frame)),
         "input_n_dates": int(input_frame["_date"].nunique()),
         "return_basis": return_basis,
+        "path_quality": _path_quality_summary(frame),
         "provenance": {
             "default_forward_cohort": FORWARD_PROVENANCE_COHORT,
             "counts": provenance_counts,
@@ -1165,6 +1226,14 @@ def _evaluate_channel(
                 availability=delivery_availability,
                 n_boot=n_boot,
                 seed=seed + 20,
+                min_rows=min_rows,
+                min_days=min_days,
+            ),
+            "complete_path_only": _cohort_report(
+                complete_path,
+                availability=path_quality_availability,
+                n_boot=n_boot,
+                seed=seed + 40,
                 min_rows=min_rows,
                 min_days=min_days,
             ),
