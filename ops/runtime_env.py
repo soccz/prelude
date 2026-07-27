@@ -240,9 +240,10 @@ def validate_runtime_values(
             raise RuntimeEnvError(
                 "PRELUDE_DASHBOARD_PIN must not have edge whitespace"
             )
-        if len(pin) < 12:
+        # 2026-07-28 사용자 명시 승인으로 12 → 4 완화 (개인용 대시보드).
+        if len(pin) < 4:
             raise RuntimeEnvError(
-                "PRELUDE_DASHBOARD_PIN must contain at least 12 characters"
+                "PRELUDE_DASHBOARD_PIN must contain at least 4 characters"
             )
 
 

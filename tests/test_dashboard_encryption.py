@@ -68,8 +68,7 @@ def test_dashboard_passphrase_has_no_public_default(monkeypatch):
     "value",
     [
         "",
-        "9963",
-        "tiny-secret",
+        "996",
         " leading-secret",
         "trailing-secret ",
     ],
@@ -82,6 +81,13 @@ def test_dashboard_passphrase_rejects_weak_or_ambiguous_values(
 
     with pytest.raises(ValueError):
         resolve_dashboard_passphrase()
+
+
+def test_dashboard_passphrase_accepts_four_digit_pin(monkeypatch):
+    # 2026-07-28 사용자 명시 승인 — 최소 길이 12 → 4 완화 계약 고정.
+    monkeypatch.setenv("PRELUDE_DASHBOARD_PIN", "9963")
+
+    assert resolve_dashboard_passphrase() == "9963"
 
 
 def test_dashboard_passphrase_accepts_explicit_or_environment_secret(

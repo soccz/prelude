@@ -83,7 +83,9 @@ DEFAULT_OUT_DIR = "output/dashboard_preview"
 ROLLING_WINDOW_DAYS = 30
 TP_PCT = 0.05  # 사용자 가이드: "5% 오르면 즉시 매도"
 PBKDF2_ITERATIONS = 250000
-MIN_DASHBOARD_PASSPHRASE_LENGTH = 12
+# 2026-07-28 사용자 명시 승인으로 12 → 4 완화 (짧은 PIN의 무차별 대입 취약을
+# 인지하고 수용 — 개인용 대시보드). PBKDF2 반복은 그대로 유지한다.
+MIN_DASHBOARD_PASSPHRASE_LENGTH = 4
 DASHBOARD_GENERATION_ENV = "PRELUDE_DASHBOARD_GENERATION_ID"
 
 
