@@ -337,8 +337,17 @@ validate_installed_contract() {
         fi
         /usr/bin/cmp -s "$REPO/deploy/$unit" "$installed_path" ||
             die "installed unit differs from source: $unit"
+        # 템플릿 유닛(name@.service)은 이 systemd 버전에서 비인스턴스명으로
+        # show 조회가 안 된다 — 임시 인스턴스명으로 조회하면 FragmentPath 가
+        # 템플릿 파일 경로로 해석된다.
+        query_unit="$unit"
+        case "$unit" in
+        *"@."*)
+            query_unit="${unit/@./@fragmentcheck.}"
+            ;;
+        esac
         if ! fragment_path=$(
-            "$SYSTEMCTL_BIN" show "$unit" \
+            "$SYSTEMCTL_BIN" show "$query_unit" \
                 --property=FragmentPath --value
         ); then
             die "cannot resolve systemd FragmentPath for $unit"
