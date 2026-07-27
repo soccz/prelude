@@ -69,6 +69,7 @@ output/.*.lock
 output/**/.*.lock
 output/pump_v1_decisions/
 output/pump_v2_receipts/
+output/close_no_decision/
 
 # Microstructure raw capture (data — git 추적 X, 로컬+백업 보관)
 data/microstructure/

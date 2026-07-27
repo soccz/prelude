@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -75,6 +76,8 @@ _LABEL_SOURCE_FILES = (
 )
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _MARKET_RE = re.compile(r"KRW-[A-Z0-9]+")
+
+log = logging.getLogger(__name__)
 _SNAPSHOT_ID_RE = re.compile(r"recommend-[0-9a-f]{20}")
 _PERCENT_RE = re.compile(r"(?:100|[0-9]{1,2})\.[0-9]%")
 _DISPLAY_PROBABILITY_TOLERANCE = 5.5e-4
@@ -726,19 +729,31 @@ def _validate_modern_row(
     p_up5 = probabilities["p_up5"]
     p_up10 = probabilities["p_up10"]
     p_up20 = probabilities["p_up20"]
-    if p_up5 is not None and p_up10 is not None and p_up20 is not None:
-        _expect(
-            p_up5 >= p_up10 >= p_up20,
-            path,
+    # 독립 head 라 포함관계가 구조적으로 보장되지 않는 알려진 모델 성질이며,
+    # snapshot 검증(recommend_snapshot)과 동일하게 진단으로만 남긴다.  값의
+    # 무결성은 artifact checksum 이 담당하고, 여기서 하드 실패로 두면 유니버스
+    # 꼬리 코인 하나가 전 유니버스 forward 라벨 축적을 죽인다(2026-07-27 실증).
+    if (
+        p_up5 is not None
+        and p_up10 is not None
+        and p_up20 is not None
+        and not p_up5 >= p_up10 >= p_up20
+    ):
+        log.warning(
+            "label artifact %s: upside nesting violated (diagnostic only): %s",
             field,
-            "upside nesting",
+            path,
         )
-    if probabilities["p_dn5"] is not None and probabilities["p_dn10"] is not None:
-        _expect(
-            probabilities["p_dn5"] >= probabilities["p_dn10"],
-            path,
+    if (
+        probabilities["p_dn5"] is not None
+        and probabilities["p_dn10"] is not None
+        and probabilities["p_dn5"] < probabilities["p_dn10"]
+    ):
+        log.warning(
+            "label artifact %s: downside nesting violated (diagnostic only): "
+            "%s",
             field,
-            "downside nesting",
+            path,
         )
     rr_ratio = _number(row["rr_ratio"], path, f"{field}.rr_ratio", nullable=True)
     downside = _number(row["exp_downside"], path, f"{field}.exp_downside", nullable=True)

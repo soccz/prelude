@@ -116,7 +116,7 @@ close_validated_preopen_r1() {
             return
         fi
         case "$mode" in
-            close|skip-zero-pick|skip-legacy-unverifiable) ;;
+            close|skip-zero-pick|skip-legacy-unverifiable|skip-no-decision) ;;
             *)
                 record_critical_failure 2 \
                     "R1 preopen recommend close evidence gate invalid mode"
@@ -147,6 +147,8 @@ close_validated_preopen_r1() {
                 echo "  R1 preopen close skipped — canonical healthy zero-pick evidence revalidated under lock" >> "$LOG"
             elif [ "$mode" = "skip-legacy-unverifiable" ]; then
                 echo "  R1 preopen close skipped — pre-contract legacy-unverifiable revalidated under lock; never forward-valid" >> "$LOG"
+            elif [ "$mode" = "skip-no-decision" ]; then
+                echo "  R1 preopen close skipped — no canonical decision evidence and no ledger rows (send-day failure already alarmed)" >> "$LOG"
             fi
             continue
         else

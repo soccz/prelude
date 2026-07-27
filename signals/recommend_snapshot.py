@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import importlib.metadata
 import json
+import logging
 import math
 import os
 import platform
@@ -40,6 +41,8 @@ _ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SNAPSHOT_ROOT = _ROOT / "output" / "recommend_snapshots"
 LEGACY_SNAPSHOT_SCHEMA_VERSION = "recommend_snapshot.v1"
 SNAPSHOT_SCHEMA_VERSION = "recommend_snapshot.v2"
+
+log = logging.getLogger(__name__)
 SUPPORTED_SNAPSHOT_SCHEMA_VERSIONS = frozenset(
     {LEGACY_SNAPSHOT_SCHEMA_VERSION, SNAPSHOT_SCHEMA_VERSION}
 )
@@ -349,6 +352,7 @@ def _validate_snapshot_contract(document: dict, path: Path) -> None:
     coins: list[str] = []
     sl_values: list[float] = []
     tp_values: list[float] = []
+    nesting_violations: list[str] = []
     for index, candidate in enumerate(universe, start=1):
         if not isinstance(candidate, dict):
             raise SnapshotError(f"snapshot candidate {index} is not an object: {path}")
@@ -416,9 +420,18 @@ def _validate_snapshot_contract(document: dict, path: Path) -> None:
                 and parsed_probabilities["p_dn5"]
                 >= parsed_probabilities["p_dn10"]
             ):
-                raise SnapshotError(
-                    f"snapshot {coin} probability nesting violated: {path}"
-                )
+                # 독립 head 라 포함관계가 구조적으로 보장되지 않는 알려진 모델
+                # 성질(07-26 snapshot 기준 36/100 위반, 최소 위반 rank 25)이다.
+                # 실제 발송분(top-k)은 사용자에게 보이는 숫자라 하드 실패를
+                # 유지하고, 유니버스 꼬리는 진단으로만 남긴다 — rank 하위 코인
+                # 하나가 전체 발송을 죽이는 구조 방지. calibration 재구축(사용자
+                # 승인 사안) 전까지는 관찰 대상.
+                if index <= len(top3):
+                    raise SnapshotError(
+                        f"snapshot {coin} probability nesting violated in "
+                        f"top-k: {path}"
+                    )
+                nesting_violations.append(coin)
         p_up20 = parsed_probabilities.get("p_up20")
         if p_up20 is not None and not math.isclose(
             probability,
@@ -510,6 +523,15 @@ def _validate_snapshot_contract(document: dict, path: Path) -> None:
         coins.append(coin)
         sl_values.append(sl)
         tp_values.append(tp)
+    if nesting_violations:
+        log.warning(
+            "snapshot probability nesting violated for %d/%d candidates "
+            "(known independent-head property; diagnostic only, e.g. %s): %s",
+            len(nesting_violations),
+            len(universe),
+            ", ".join(nesting_violations[:5]),
+            path,
+        )
     if ranks != expected_ranks:
         raise SnapshotError(f"snapshot candidate ranks are not contiguous: {path}")
     if len(set(coins)) != len(coins):

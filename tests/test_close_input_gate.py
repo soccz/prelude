@@ -697,3 +697,294 @@ def test_close_plan_rejects_unknown_status_instead_of_hiding_row(
             cohort="r1-open",
             output_root=output,
         )
+
+
+def _seam_ledger_setup(
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    asof: str,
+    blank_seam_column: bool = False,
+    extra_expected_column: str | None = None,
+):
+    """Old-schema ledger row + new-schema immutable evidence for one day."""
+    output = tmp_path / "output"
+    output.mkdir()
+    evidence = output / "decision.json"
+    evidence.write_text("{}", encoding="utf-8")
+    immutable_row = {
+        "date": asof,
+        "coin": "KRW-AAA",
+        "rank": 1,
+        "score": 0.91,
+        "entry_open": 100.0,
+        "decision_completed_at": f"{asof}T00:08:00+00:00",
+    }
+    if extra_expected_column is not None:
+        immutable_row[extra_expected_column] = "expected-value"
+    expected = gate.ExpectedCohort(
+        asof=asof,
+        evidence_id="immutable-id",
+        evidence_path=evidence.resolve(),
+        candidates=(("KRW-AAA", 1),),
+        immutable_rows=(immutable_row,),
+        validate_delivery_metadata=True,
+        delivery_ok=True,
+        sent_at=f"{asof}T00:05:00+00:00",
+    )
+    monkeypatch.setattr(gate, "_load_expected", lambda **_kwargs: expected)
+    row = {
+        "date": asof,
+        "coin": "KRW-AAA",
+        "rank": "1",
+        "score": "0.91",
+        "entry_open": "100.0",
+        "snapshot_id": "immutable-id",
+        "snapshot_path": str(evidence),
+        "delivery_ok": "True",
+        "sent_at": f"{asof}T00:05:00+00:00",
+        "status": "open",
+    }
+    if blank_seam_column:
+        row["decision_completed_at"] = ""
+    ledger = output / "shadow_ledger_recommend.csv"
+    with ledger.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(row))
+        writer.writeheader()
+        writer.writerow(row)
+    return output, ledger
+
+
+def test_pre_activation_seam_tolerates_old_ledger_schema(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 07-26 이음매: snapshot/receipt 는 신형인데 원장 행은 구스키마 writer 가
+    # 이미 아침에 적재한 상태.  없는 컬럼은 관용, 있는 컬럼 값은 그대로 강제.
+    output, _ = _seam_ledger_setup(tmp_path, monkeypatch, asof="2026-07-25")
+
+    assert gate.validate_close_input(
+        asof="2026-07-25",
+        cohort="r1-open",
+        output_root=output,
+    ) == "close"
+
+
+def test_pre_activation_seam_still_rejects_present_value_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output, ledger = _seam_ledger_setup(
+        tmp_path,
+        monkeypatch,
+        asof="2026-07-25",
+    )
+    text = ledger.read_text(encoding="utf-8").replace("0.91", "0.95")
+    ledger.write_text(text, encoding="utf-8")
+
+    with pytest.raises(gate.CloseInputError, match="immutable value mismatch"):
+        gate.validate_close_input(
+            asof="2026-07-25",
+            cohort="r1-open",
+            output_root=output,
+        )
+
+
+def test_post_activation_missing_schema_columns_still_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output, _ = _seam_ledger_setup(tmp_path, monkeypatch, asof="2026-07-27")
+
+    with pytest.raises(
+        gate.CloseInputError,
+        match="immutable schema missing",
+    ):
+        gate.validate_close_input(
+            asof="2026-07-27",
+            cohort="r1-open",
+            output_root=output,
+        )
+
+
+def test_close_plan_records_evidence_free_target_day_as_no_decision(
+    tmp_path: Path,
+) -> None:
+    # 발송 파이프가 그날 아예 죽어 snapshot 도 원장 행도 없는 post-activation
+    # 날짜는 백로그 전체를 오염시키지 않고 no-decision 으로만 기록한다.
+    output = tmp_path / "output"
+    output.mkdir()
+    ledger = output / "shadow_ledger_recommend.csv"
+    ledger.write_text(
+        "date,status\n2026-07-26,closed\n",
+        encoding="utf-8",
+    )
+
+    assert gate.validate_close_plan(
+        through_asof="2026-07-27",
+        cohort="r1-open",
+        output_root=output,
+    ) == (("2026-07-27", "skip-no-decision"),)
+
+
+def test_close_plan_pending_rows_without_evidence_still_fail_closed(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+    ledger = output / "shadow_ledger_recommend.csv"
+    ledger.write_text(
+        "date,status\n2026-07-27,open\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(gate.MissingCloseEvidenceError):
+        gate.validate_close_plan(
+            through_asof="2026-07-27",
+            cohort="r1-open",
+            output_root=output,
+        )
+
+
+def test_pre_activation_seam_tolerates_blank_backfilled_seam_column(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 07-28 아침 append 가 백로그 행에 seam 컬럼을 pd.NA(공란)로 채워도
+    # allowlist 컬럼에 한해 관용한다 (C2 재발 방지).
+    output, _ = _seam_ledger_setup(
+        tmp_path,
+        monkeypatch,
+        asof="2026-07-25",
+        blank_seam_column=True,
+    )
+
+    assert gate.validate_close_input(
+        asof="2026-07-25",
+        cohort="r1-open",
+        output_root=output,
+    ) == "close"
+
+
+def test_pre_activation_seam_rejects_non_allowlisted_missing_column(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output, _ = _seam_ledger_setup(
+        tmp_path,
+        monkeypatch,
+        asof="2026-07-25",
+        extra_expected_column="decision_started_at",
+    )
+
+    with pytest.raises(
+        gate.CloseInputError,
+        match="immutable schema missing",
+    ):
+        gate.validate_close_input(
+            asof="2026-07-25",
+            cohort="r1-open",
+            output_root=output,
+        )
+
+
+def test_pre_activation_seam_rejects_blanked_non_allowlisted_value(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output, ledger = _seam_ledger_setup(
+        tmp_path,
+        monkeypatch,
+        asof="2026-07-25",
+    )
+    text = ledger.read_text(encoding="utf-8").replace("0.91", "")
+    ledger.write_text(text, encoding="utf-8")
+
+    with pytest.raises(gate.CloseInputError, match="immutable value mismatch"):
+        gate.validate_close_input(
+            asof="2026-07-25",
+            cohort="r1-open",
+            output_root=output,
+        )
+
+
+@pytest.mark.parametrize("status", ["closed", "not_delivered"])
+def test_no_decision_rejects_any_status_ledger_row(
+    tmp_path: Path,
+    status: str,
+) -> None:
+    # closed/not_delivered 행이 있는 날은 결정이 존재했던 날 — 정본 증거
+    # 부재는 무결성 실패이지 조용한 skip 대상이 아니다 (C1).
+    output = tmp_path / "output"
+    output.mkdir()
+    ledger = output / "shadow_ledger_recommend.csv"
+    ledger.write_text(
+        f"date,status\n2026-07-27,{status}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(gate.MissingCloseEvidenceError):
+        gate.validate_close_plan(
+            through_asof="2026-07-27",
+            cohort="r1-open",
+            output_root=output,
+        )
+
+
+def test_no_decision_rejects_lingering_delivery_receipt(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+    ledger = output / "shadow_ledger_recommend.csv"
+    ledger.write_text(
+        "date,status\n2026-07-26,closed\n",
+        encoding="utf-8",
+    )
+    receipt_dir = output / "recommend_receipts" / "2026-07-27"
+    receipt_dir.mkdir(parents=True)
+    (receipt_dir / "open_r1.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(gate.MissingCloseEvidenceError):
+        gate.validate_close_plan(
+            through_asof="2026-07-27",
+            cohort="r1-open",
+            output_root=output,
+        )
+
+
+def test_no_decision_ledger_reader_rejects_duplicate_header(
+    tmp_path: Path,
+) -> None:
+    # 중복 date 헤더로 실제 행을 가리는 원장은 형제 리더와 동일하게 거부 —
+    # 락 하 최종 권위 지점에서 skip-no-decision 위장을 막는다 (N1).
+    output = tmp_path / "output"
+    output.mkdir()
+    ledger = output / "shadow_ledger_recommend.csv"
+    ledger.write_text(
+        "date,coin,rank,snapshot_id,snapshot_path,status,date\n"
+        "2026-07-27,KRW-AAA,1,snap-1,output/x.json,closed,2020-01-01\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(gate.CloseInputError, match="identity schema invalid"):
+        gate.is_no_decision_day(
+            asof="2026-07-27",
+            cohort="r1-open",
+            output_root=output,
+        )
+
+
+def test_no_decision_ledger_reader_rejects_symlink(tmp_path: Path) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+    real = tmp_path / "elsewhere.csv"
+    real.write_text("date,status\n", encoding="utf-8")
+    (output / "shadow_ledger_recommend.csv").symlink_to(real)
+
+    with pytest.raises(gate.CloseInputError):
+        gate.is_no_decision_day(
+            asof="2026-07-27",
+            cohort="r1-open",
+            output_root=output,
+        )

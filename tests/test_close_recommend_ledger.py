@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 
@@ -661,3 +662,63 @@ def test_decision_date_newer_than_cutoff_is_rejected(tmp_path):
             logging.getLogger("test"),
             decision_date=pd.Timestamp("2026-07-03"),
         )
+
+
+def test_no_decision_revalidated_under_lock_writes_marker(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    ledger_path = tmp_path / "shadow_ledger_recommend.csv"
+
+    def validate(**_kwargs):
+        raise closer.MissingCloseEvidenceError("no evidence")
+
+    monkeypatch.setattr(closer, "validate_close_input", validate)
+
+    closer.close_recommend_ledger(
+        str(ledger_path),
+        pd.Timestamp("2026-07-28"),
+        False,
+        logging.getLogger("test"),
+        decision_date=pd.Timestamp("2026-07-27"),
+        cohort="r1-open",
+        expected_mode="skip-no-decision",
+        output_root=tmp_path,
+    )
+
+    marker = tmp_path / "close_no_decision" / "r1-open" / "2026-07-27.json"
+    assert marker.exists()
+    payload = json.loads(marker.read_text(encoding="utf-8"))
+    assert payload["asof"] == "2026-07-27"
+    assert payload["cohort"] == "r1-open"
+    assert not ledger_path.exists()
+
+
+def test_no_decision_under_lock_rejects_lingering_ledger_row(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    ledger_path = tmp_path / "shadow_ledger_recommend.csv"
+    ledger_path.write_text(
+        "date,status\n2026-07-27,closed\n",
+        encoding="utf-8",
+    )
+
+    def validate(**_kwargs):
+        raise closer.MissingCloseEvidenceError("no evidence")
+
+    monkeypatch.setattr(closer, "validate_close_input", validate)
+
+    with pytest.raises(closer.MissingCloseEvidenceError):
+        closer.close_recommend_ledger(
+            str(ledger_path),
+            pd.Timestamp("2026-07-28"),
+            False,
+            logging.getLogger("test"),
+            decision_date=pd.Timestamp("2026-07-27"),
+            cohort="r1-open",
+            expected_mode="skip-no-decision",
+            output_root=tmp_path,
+        )
+
+    assert not (tmp_path / "close_no_decision").exists()

@@ -844,3 +844,75 @@ def test_missing_batch_snapshot_is_operational_failure(
 def test_invalid_cli_date_is_rejected():
     with pytest.raises(argparse.ArgumentTypeError):
         label_cli._iso_date("2026-02-30")
+
+
+def test_nesting_violation_row_is_labeled_complete_with_diagnostic(
+    tmp_path,
+    caplog,
+):
+    # 독립 head 의 포함관계 위반(유니버스 꼬리)은 진단 경고일 뿐, 전 유니버스
+    # forward 라벨 축적을 죽이지 않는다 (2026-07-27 장애 회귀 방지).
+    def scorer(asof, *, limit_markets, slot, ranking):
+        universe = [
+            _candidate(i, entry_open=100.0 + i) for i in range(1, 5)
+        ]
+        degraded = universe[3]
+        degraded["p_up20"] = 0.2
+        degraded["pump_prob"] = 0.2
+        degraded["pump_prob_pct"] = "20.0%"
+        return {
+            "asof": asof,
+            "slot": slot,
+            "feature_date": asof,
+            "btc_regime": "neutral",
+            "universe_n": 4,
+            "calibration_source": "bucket_score_pump20",
+            "rank_basis": "R1_riskreward(de-corr head)",
+            "n_history_dates": 100,
+            "ranking": ranking,
+            "score_schema_version": "recommend_score.v1",
+            "rule_version": "r1_riskreward_v1",
+            "model_random_seed": 42,
+            "feature_columns": ["f_ret_3d"],
+            "training": {
+                "start": "2025-01-01",
+                "end": "2026-07-18",
+                "cutoff_exclusive": "2026-07-19",
+                "embargo_days": 5,
+                "rows": 1000,
+                "dates": 100,
+            },
+            "universe": universe,
+            "top3": universe[:3],
+        }
+
+    result = get_or_create_recommend_snapshot(
+        "2026-07-24",
+        slot="open",
+        root=tmp_path / "snapshots",
+        scorer=scorer,
+    )
+    bars = [(100.0, 101.0, 99.0, 100.0) for _ in range(96)]
+
+    with caplog.at_level(
+        "WARNING",
+        logger="signals.recommend_score_labels",
+    ):
+        labeled = label_recommend_snapshot(
+            Path(result["snapshot_path"]),
+            output_root=tmp_path / "labels",
+            receipt_root=tmp_path / "receipts",
+            db_path=tmp_path / "15m.db",
+            now="2026-07-25 09:16:00",
+            assessor=lambda _market, start_at, **_kwargs: _assessment(
+                bars,
+                start=start_at,
+            ),
+        )
+
+    assert labeled["artifact_status"] == "complete"
+    assert labeled["summary"]["labeled"] == 4
+    assert any(
+        "upside nesting violated" in record.getMessage()
+        for record in caplog.records
+    )

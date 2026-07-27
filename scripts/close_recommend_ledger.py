@@ -31,7 +31,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+import os
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -58,6 +60,8 @@ from ledger.path_quality import (  # noqa: E402
 from ops.close_input_gate import (  # noqa: E402
     COHORTS,
     CloseInputError,
+    MissingCloseEvidenceError,
+    is_no_decision_day,
     validate_close_input,
 )
 from scripts.recommend_today import (  # noqa: E402
@@ -154,6 +158,41 @@ def _daily_pump20(coin: str, date: pd.Timestamp) -> dict:
     return {"status": "ok", "pump20_hit": int((h / o - 1.0) >= PUMP20_THRESH)}
 
 
+def _record_no_decision_marker(
+    *,
+    output_root: Path,
+    cohort: str,
+    asof: str,
+) -> None:
+    """Persist a validated no-decision day so the gap stays auditable.
+
+    Without the marker the day would be indistinguishable from a healthy
+    zero-pick day in every downstream coverage denominator (MNAR loss).
+    """
+    marker_dir = output_root / "close_no_decision" / cohort
+    marker_dir.mkdir(parents=True, exist_ok=True)
+    marker = marker_dir / f"{asof}.json"
+    if marker.exists():
+        return
+    payload = json.dumps(
+        {
+            "asof": asof,
+            "cohort": cohort,
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+            "reason": (
+                "no canonical decision evidence, no receipt and no ledger "
+                "rows — send-day pipeline failure"
+            ),
+        },
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    )
+    tmp = marker.with_suffix(".json.tmp")
+    tmp.write_text(payload + "\n", encoding="utf-8")
+    os.replace(tmp, marker)
+
+
 def close_recommend_ledger(
     ledger_path: str,
     asof: pd.Timestamp,
@@ -177,6 +216,7 @@ def close_recommend_ledger(
                 "close",
                 "skip-zero-pick",
                 "skip-legacy-unverifiable",
+                "skip-no-decision",
             }:
                 raise CloseInputError(
                     f"invalid expected close mode: {expected_mode!r}"
@@ -187,11 +227,27 @@ def close_recommend_ledger(
                 raise CloseInputError(
                     f"{cohort} ledger path does not match canonical path"
                 )
-            actual_mode = validate_close_input(
-                asof=str(decision_date.date()),
-                cohort=cohort,
-                output_root=root,
-            )
+            try:
+                actual_mode = validate_close_input(
+                    asof=str(decision_date.date()),
+                    cohort=cohort,
+                    output_root=root,
+                )
+            except MissingCloseEvidenceError:
+                # Same shared predicate the plan builder used — evidence,
+                # receipt and ledger rows (any status) must all be absent.
+                if expected_mode != "skip-no-decision" or not is_no_decision_day(
+                    asof=str(decision_date.date()),
+                    cohort=cohort,
+                    output_root=root,
+                ):
+                    raise
+                actual_mode = "skip-no-decision"
+                _record_no_decision_marker(
+                    output_root=root,
+                    cohort=cohort,
+                    asof=str(decision_date.date()),
+                )
             if actual_mode != expected_mode:
                 raise CloseInputError(
                     f"{cohort} close mode changed under ledger lock: "
@@ -490,7 +546,12 @@ def main():
     )
     ap.add_argument(
         "--expected-mode",
-        choices=("close", "skip-zero-pick", "skip-legacy-unverifiable"),
+        choices=(
+            "close",
+            "skip-zero-pick",
+            "skip-legacy-unverifiable",
+            "skip-no-decision",
+        ),
         help="mode emitted by the outer plan; must still match under lock",
     )
     ap.add_argument("--dry-run", action="store_true", help="저장 X, 미리보기만")

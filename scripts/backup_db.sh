@@ -388,6 +388,7 @@ for item in \
     output/pump_v2_receipts \
     output/pump_v2_decisions \
     output/recommend_score_labels \
+    output/close_no_decision \
     data/microstructure/upbit; do
     [ -e "$PROJ_ROOT/$item" ] && BACKUP_ITEMS+=("$item")
 done

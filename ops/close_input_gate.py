@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import csv
 import io
+import logging
 import math
 import sys
 from dataclasses import dataclass
@@ -55,6 +56,12 @@ CLOSE_EVIDENCE_ACTIVATION_DATE = date(2026, 7, 27)
 ALLOWED_LEDGER_STATUSES = frozenset(
     {"open", "no_data", "not_delivered", "closed"}
 )
+# 2026-07-26 이음매(구 writer가 아침에 적재, immutable schema는 저녁에 도착)
+# 하루에만 존재할 수 있는 컬럼.  pre-activation 행에서 이 컬럼이 아예 없거나
+# 이후 append 가 pd.NA 로 채워 공란인 경우만 관용한다.  다른 컬럼은 예외 없음.
+SEAM_TOLERATED_COLUMNS = frozenset({"decision_completed_at"})
+
+log = logging.getLogger(__name__)
 
 
 class CloseInputError(RuntimeError):
@@ -665,7 +672,7 @@ def validate_close_plan(
     except KeyError as exc:
         raise CloseInputError(f"unsupported close cohort: {cohort}") from exc
     root = Path(output_root)
-    dates = set(
+    pending = set(
         _pending_ledger_dates(
             ledger_path=root / spec.ledger_name,
             through_asof=through_asof,
@@ -673,17 +680,128 @@ def validate_close_plan(
     )
     # A zero-pick day has no ledger row, but its canonical decision still needs
     # authentication so a missing candidate-bearing ledger cannot pass silently.
+    dates = set(pending)
     dates.add(through_asof)
-    return tuple(
-        (
-            decision_date,
-            validate_close_input(
+    plan: list[tuple[str, str]] = []
+    for decision_date in sorted(dates):
+        try:
+            mode = validate_close_input(
                 asof=decision_date,
                 cohort=cohort,
                 output_root=root,
-            ),
+            )
+        except MissingCloseEvidenceError:
+            # Evidence is entirely absent AND the ledger holds no rows of any
+            # status for the injected target day: the send pipeline never
+            # produced a decision (and already failed loudly on its own unit).
+            # There is nothing to close, so record the day explicitly instead
+            # of poisoning every backlog date in this run.  Any ledger row or
+            # lingering receipt still fails closed.
+            if decision_date != through_asof or not is_no_decision_day(
+                asof=decision_date,
+                cohort=cohort,
+                output_root=root,
+            ):
+                raise
+            log.warning(
+                "%s close: no canonical decision evidence, no receipt and no "
+                "ledger rows for %s — recording no-decision day",
+                cohort,
+                decision_date,
+            )
+            mode = "skip-no-decision"
+        plan.append((decision_date, mode))
+    return tuple(plan)
+
+
+def _no_decision_artifacts(
+    asof: str,
+    spec: CohortSpec,
+    output_root: Path,
+) -> tuple[Path, ...]:
+    """Artifacts whose presence disproves a genuine no-decision day."""
+    evidence = output_root / spec.evidence_name.format(asof=asof)
+    paths = [evidence]
+    if spec.evidence_kind == "recommend_snapshot":
+        paths.append(
+            output_root / "recommend_receipts" / asof / evidence.name
         )
-        for decision_date in sorted(dates)
+    elif spec.evidence_kind == "pump_v2_decision":
+        paths.append(output_root / "pump_v2_receipts" / f"{asof}.json")
+    return tuple(paths)
+
+
+def _ledger_has_rows_for(ledger_path: Path, asof: str) -> bool:
+    """Any-status row presence check via the same hardened CSV entry point.
+
+    Must share ``_stable_csv_text`` (O_NOFOLLOW, regular-file, change-detect)
+    and the duplicate-header/extra-field rejection of the sibling readers —
+    a permissive reader here would let a symlinked or header-shadowed ledger
+    fake a no-decision day at the final under-lock authority.
+    """
+    if not _directory_entry_exists(ledger_path):
+        return False
+    try:
+        with io.StringIO(
+            _stable_csv_text(ledger_path),
+            newline="",
+        ) as handle:
+            reader = csv.DictReader(handle, strict=True)
+            fieldnames = reader.fieldnames
+            if (
+                fieldnames is None
+                or len(fieldnames) != len(set(fieldnames))
+                or "date" not in fieldnames
+            ):
+                raise CloseInputError(
+                    f"ledger identity schema invalid: {ledger_path}"
+                )
+            for row in reader:
+                if None in row:
+                    raise CloseInputError(
+                        f"ledger row has extra fields: {ledger_path}"
+                    )
+                raw = (row.get("date") or "").strip()
+                try:
+                    canonical = str(date.fromisoformat(raw))
+                except ValueError as exc:
+                    raise CloseInputError(
+                        f"ledger date invalid: {raw!r} ({ledger_path})"
+                    ) from exc
+                if raw != canonical:
+                    raise CloseInputError(
+                        f"ledger date noncanonical: {raw!r} ({ledger_path})"
+                    )
+                if canonical == asof:
+                    return True
+    except (OSError, csv.Error, UnicodeError) as exc:
+        raise CloseInputError(f"ledger is unreadable: {ledger_path}") from exc
+    return False
+
+
+def is_no_decision_day(
+    *,
+    asof: str,
+    cohort: str,
+    output_root: str | Path = PROJECT_ROOT / "output",
+) -> bool:
+    """True iff evidence, receipt, and ledger rows (any status) are all absent.
+
+    The single shared predicate behind ``skip-no-decision``: the plan builder
+    and the under-lock closer revalidation must agree on it, so neither may
+    reimplement the check.  A closed/not_delivered row or a lingering receipt
+    means a decision existed and the missing canonical artifact is an
+    integrity failure, never a quiet skip.
+    """
+    spec = COHORTS.get(cohort)
+    if spec is None:
+        raise CloseInputError(f"unsupported close cohort: {cohort}")
+    root = Path(output_root)
+    if _ledger_has_rows_for(root / spec.ledger_name, asof):
+        return False
+    return not any(
+        _directory_entry_exists(path)
+        for path in _no_decision_artifacts(asof, spec, root)
     )
 
 
@@ -723,15 +841,49 @@ def _validate_immutable_row(
     key: tuple[str, int],
     actual: Mapping[str, str],
     expected: Mapping[str, object],
+    pre_activation: bool = False,
 ) -> None:
     missing_columns = sorted(set(expected) - set(actual))
     if missing_columns:
-        raise CloseInputError(
-            f"{cohort} ledger immutable schema missing for {asof}: "
-            f"{missing_columns}"
+        if not pre_activation or not set(
+            missing_columns
+        ) <= SEAM_TOLERATED_COLUMNS:
+            raise CloseInputError(
+                f"{cohort} ledger immutable schema missing for {asof}: "
+                f"{missing_columns}"
+            )
+        # Seam day: the ledger row was appended by the pre-contract writer
+        # before the immutable schema landed, while snapshot/receipt already
+        # exist in canonical form.  Only the allowlisted seam columns are
+        # tolerated; every other column stays strictly enforced.
+        log.warning(
+            "%s ledger predates immutable schema for %s: tolerating missing "
+            "columns %s (values of present columns remain enforced)",
+            cohort,
+            asof,
+            missing_columns,
         )
     for field, expected_value in expected.items():
-        if not _csv_value_matches(actual.get(field), expected_value):
+        if field not in actual:
+            continue
+        actual_value = actual.get(field)
+        if (
+            pre_activation
+            and field in SEAM_TOLERATED_COLUMNS
+            and (actual_value is None or not actual_value.strip())
+        ):
+            # A later appender backfills the seam column as pd.NA for the
+            # pre-contract backlog row; the blank carries no information the
+            # canonical snapshot does not already pin.
+            log.warning(
+                "%s ledger seam column %s blank for %s: tolerating "
+                "pre-activation backfill artifact",
+                cohort,
+                field,
+                asof,
+            )
+            continue
+        if not _csv_value_matches(actual_value, expected_value):
             raise CloseInputError(
                 f"{cohort} ledger immutable value mismatch for {asof}: "
                 f"candidate={key} field={field}"
@@ -874,6 +1026,9 @@ def validate_close_input(
                 key=key,
                 actual=row,
                 expected=expected_row,
+                pre_activation=(
+                    date.fromisoformat(asof) < CLOSE_EVIDENCE_ACTIVATION_DATE
+                ),
             )
         if expected.validate_delivery_metadata:
             _validate_delivery_row(
