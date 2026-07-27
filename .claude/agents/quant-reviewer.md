@@ -1,0 +1,1 @@
+/home/soccz/22tb/.claude-packs/quant/agents/quant-reviewer.md

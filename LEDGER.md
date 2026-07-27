@@ -1,20 +1,23 @@
 # LEDGER.md — 가상 reference ledger
 
-> **현재 운영: detector_v1 detector beta. ledger 는 "추천 그대로 따라갔으면" reference 만.**
-> 시스템 = 텔레그램 알림. 실제 매매는 사용자 직접. ledger 는 시스템 정직성 검증용 reference.
-> 자동매매 0. 백테스트 EV(+7.4% 평균, 2024 -0.89%)는 운영 보장 X — Stage 1/2 라이브 데이터로 재확인.
+> **현재 운영: R1 preopen/open과 pump v2의 분리된 reference ledger.**
+> 시스템은 추천·기록만 하고 실제 매매는 사용자가 직접 한다.
 
-**detector beta 단계 (현재) ledger 역할**:
-- alerts → 가상 reference ledger 자동 누적 (TP=+20%, EOD close, 왕복 0.15%)
-- 사용자 실제 매매 NOTES 와 비교 (시스템 가상 vs 사용자 실제)
-- backtest 와 라이브 reference 의 EV 차이 추적 (백테스트 → 라이브 drift 감지)
-- **시스템 사이징/익절 룰은 사용자에게 강제 X** — 사용자 본인 룰
+**현재 운영 원장**:
+- R1 open: `output/shadow_ledger_recommend.csv`
+- R1 preopen: `output/shadow_ledger_recommend_preopen.csv`
+  (첫 compliant preopen run 전에는 파일이 없을 수 있음)
+- R2/A1/pump v1/v2: 각 모델의 별도 `output/shadow_ledger_*.csv`
+- 성공 delivery receipt 이후 다음 실행 가능한 15분봉부터 96봉을 평가하고
+  TP5/SL3/EOD·왕복 0.15% 비용을 기록
+- 같은 날 추천은 equal-weight, 무추천일은 cash 0%로 집계
 
-아래 §1~§9 는 **TP/SL 옵션 3** 기반 가상 ledger 인프라 (legacy + reference) — 자동매매 X 원칙 유지.
+통합 `output/ledger.csv`는 현재 생성되지 않는다. 아래 §0L~§9는 원래 Phase 1
+TP/SL 통합 ledger 설계이며, 일부 모듈만 남은 **legacy·미배선 문서**다.
 
 ---
 
-## 0. 한 줄 결론
+## 0L. Legacy 통합 ledger 설계
 
 ```
 SIGNAL → top-K 코인 + 분포 (P(≥5%/10%/15%/20%)) + 기대 max + CI
@@ -126,7 +129,7 @@ def simulate_position(market, entry_time, entry_price, tp_pct, sl_pct, max_hold_
   - MDD
 - 최적 조합 채택 (또는 사용자 본인 매매 룰 결정 시 참고)
 
-`scripts/tp_sl_sweep.py` 매주 자동 실행 → 최적 TP/SL 추천.
+`scripts/tp_sl_sweep.py` 자동 실행은 과거 계획이며 현재 스크립트도 scheduler도 없다.
 
 ### 3.4 max_hold (24h) cap
 24h 후 강제 청산. 이것도 placeholder (12h / 36h 도 비교 가능).
@@ -143,7 +146,7 @@ def simulate_position(market, entry_time, entry_price, tp_pct, sl_pct, max_hold_
 
 ---
 
-## 5. ledger 데이터 (output/ledger.csv)
+## 5. Legacy ledger 데이터 (`output/ledger.csv`, 현재 미생성)
 
 스키마:
 ```csv
@@ -157,7 +160,8 @@ date,coin,btc_regime,
   realized_pnl_krw,cumulative_pnl_krw,equity_krw
 ```
 
-각 행 = 한 가상 포지션 한 사이클. 매일 KST 09:30 (어제 추천 → 오늘 진입 시뮬 후) 자동 갱신.
+설계상 각 행은 한 가상 포지션 한 사이클이며 KST 09:30 갱신 예정이었지만,
+현재 운영은 상단의 채널별 원장을 사용한다.
 
 **가상 자본 시작**: 1,000 만원 (사용자 조정 가능, `ledger/config.py`)
 
@@ -174,7 +178,7 @@ date,coin,btc_regime,
 - **현재 MDD**
 - **현재 capital deployment** (가상 노출)
 
-### 6.2 주간 / 월간 리포트 (scripts/ledger_summary.py)
+### 6.2 주간 / 월간 리포트 (legacy 계획, 스크립트 미구현)
 ```
 === Week 18 (2026-05-04 ~ 05-10) ===
 - 추천 코인: 12 (15 알림 중 3 침묵 - bear_volatile)
@@ -193,17 +197,18 @@ date,coin,btc_regime,
 ```
 
 ### 6.3 학술 메트릭 (사후 진단)
-- IC (Spearman, P(≥10%) vs 실제 max) → `output/ic_history.json`
+- IC (Spearman, P(≥10%) vs 실제 max) → `output/ic_history.json` (legacy 계획, 현재 미생성)
 - ICIR
 
 **우선순위**: 핵심 트레이딩 메트릭으로 결정. 학술 옆 표기만 (CLAUDE.md §2.3).
 
 ---
 
-## 7. 사용자 실제 매매와 비교
+## 7. 사용자 실제 매매와 비교 (legacy 계획)
 
 ### 7.1 NOTES.md 형식 (사용자 손글)
-사용자가 매일 NOTES.md 에 적는 자유 형식 — `scripts/ledger_vs_user.py` 가 파싱.
+사용자가 매일 NOTES.md에 적는 방식은 유지하지만 `scripts/ledger_vs_user.py`는
+현재 구현되지 않았다.
 
 ### 7.2 비교 스크립트
 주 1 회 NOTES 파싱 → 사용자 실제 ledger 추출 → 시스템 가상 ledger 와 비교:
@@ -224,7 +229,7 @@ date,coin,btc_regime,
 
 ---
 
-## 8. kill switch / 리스크 한도 (ledger/risk.py)
+## 8. kill switch / 리스크 한도 (legacy·미배선, ledger/risk.py)
 
 ### 8.1 일일 한도
 - **일일 가상 손실 -3% 는 초기값** (CLAUDE.md §2.5)
@@ -237,22 +242,21 @@ date,coin,btc_regime,
 - 발동 시 7 일 cool-down (가상 watch-only)
 
 ### 8.3 drift 발동 시
-- ops/drift_detector.py 가 sign flip / 정확도 drop 감지 → 자동 watch-only
+- `ops/drift_detector.py` 구현은 남아 있지만 production evaluator 호출자는 없어
+  자동 watch-only로 배선되지 않았다
 
 ### 8.4 사용자 직접 매매에는 강제 X
 이 한도는 **가상 ledger 한정**. 사용자 본인은 본인 판단.
 
 ---
 
-## 9. ledger ↔ 텔레그램 일관성 검증
+## 9. ledger ↔ 텔레그램 일관성 검증 (legacy·미등록)
 
 xsec_alpha 의 verify_telegram.py 패턴: 텔레그램이 ledger 와 부호 / 크기 일치하는지 자동 검증.
 
-`scripts/verify_telegram.py`:
-- 매일 KST 09:30 (가상 진입 후) 자동
-- 어제 텔레그램 vs 오늘 ledger 비교
-- 부호 / 크기 / 코인 일치
-- 불일치 → 텔레그램 alert
+`scripts/verify_telegram.py`는 legacy `output/ledger.csv`용 수동 검사이며 현재
+systemd timer에서 호출되지 않는다. 현재 R1/pump 경로는 snapshot/decision,
+delivery receipt, 전용 ledger identity를 쓰기·청산 단계에서 fail closed로 검증한다.
 
 ---
 
@@ -275,13 +279,18 @@ xsec_alpha 의 verify_telegram.py 패턴: 텔레그램이 ledger 와 부호 / �
 
 | 파일 | 역할 |
 |---|---|
-| `ledger/config.py` | 가상 자본, K, max exposure, TP/SL 초기값 |
-| `ledger/sizing.py` | equal / prob_weighted / kelly |
-| `ledger/tracker.py` | 진입 / 익절 / 손절 / 청산 시뮬 (4h 봉 기반) |
-| `ledger/risk.py` | kill switch / MDD 한도 |
-| `ledger/metrics.py` | Sharpe / MDD / TP-SL hit rate |
-| `output/ledger.csv` | 누적 가상 ledger |
-| `scripts/ledger_summary.py` | 주간 / 월간 리포트 |
-| `scripts/ledger_vs_user.py` | 시스템 vs 사용자 비교 |
-| `scripts/tp_sl_sweep.py` | TP/SL 최적 조합 sweep |
-| `scripts/verify_telegram.py` | ledger ↔ telegram 일관성 |
+| `output/shadow_ledger_recommend.csv` | 현재 R1 open 전용 원장 |
+| `output/shadow_ledger_recommend_preopen.csv` | 현재 R1 preopen 전용 원장 (첫 실행 전 미생성 가능) |
+| `output/shadow_ledger_pump_hunter_v2.csv` | 현재 pump v2 원장 |
+| `scripts/close_recommend_ledger.py` | receipt 이후 15m 경로 청산 |
+| `ledger/path_quality.py` | 15m 경로 완전성 판정 |
+| `ledger/portfolio_metrics.py` | day-equal/cash-day 포트폴리오 지표 |
+| `ledger/exit_lab.py` | record-only 청산 변형 |
+| `ops/champion_selector.py` | 채널별 forward champion 판정 |
+| `ops/policy_competition.py` | 모델·정책·청산 근거 비교 |
+| `ledger/config.py` | legacy 가상 자본·사이징·TP/SL 상수 |
+| `ledger/sizing.py` | legacy sizing (운영 미배선) |
+| `ledger/tracker.py` | legacy 4h TP/SL 시뮬 |
+| `ledger/risk.py` | legacy kill switch (운영 미배선) |
+| `ledger/metrics.py` | legacy 통합 ledger 지표 |
+| `scripts/verify_telegram.py` | legacy 수동 검사 |

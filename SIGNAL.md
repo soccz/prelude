@@ -1,30 +1,30 @@
 # SIGNAL.md — 시그널 생성 (라벨 / 피처 / 모델 / 추론)
 
-> **현재 메인 = detector_v1 (binary tail detector).** 6-class 분포 모델은 legacy 보존.
+> **현재 메인 = R1 risk-reward recommender (`signals/recommend.py`).**
+> detector_v1과 6-class 분포 모델은 legacy로 보존한다.
 > 책임: 라벨 / 피처 / 모델 / 추론. 사이징·청산·알림은 LEDGER / OPS.
 
 ---
 
-## 0. 한 줄 결론 (현재 운영, detector_v1)
+## 0. 한 줄 결론 (현재 운영, R1)
 
 ```
-입력  : 어제까지 KRW 코인 일봉 + BTC 일봉 (multi-lookback)
-모델  : XGBoost binary, target = next-day max(high)/open ≥ 20%
-출력  : { 코인, model_score (0~1), btc_regime }
-게이트: regime ∈ {bull_quiet, bull_volatile} AND score ≥ 0.8815 (고정)
-       → per-day top 2
-운영  : silence-heavy. bear regime 전체 침묵.
-관계자: SIGNAL.detector_v1 → (alerts) → notifier.format_detector_beta → 텔레그램 (Stage 2)
+입력  : D-1까지의 KRW 일봉 피처 + PIT 거래대금 Top100
+점수  : 8-feature rank mean + 독립 up/down head
+정렬  : p_up10 / max(p_dn5, eps) 내림차순 → top 3
+출력  : 슬롯별 단일 immutable snapshot
+평가  : delivery receipt 이후 다음 15분봉부터 새 96봉
+운영  : KST 08:50 preopen / 09:05 open R1
 ```
 
 **운영 안전장치**:
-- threshold = `output/detector_threshold.json` 의 0.8815 그대로. 라이브 quantile 재계산 절대 X
-- `signals/detector.py::DetectorV1` 가 단일 진입점 (load + score + detect + diagnose)
-- artifact 재구축 = `scripts/build_detector_v1.py` (재학습 시 1회)
+- 현재 확률과 RR는 정렬용 score이며 strict calibrated probability로 해석하지 않음
+- snapshot→delivery receipt→전용 ledger identity가 일치하지 않으면 fail closed
+- 활성 R1 정렬·라벨·모델·표시는 사용자 승인 없이 변경하지 않음
 
 ---
 
-## 0.5 detector_v1 (메인 — Phase X-2-D 채택)
+## 0.5 detector_v1 (legacy/archive — Phase X-2-D 채택)
 
 ### 정의
 - target: `next_max_return ≥ 0.20` (next-day high / next-day open - 1)
@@ -80,7 +80,8 @@
 ### 1.1 소스
 - **업비트 KRW 일봉** (메인): `pyupbit` 라이브러리
 - **업비트 KRW 4h 봉** (보조): 일봉 안 장중 max(high) 정확히 측정
-- **바이낸스 USDT 1h 봉** (보조): 김프 / binance lead-lag
+- **바이낸스 USDT 1h 봉** (legacy 보조): 김프 / binance lead-lag
+- **바이낸스 USDT 일봉** (pump v2): D-1 volume-surge
 - **historical 3 년치** 백필 (2023~ 현재). 알트는 상장 기준 가능한 만큼
 
 ### 1.2 저장
@@ -103,8 +104,9 @@
 - 업비트 일봉 마감 = **UTC 00:00 = KST 09:00**
 - DB 저장은 **KST naive** (pyupbit 기본). timestamp = KST 09:00:00 = 그 봉 시작
 - 추론 시 "오늘 일봉" = KST 09:00 시작 ~ 다음 KST 09:00 마감
-- 추론 시점 KST 09:05 = 어제 일봉 100% 마감 후 30 분
-- 바이낸스 (UTC) join 시 +9 시간 변환 1 줄
+- 추론 시점 KST 09:05 = 어제 일봉 100% 마감 후 5 분
+- 바이낸스 DB는 UTC-naive로 저장한다. timezone-aware 변환 후 업비트 KST session과
+  명시적으로 정렬하며 host timezone이나 naive `+9h`에 의존하지 않는다
 
 ### 1.4 유니버스
 - **업비트 KRW 24h 거래대금 top N**
@@ -152,7 +154,8 @@ EDA 에서 분포 보고 조정:
 - bin 너무 sparse (예: bin 5 가 < 1%) → bin 합치기 또는 cutoff 변경
 - bin 너무 흔함 (예: bin 1 이 > 50%) → 더 세분화
 
-`scripts/label_distribution.py` 로 bin 분포 분석 → 사용자 컨펌 후 최종.
+`scripts/label_distribution.py`로 bin 분포를 분석한다는 legacy 계획이며,
+현재 스크립트는 미구현이다. 실제 탐색 코드는 `scripts/label_space_discovery_v2.py`다.
 
 ### 2.3 cumulative 확률 (출력용)
 
@@ -318,7 +321,7 @@ ASSETS.md 의 gan_t/models/hybrid_model.py 구조 참조 → today_pump 안에 �
 
 **언제 도입?**: Phase 1 multi-class 정확도 (Brier / reliability) 충분하면 Phase 2 유보. 부족하면 도입 + DM test.
 
-**파일**: `signals/models/hybrid_phase2.py`
+**파일**: `signals/models/hybrid_phase2.py` (Phase 2 계획, 현재 미구현)
 
 ### 4.4 Phase 3 — APF motif 진단 (옵션, 학술)
 
@@ -353,7 +356,7 @@ def reliability_diagram(predictions, actuals, threshold=0.10):
 ```
 
 **목표**: pred_avg ≈ actual_rate (대각선). 벗어나면 isotonic regression 으로 calibrate.
-**저장**: `output/reliability_curves.json` (각 cutoff 별)
+**저장 계획**: `output/reliability_curves.json` (각 cutoff 별, 현재 미생성)
 
 ### 5.2 Quantile coverage
 
@@ -428,13 +431,13 @@ def predict_today():
 
 ---
 
-## 7. 검증 (signals/validate.py + scripts/backtest_wf.py)
+## 7. 검증 (현재 forward + legacy `scripts/backtest_wf_ledger.py`)
 
-### 7.1 Purged Walk-Forward
+### 7.1 Purged Walk-Forward (legacy 6-class)
 - 5-fold WF + 10일 embargo (보수)
 - 최종 holdout: 마지막 6 개월 절대 락
 
-### 7.2 지표 (트레이딩 + 정확도 둘 다)
+### 7.2 지표 (legacy 6-class 설계)
 
 **필수 (트레이딩)**:
 - net Sharpe (옵션 3 익절/손절 시뮬, 왕복 0.15% 차감)
@@ -453,14 +456,70 @@ def predict_today():
 - ICIR
 
 ### 7.3 forward 검증
-백테스트만 보고 결정 X. 최소 **2 주 live paper** 후 net + 정확도 확인.
+백테스트만 보고 결정 X. 슬롯당 한 번 생성한 R1 snapshot의 전 유니버스 score와
+피처를 `output/recommend_snapshots/`에 저장하고, Telegram delivery receipt의
+`sent_at`을 다음 15분 경계로 올린 시각부터 정확히 96봉을 평가한다. 예를 들어
+09:10 발송이면 `[D 09:15, D+1 09:15)`가 라벨 창이다.
+
+- `signals/recommend_score_labels.py`: up5/10/20, dn3/5/10,
+  TP5/SL3 선도달, MFE/MAE, 비용 차감 EOD를 행별 기록
+- `scripts/evaluate_recommend_score_labels.py`: AUC/Brier/calibration,
+  up10이면서 dn5가 아닌 safe-up10, day-equal top-N, 유동성-matched,
+  within-volatility baseline과 날짜-cluster CI 산출
+- 대상 종목만 빈 15분봉은 무체결 flat 경로로 복원하고, KRW-BTC 기준 경로가
+  불완전하면 해당 artifact는 partial로 보류
+- 목표일 밖에서 만든 과거 재생은 `scheduled_replay`로 분리해 기본 forward
+  통계에서 제외
+- 실제 사용자가 받은 추천은 all-score가 아니라 `delivery_ok=True` cohort로
+  별도 확인
+
+2026-07-26 open R1/R2/A1 snapshot은 각각 PIT Top100 100행으로 생성됐고 R1
+delivery receipt도 검증됐다. 다만 새 계약으로 성숙한 complete label은 아직 0개이며,
+당일 preopen은 이전 설치본의 15m gate 실패로 snapshot이 없다. 따라서 최소
+**2주 live paper**는 초기값일 뿐이며, 날짜 수와 CI 폭이 충분해질 때까지 활성 모델
+승격 근거로 사용하지 않는다.
+
+`recommendation_quality_meta_label_v1`의 과거 metadata는 자체적으로
+`deployable=true`를 선언하지만, content-addressed model·feature schema digest·명시적
+승인 digest가 없는 legacy bundle이다. 엄격한 loader 판정은 `LEGACY_UNBOUND`이고
+pickle을 실행하지 않으며, 현재 추천을 강등하지도 않는다. 이 결과는 historical
+diagnostic/model card일 뿐 운영 승격 증거가 아니다.
+
+### 7.4 확률 정합성 제한
+
+현재 R1의 독립 binary head와 일부 bucket calibration은 확률을 서로 독립적으로
+만들기 때문에 수학적으로 필요한 포함관계가 항상 성립하지 않는다.
+
+- 2026-07-26 09:05에 고정한 R1/R2/A1 snapshot은 각 100행 중 36행에서
+  `p_up20 > p_up10`이었다. 이후 현재 DB·코드로 같은 R1 cutoff를 재계산한
+  100행에서는 37행이었고, 두 경우 모두 `p_up10 > p_up5`와
+  `p_dn10 > p_dn5` 위반은 0행이었다. 과거 snapshot은 이 차이를 소급 반영해
+  덮어쓰지 않는다.
+- OOS 76,731행 중 포함관계 위반은 442행(0.576%)이었다.
+- 기존 R1 forward 165행/55일에서는 `p_up10` 평균 20.49% 대 실현 13.94%,
+  `p_dn5` 평균 22.98% 대 실현 33.94%로 RR가 낙관적이었다.
+
+따라서 현재 확률과 RR는 정렬용 score이지 calibrated trading probability로 해석하지
+않는다. 모델 변경 승인 후에는 inner-OOF calibration을 우선하고, rank anchor를
+유지해야 하면 `p_up5=max(p_up5,p_up10)`,
+`p_up20=min(p_up20,p_up10)`, `p_dn10=min(p_dn10,p_dn5)`의 단조 projection을
+versioned shadow로 비교한다. snapshot v2는 전 유니버스 포함관계 위반을 발견하면
+발송을 fail closed한다. 현재 구현은 이 검사를 Top3만으로 완화하지 않으며,
+전 유니버스 fail-closed를 유지한다. Top3 한정 완화는 사용자 결정 대기안일 뿐
+적용된 운영 규칙이 아니다. 다만 현재 R1 formatter에는 과거 문구
+`둘 다 검증된 calibrated`가 남아 있어 위 증거와 모순된다. 현 활성 정렬·표시·알림은
+임의 변경하지 않으며, 이 문구 수정과 versioned projection은 사용자 승인 후 적용한다.
 
 ---
 
-## 8. 재학습 (signals/retrain.py)
+## 8. 재학습 (legacy·미등록, signals/retrain.py)
+
+현재 `scripts/retrain_run.sh`와 `signals/retrain.py`는 systemd/cron에 등록되지 않은
+legacy 수동 경로다. 구현 gate도 아래 설계와 완전히 일치하지 않으므로 사용자 승인과
+gate 재검증 전에는 활성 R1 학습·배포 경로로 사용하지 않는다.
 
 ### 8.1 cadence
-- 주 1 회 (일요일 KST 06:00) — `ops/retrain_pipeline.py`
+- 주 1 회 (일요일 KST 06:00)는 과거 설계이며 현재 scheduler에는 미등록
 - **cadence 는 초기값** (CLAUDE.md §2.5)
 
 ### 8.2 promotion gate
@@ -502,15 +561,23 @@ OPS.md 참조. 시그널 정확도 + 분포 안정성 감시.
 | `data/collector_d1.py` | 업비트 일봉 수집 (이미 작성) |
 | `data/collector_4h.py` | 4h 보조 (장중 max(high) 정확히) |
 | `data/collector_binance.py` | 바이낸스 1h |
+| `data/collector_binance_d1.py` | pump v2용 바이낸스 일봉 |
 | `data/database.py` | sqlite 헬퍼 (이미 작성) |
+| `signals/recommend.py` | 현재 R1 score와 risk-reward 정렬 |
+| `signals/recommend_snapshot.py` | 슬롯별 immutable score snapshot |
+| `signals/recommend_score_labels.py` | receipt 이후 96봉 forward label |
+| `scripts/recommend_send.py` | 현재 R1 Telegram 발송 |
+| `scripts/recommend_today.py` | R1/R2/A1 전용 원장 기록 |
+| `scripts/label_recommend_snapshots.py` | snapshot 전 유니버스 label 생성 |
+| `scripts/evaluate_recommend_score_labels.py` | 전 유니버스 forward 평가 |
 | `signals/labels.py` | today_pump_label (multi-class) |
 | `signals/features.py` | alt + BTC + cross-market 피처 |
-| `signals/models/xgb_phase1.py` | Phase 1 multi-class softprob |
-| `signals/models/hybrid_phase2.py` | Phase 2 (나중) |
+| `signals/models/xgb_phase1.py` | legacy Phase 1 multi-class softprob |
+| `signals/models/hybrid_phase2.py` | Phase 2 계획 (미구현) |
 | `signals/calibration.py` | reliability / Brier / coverage |
-| `signals/predict.py` | 일일 추론 (분포 출력) |
-| `signals/retrain.py` | 주간 재학습 + promotion |
+| `signals/predict.py` | legacy 일일 추론 (분포 출력) |
+| `signals/retrain.py` | legacy 수동 재학습 (scheduler 미등록) |
 | `signals/validate.py` | Purged WF |
-| `scripts/backtest_wf.py` | 전체 백테스트 |
-| `scripts/label_distribution.py` | bin 분포 분석 (EDA) |
-| `scripts/predict_today.py` | 수동 추론 (dry-run) |
+| `scripts/backtest_wf_ledger.py` | legacy Phase 1 WF 백테스트 |
+| `scripts/label_space_discovery_v2.py` | legacy label-space 분석 |
+| `scripts/predict_today.py` | legacy detector 수동 추론 (기본 dry-run) |

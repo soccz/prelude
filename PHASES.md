@@ -4,11 +4,16 @@
 
 ---
 
-## 현재 상태 (요약, 2026-05-25)
+## 현재 상태 (요약, 2026-07-26)
 
-- **현재 운영 후보**: pre-open + distribution beta. decision policy 가 ACTIVE / WATCH_ONLY / SILENCE 로 분리
-- **텔레그램 원칙**: 매일 발송. ACTIVE 가 있으면 추천, 없으면 침묵/상태 메시지. WATCH/SILENCE 후보는 shadow ledger + dashboard 검증용으로 기록
-- **검증 방향**: 포트폴리오용 아이디어 검증 우선. net PnL / Max DD / hit rate / forward paper 결과로 policy 조정
+- **현재 운영 알림**: R1 preopen/open 발송과 pump v2 radar. 사용자가 직접 최종 매매하며 자동 주문은 없음
+- **현재 판정**: radar-not-strategy. 새 snapshot 계약 이전 historical forward에서 R1 상방 head AUC 0.477, 비용 차감 성과도 음수라 우수 추천기로 주장할 수 없음
+- **검증 방향**: 알림 이후 경로의 저하방·고상방 추천 품질과 비용 차감 결과를 전 유니버스 forward로 함께 측정
+- **Track 1 + 적대 감사 완료**: 단일 snapshot·receipt·실행시각 경로·원자적 ledger·PIT universe·exact freshness·source provenance·terminal verdict·versioned backup 구현. 현재 signal-eligible 266개(명시 stablecoin 5종 제외), open PIT Top100 D1/4h `100/100`
+- **실검증**: 최종 전수검증 진행 중. SQLite 7개 `quick_check=ok`, R1/R2/A1 open snapshot 각 100행과 R1 delivery receipt 검증. 새 계약의 complete label은 아직 0개
+- **남은 운영 조치**: 저장소 systemd 소스는 검증됐지만 `/etc` 설치본 15개가 stale/missing이고 `.env`의 `PRELUDE_DASHBOARD_PIN`도 설치 전제다. sudo preflight·재설치 전에는 내일 운영 반영으로 간주하지 않음
+- **확률 주의**: 독립 head의 포함관계 위반과 R1 RR 낙관 편향을 확인. 활성 모델·정렬·표시는 변경하지 않았고 calibration 재구축은 사용자 승인 후
+- **변경 경계**: 활성 R1 정렬·라벨·모델 구조·알림 문구와 아래 09-01 동결 판정은 변경하지 않음. 상방 head 재구축은 승인 및 모라토리엄 종료 후
 - **AI quant 포트폴리오 강화**: historical recommendation-quality meta-filter + model card + idea attribution scorecard 추가
 - **학습 결과**: `recommendation_quality_meta_label_v1` 학습 완료. holdout 는 손실 축소/정밀도 개선 신호가 있으나 selected n=1 이라 자동 배포는 보류(shadow scoring)
 - **아카이브**: detector_v1 / legacy 6-class 모델은 보존, 현재 메인 운영 문맥에서는 후순위
@@ -16,17 +21,18 @@
 진행 트랙:
 - [x] Phase 0 — 8 MD 설계 완료
 - [x] Phase 1 — 데이터 수집 / 6-class 모델 / 인프라 (legacy)
-- [x] Phase X — leak 발견 → detector 재정의 → C3 채택 → detector_v1 artifact (이번 세션)
+- [x] Phase X — leak 발견 → detector 재정의 → C3 채택 → detector_v1 artifact (historical)
 - [x] **Phase X+2** — dashboard publish 파이프 (paper_ledger → soccz.github.io 정적 회고) 2026-05-07
 - [x] **Phase X+3** — 운영 안전 (DB 백업 + heartbeat 모니터링) 2026-05-26
 - [x] **Stage 1 구조 전환** — shadow/paper ledger + ACTIVE-only Telegram + idea validation dashboard
 - [x] **Stage 1+ AI quant layer** — recommendation-quality meta-filter + model card/report
-- [ ] **Stage 2 live paper 축적** — systemd/cron 운영 후 live shadow 표본 확보
+- [ ] **Stage 2 live paper 축적** — systemd timer 운영 후 live shadow 표본 확보
 - [ ] **Stage 3** (NOTES 기반 사용자 실제 매매 vs system 추천 비교)
 - [x] **Phase X+1 초안** — Distribution head (multi-target) + pre-open trigger 운영 후보
 - [x] **Phase X+4** — 정책 채택 (distribution PROMOTE_PAPER + preopen DEMOTE) 2026-05-26 사용자 컨펌
 - [x] **Phase X+5** — PUMP hunter rule detector SHADOW 배선 2026-06-04
 - [x] **Phase X+6** — exit lab (멀티 청산 잣대) + 운영 강화 (ledger 백업·비용 단일화·CSV 검증) 2026-06-11
+- [x] **Track 1 측정 무결성** — 단일 snapshot/receipt, 전 유니버스 label/evaluator, path·비용·집계·수집·실패 전파 수리 2026-07-25
 - [x] [Research] Cold-start 장중 펌프 (15m 미세동학) — **REJECT** 2026-06-11 (OOS allpick net 전부 음수, robust root 0; _workspace/coldstart_signal-researcher_pump_v1.md)
 - [x] [Research] Day-quality gate (죽은 날 침묵) — **REJECT** 2026-06-11 (죽은날 2.8%뿐, replay 개선 permutation p=0.43 noise; 클러스터링 corr 0.52 는 진짜 — pump20 axis 재고 조건)
 - [x] [Research] Binance lead-lag (volsurge) — **lift 진짜·배선 보류** 2026-06-11. researcher lift 4.34x (5/5 fold) → evaluator 가 "+1.24% net" 을 일봉 낙관 근사 환상으로 REJECT → 15m 정직 경로 재계산: 전기간 -0.11% (CI 0 포함), **최근 7개월 순수 OOS -0.357% (CI 0 제외), bear_quiet -0.19%**. hit 8.1% vs baseline 5.6% — 증분 피처로는 유효. 다음 주간 retrain 시 b_vol_surge 피처 후보 (모델 변경 = 사용자 컨펌 사안). 독립 룰 배선은 net 양수 확인 전 보류.
@@ -35,7 +41,7 @@
 - [x] [Research] Self-impact decay (발사 ACTIVE vs WATCH forward 차 — 영상 효율시장 자가소멸) — **INSUFFICIENT_SAMPLE** 2026-06-25. 하네스(`scripts/self_impact_decay_v1.py`, candles forward 조인) 빌드 완료·재실행 가능. 현재: 30일·전구간 bear(bull 0)·ACTIVE 20(A_TRIPLE) vs WATCH A_TRIPLE **5**. naive ATT(A_TRIPLE)=-0.0341 이나 conf_gap=+47.1 → self-impact(음)와 selection(양) 혼재 분리불가. 힌트: ACTIVE fwd_max +9.9%(레이더는 펌프 포착) vs EOD -5.85%(튀고 덤프) — self-impact 시그니처 후보. 게이트: ACTIVE n≥50 & WATCH A_TRIPLE n≥30(~2-3개월 누적) 후 conf-매칭/RD 로 selection 통제 재추정. `output/self_impact_decay_{v1,coverage_v1}.*`.
 - [x] [Research] Exit-timing autopsy (언제 파나 — self_impact 의 +9.9%max→EOD덤프 정조준) — **결론: exit 는 이미 frontier, 변경 불요** 2026-06-25. 장중 autopsy(K=3, 3732픽 420일): 고점 max p50 +5.9%/p90 +21%, **t_max 중앙 0.06(고점은 장 초반에 찍힘)**, EOD p50 −3.4%(이후 하루종일 흘러내림), touched+5% 후 P(EOD>0)=0.54(스파이크 안 유지=코인플립). 청산 토너먼트 13정책: hold_eod −2.14%(최악) → champ TP5/SL3 −0.47%(deep 0) → bestnet TP5/SL8 −0.17%(deep 0.32, −5% 초과로 사용자 성향 위배). **champion 을 net↑·deep≤ 로 동시개선하는 정책 없음** — 사다리(246/123)·부분익절(half5)·trail·TP2~4 전부 못 이김(tp4_sl3 −0.0044 = +0.03pp 노이즈). → **downside-first frontier 에서 champion TP5/SL3 이미 효율적, exit lever 소진. 잃는 건 exit 아니라 진입 엣지.** 사용자 수동매매 규칙: 고점은 장 초반, +5% 익절, EOD 까지 들지 말 것(hold_eod −2.1%). 구현 `scripts/exit_timing_autopsy_v1.py`, `output/exit_timing_autopsy_{v1,coverage_v1}.*`.
 - [x] [Research] PRPC 펌프-후 reclaim 확인진입 (entry-timing 마지막 미답축, (b) 데이터/TF 전환) — **DEAD** 2026-06-25. 설계 워크플로(11에이전트) 4후보 중 선정: P4HS(4h돌파) DEAD·SWING-DD(C1+C3 재포장) DEAD·LVG-XS(저변동 시장중립 excess) WEAK·PRPC 선정. kill-test(`scripts/prpc_kill_test_v1.py`, 4h 3.2년, d1 펌프≥12%→과열해소·변동성수축·higher-low consolidation→4h 재돌파, purged 4-fold block-bootstrap): armed 2616/reclaim 825(표본 충분). **B 재돌파진입 net +0.0013 CI[−0.007,+0.009] 0포함·foldPos 2/4 → DEAD. A 즉시눌림목진입(전 armed clean) net −0.0061 CI[−0.011,−0.0002] 유의 음수.** 초기 대조서 즉시진입 +4.4% 는 reclaim-subset 조건부 leak(미래상승 조건)이었고 clean 전수서 소멸. → **entry-timing(관측-후-확인/눌림목)도 exhausted. pump-then-revert 는 timeframe-invariant(4h=일봉=15m), 천장은 진입타이밍 아닌 시장구조.** ★(b)에서 발굴된 유일 실제 엣지 = **LVG-XS cross-sectional excess(진짜·repro 확인, but 현물 long-only 환금불가 — 숏/futures or 불장 필요, prelude 범위 밖)**. 설계 `_workspace/next_research_PRPC_design_v1.md`.
-- [ ] [Research] Downside guard / 4h confirmation tier (병렬)
+- [x] [Research] Downside guard / 4h confirmation tier — 2026-07-25 historical challenger 5축 전 후보 REJECT, 채택·SHADOW·운영 연결 0
 - [ ] [Later] MTF features / regime split / Optuna
 
 ### Phase X+7 — PUMP hunter v2 (Binance volsurge) 🎯 radar 텔레그램 (2026-06-11 사용자 컨펌)
@@ -49,10 +55,10 @@ radar 로 배선 — 정직 고지 (자동 net 음수) 포함.
   자동 룰 (TP5/SL3) net -0.36% (음수) — 메시지에 정직 고지, exit 은 사용자 판단.
 - `signals/pump_detector_v2.py` — v1 frame 재사용 + Binance volsurge join (D-1 경계 검증:
   BTC ret corr lag0 0.962). binance stale 시 후보 0 + 사유 (조용한 오신호 방지).
-- `scripts/pump_detector_v2_today.py` — shadow ledger (`shadow_ledger_pump_hunter_v2.csv`)
+- `scripts/pump_detector_v2_today.py` — shadow ledger (`output/shadow_ledger_pump_hunter_v2.csv`)
   + 🎯 텔레그램. 발사 정책: 후보 ≥1 만 발사 / stale 시 경고 1줄 / 후보 0 정상 = 무소음.
-- cron: daily_run_distribution [8/9] binance --days 3 refresh (메인 알림 뒤라 무영향)
-  + [9/9] v2 발사. close: v2 ledger 청산 (exit lab 7 잣대 자동).
+- systemd가 호출하는 `daily_run_distribution` [10/11] binance --days 3 refresh
+  (메인 알림 뒤라 무영향) + [11/11] v2 발사. close: v2 ledger 청산 (exit lab 7 잣대 자동).
 - registry: `pump_hunter_v2` challenger_only=True — champion 승격 차단 유지 (radar 와 별개).
   policy_competition 자동 편입 (7 모델). heartbeat schema 검증에 v2 ledger 추가.
 - 첫 발사: 2026-06-11 23:14 테스트 1통 (KAT surge 10.6× 외 4건) + ledger 5 rows.
@@ -77,7 +83,8 @@ radar 로 배선 — 정직 고지 (자동 net 음수) 포함.
 - 비용 상수 단일화 — `ledger/config.py` 가 유일 출처 (decimal `*_PCT` / %p `*_PP` 구분).
   ops 2곳의 동명·다른단위 (0.15 %p) 재정의 제거. 보수 tier (왕복 0.5%) 신설.
 - `heartbeat.sh` — ledger CSV pandas parse + 필수 컬럼 스키마 검증 (행수만 보던 구멍 fix).
-- 아카이브 명시 — collector_1h (37일 stale·미사용), collector_binance_d1 (주간 retrain 전용),
+- 아카이브 명시 — collector_1h (37일 stale·미사용), collector_binance_d1
+  (pump v2 일일 증분 + legacy 수동 retrain 경로),
   ledger/sizing.py·risk.py (radar 철학상 의도된 미배선) 헤더 주석.
 
 ### Phase X+5 — PUMP hunter rule detector SHADOW 배선 (2026-06-04)
@@ -102,6 +109,7 @@ radar 로 배선 — 정직 고지 (자동 net 음수) 포함.
 - **preopen DEMOTE → WATCH_ONLY (전 채널)**: observed -40.8% over 88 alerts, replay active 0건.
   `ops/decision_policy.py` 에 `PREOPEN_DEMOTED=True` flag 추가, `apply_preopen_policy` 의 ACTIVE
   분기를 WATCH_ONLY 로 강등 (bear_volatile 만 SILENCE 유지). POLICY_VERSION → `2026-05-26.1`.
+  이 historical 결정은 2026-07-18 사용자 지시의 R1 preopen/open 재발송으로 superseded.
 - **텔레그램**: 사용자 의도로 매일 2 통 유지. preopen 은 매일 "DEMOTED (shadow only)" 한 줄 알림
   (정책 사실 가시성). distribution 은 ACTIVE/침묵 메시지 변동.
 - **heartbeat**: preopen paper_ledger 빈 거 정상 처리. shadow_ledger_preopen 검사로 대체.
@@ -211,6 +219,10 @@ Distribution head (multiple binary XGBoost):
 **우선순위**: Stage 1 dry-run + Downside guard / 4h confirmation 보다 **뒤** (detector_v1 안정 후 트랙 분리). 단 stable_v1 prototype 은 detector_v1 운영과 병렬 research 가능.
 
 ---
+
+아래 Phase 0~3 체크박스는 당시 설계·진행 이력이다. 현재 작업 우선순위와 미완료 판정은
+문서 상단 `현재 상태`, 09-01 동결 판정 블록, 최신 집행 노트를 기준으로 하며 legacy
+미체크 항목을 자동 작업 큐로 해석하지 않는다.
 
 ## Phase 0 — 설계 문서 (legacy)
 
@@ -417,7 +429,10 @@ Distribution head (multiple binary XGBoost):
 
 ---
 
-## 비상 / 롤백 절차
+## 비상 / 롤백 절차 (legacy 설계)
+
+아래 표의 drift/retrain/verify 경로는 현재 scheduler에 배선되지 않은 과거 설계다.
+현재 자동 중단 기준과 fail-closed 동작은 OPS.md의 실제 systemd/health 계약을 따른다.
 
 각 Phase 진행 중 다음 발생 시:
 
@@ -434,7 +449,7 @@ Distribution head (multiple binary XGBoost):
 ## 작업 흐름 (매 Phase 공통)
 
 1. 이 문서 head 60 줄로 어디까지 왔는지 확인
-2. 다음 미체크 액션 1 개 in_progress
+2. 상단 현재 상태·동결 판정·최신 집행 노트에서 승인된 다음 액션 1개를 in_progress
 3. TodoWrite 로 세션 내 작업 추적
 4. 액션 완료 시 즉시 [x] 체크 + 한 줄 lessons 기록 (선택)
 5. 큰 결정 (모델 변경, 라벨 X/Y, 알림 포맷) 은 사용자 컨펌
@@ -491,3 +506,7 @@ Distribution head (multiple binary XGBoost):
 | 2026-07-11 | 최소관심 모드 실집행: R1 recommend_send 2건(preopen·open) `--dry-run` 강등 — 텔레그램 발송 X, R1 ledger 기록은 유지 | 블록 "recommend record-only 강등" 조항 |
 | 2026-07-11 | **해석 명문화**: pump v2 radar 텔레그램(distribution [9/9])은 음소거 대상 아님 — v2는 09-01 판정 대상 실험 그 자체이며, 블록의 "ACTIVE 외 음소거"에서 v2가 유일한 판정 대상 채널. R2·A1·PUMP-rule 등 challenger는 종전대로 record-only(champion_selector 영구 차단) | 블록 취지 = 죽은 정책 관심누수 차단, 실험 관찰 채널 유지 |
 | 2026-07-11 | heartbeat 이상시 알림·backup·dashboard publish는 운영 채널로 유지 | 판정과 무관한 위생 |
+| 2026-07-18 | 사용자 지시로 R1 preopen/open 텔레그램 발송 재개. 원장·판정 기준은 그대로 유지 | 추천은 사용자가 직접 판단·매매하며 자동 주문 없음 |
+| 2026-07-25 | Track 1 측정 무결성 수리 완료: 단일 inference snapshot·delivery receipt·전 유니버스 score/label/evaluator·실행 가능 시각부터 새 96봉·신규상장/수집 실패 차단·공통 day-equal 지표. 실데이터 D1/4h/15m `269/269`, 전체 테스트 `177 passed` | 판정 결함 수리이며 동결 블록·활성 R1 정렬/라벨/모델/알림 문구는 무수정. systemd unit 소스는 완료, `/etc` 재설치는 sudo 대기 |
+| 2026-07-25 | 사용자 명시 요청으로 별도 historical challenger 5축(downside veto·upside·safe-up·first-passage·downside semivol)을 끝까지 실행하고 독립 재검산. 전 후보 REJECT, 채택 0·SHADOW 0·운영 연결 0 | 동결 블록 본문은 무수정. 다만 모라토리엄 기간 연구이자 이미 본 마지막 180일을 사용했으므로 깨끗한 사전등록/virgin holdout 증거로 사용할 수 없음. 추가 사후 식 탐색은 중단하고 새 forward 전 유니버스 표본을 우선 축적 |
+| 2026-07-26 | 전 변경 코드 적대 감사·보강: stablecoin 5종 provenance, D1/4h/15m exact PIT gate, preopen R1과 legacy 15m 장애 격리, immutable snapshot/receipt/ledger, v2 205행 legacy digest + 07-27 strict 계약, GO/KILL state+anchor, close/publish/heartbeat/backup 실패 전파. 최종 전수검증 진행 중, SQLite 7개 `quick_check=ok` | 동결 판정·활성 R1 정렬/라벨/모델/알림 문구는 무수정. 실제 `/etc` systemd 설치는 sudo password와 `.env`의 `PRELUDE_DASHBOARD_PIN` 준비 대기 |

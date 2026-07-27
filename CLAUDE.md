@@ -26,7 +26,7 @@
 새 세션 시작 시 무조건 이 순서:
 1. `cat PHASES.md | head -60` — 마지막 체크박스 확인 (어디까지 왔는지)
 2. `cat NOTES.md | tail -30` — 사용자가 새 항목 적었는지 확인
-3. `tail -10 output/ledger.csv 2>/dev/null` — 최근 가상 ledger 결과 확인
+3. `tail -10 output/shadow_ledger_recommend.csv 2>/dev/null` — 최근 R1 open 가상 결과 확인
 4. `git log --oneline -5` — 최근 커밋 5 개
 5. 사용자가 명시 task 주면 그것부터, 없으면 PHASES 다음 항목
 
@@ -36,7 +36,8 @@
 
 ## 1. 이 프로젝트의 정체 (한 줄)
 
-업비트 KRW 코인의 **오늘 일봉 (KST 09:00 시작) 이 안정적으로 X% 이상 오를지** 매일 KST 09:05 에 텔레그램으로 알리는 **개인 트레이딩 보조 시스템**.
+업비트 KRW 코인의 저하방·고상방 후보를 KST 08:50/09:05 R1 알림과
+09:05 pump v2 조건부 radar로 보여 주는 **개인 트레이딩 보조 시스템**.
 
 - **사용자**: 알림 받고 본인 판단으로 직접 매매. 매매 결과는 NOTES.md 에 손글
 - **시스템**: 알림 발사 + 가상 ledger 자동 기록 + 가상 성과 추적 (실거래 자동 주문 X)
@@ -133,6 +134,7 @@
 
 ### 3.2 주의
 - **자동 학습/재학습 트리거 시 사용자 컨펌**. 매주 1회 retrain OK 이지만, 새 모델 배포는 promotion gate 통과 필요
+- 현재 retrain 코드는 systemd/cron에 등록되지 않은 legacy 수동 경로다. 활성화·자동 배포는 사용자 승인 전 금지
 - **알림 포맷 변경 시 사용자 컨펌**. 매일 보는 거라 안정적이어야
 - **라벨 정의 (X/Y) 변경 시 사용자 컨펌**
 
@@ -162,29 +164,30 @@
 # 1. 매 세션 시작 의례
 cat PHASES.md | head -60
 tail -30 NOTES.md
-tail -10 output/ledger.csv 2>/dev/null
+tail -10 output/shadow_ledger_recommend.csv 2>/dev/null
 git log --oneline -5
 
-# 2. 데이터 freshness 확인
-python -c "import sqlite3; c=sqlite3.connect('data/upbit_d1.db'); print(c.execute('SELECT MAX(timestamp) FROM crypto_data').fetchone())"
+# 2. 현재 R1 open 데이터 gate 확인
+venv/bin/python scripts/health_check.py --channel recommend --no-telegram
 
-# 3. 어제 추천 결과 확인
-tail -20 output/predictions_$(date -d yesterday +%Y%m%d).csv 2>/dev/null
+# 3. 최근 R1 open 결과 확인
+tail -20 output/shadow_ledger_recommend.csv 2>/dev/null
 
-# 4. 가상 ledger 누적 PnL
-python scripts/ledger_summary.py --days 30
+# 4. 현재 champion / v2 판정 근거 확인
+jq . output/champion_state.json
+jq . output/v2_scoreboard.json
 
-# 5. drift 상태
-cat output/drift_state.json 2>/dev/null
+# 5. preopen D1 gate 확인 (08:45~08:59 KST)
+venv/bin/python scripts/health_check.py --channel recommend-preopen --no-telegram
 
-# 6. 수동 추론 (오늘 알림 미리)
-python scripts/predict_today.py --dry-run
+# 6. 현재 R1 수동 추론 (기록 X)
+venv/bin/python scripts/recommend_today.py --slot open --dry-run
 
-# 7. 백테스트 1개 실행
-python scripts/backtest_wf.py --label-x 0.08 --label-y 0.03 --n-folds 5
+# 7. legacy Phase 1 WF 백테스트
+venv/bin/python scripts/backtest_wf_ledger.py --n-folds 5
 
-# 8. 라벨 sweep
-python scripts/label_sweep.py --x-grid 0.05,0.08,0.10,0.15 --y-grid 0.02,0.03,0.05
+# 8. legacy label-space discovery
+venv/bin/python scripts/label_space_discovery_v2.py
 ```
 
 ---
@@ -193,20 +196,20 @@ python scripts/label_sweep.py --x-grid 0.05,0.08,0.10,0.15 --y-grid 0.02,0.03,0.
 
 ```
 prelude/
-├── *.md (8 개)              # 설계 문서
+├── 핵심 MD 8 개 + RESEARCH.md  # 설계 문서 + historical narrative
 ├── .claude/                  # Claude Code 세팅
 │   ├── settings.local.json   # 권한, 환경
 │   └── agents/               # (필요 시) sub-agent
-├── data/                     # 데이터 수집 + DB
+├── data/                     # D1 / 4h / 15m / Binance 데이터 수집 + DB
 ├── signals/                  # 라벨, 피처, 모델, 추론
 ├── ledger/                   # 가상 포지션 추적
-├── ops/                      # preflight, drift, ic_gate, retrain
+├── ops/                      # policy, provenance, champion, runtime gate
 ├── notifier/                 # 텔레그램
 ├── scripts/                  # 실행 스크립트 (백테스트, sweep, 일일 추론)
 ├── notebooks/                # 실험 / EDA
 ├── output/                   # 결과물 (예측 CSV, ledger, drift state)
 ├── tests/                    # pytest
-├── deploy/                   # cron / systemd
+├── deploy/                   # systemd 단일 scheduler (cron은 비활성 참고)
 └── requirements.txt
 ```
 
