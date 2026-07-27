@@ -46,6 +46,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from signals.features import compute_btc_features
 # 패널/피처 빌더는 angle-A 스크립트 재사용 (동일 leak 규율)
 from scripts.univariate_precursor_lift_v1 import (
@@ -76,7 +77,7 @@ log = logging.getLogger("failmode")
 def build_outcome_panel(limit_markets: int | None) -> pd.DataFrame:
     """univariate 스크립트의 build_market_features 를 쓰되, day-D OHLC 를
     outcome(PnL 경로) 계산용으로 추가 보관한다. feature 엔 안 섞는다."""
-    markets = list_markets(DB_PATH)
+    markets = signal_eligible_markets(list_markets(DB_PATH))
     if limit_markets:
         markets = markets[:limit_markets]
     log.info("loading %d markets", len(markets))

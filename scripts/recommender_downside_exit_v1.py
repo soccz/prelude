@@ -13,7 +13,8 @@
 
 대상 = recall_universe_recommender_v1 의 rank-mean 스코어러가 매일 OOF 로 뽑는
        cross-section top-K(K=3 메인, 5 보조) 픽. 15m 경로가 있는 구간만.
-진입 = day-D open(09:00 KST). 경로 = [09:00 D, 09:00 D+1) 의 ~96개 15m 봉.
+진입 = 알림 후 첫 실행가능 15m open(09:15 KST).
+경로 = [09:15 D, 09:15 D+1) 의 완결된 96개 15m 봉.
 청산정책 그리드를 15m 봉 시간순 walk 로 시뮬 후 하방위험으로 재집계.
 
 ★ LEAK 방어 (same-day leak 2번 전적):
@@ -61,6 +62,7 @@ from scripts.recall_universe_recommender_v1 import (  # noqa: E402
     N_FOLDS,
     EMBARGO,
 )
+from ledger.path_quality import assess_15m_windows  # noqa: E402
 
 D1_DB = "data/upbit_d1.db"
 M15_DB = "data/upbit_15m.db"
@@ -68,6 +70,7 @@ OUT_DIR = Path("output")
 ROUND_TRIP_COST = 0.0015
 BARS_PER_HOUR = 4
 DEEP_LOSS_THRESH = -0.05   # 사용자 기준: 이보다 깊은 손실이 '나쁜 사건'
+EXECUTION_OFFSET = pd.Timedelta(hours=9, minutes=15)
 
 K_LIST = [3, 5]            # 메인 3, 보조 5
 
@@ -113,23 +116,25 @@ def collect_oof_picks(panel: pd.DataFrame, label: str = "lab_pump20") -> pd.Data
 
 
 # ============================================================================
-# 2. 15m 경로 로딩 ([09:00 D, 09:00 D+1)) — d1 OHLC 와 정확 일치 검증됨
+# 2. 15m 실행 경로 로딩 ([09:15 D, 09:15 D+1))
 # ============================================================================
-def load_paths(pick_pairs: pd.DataFrame) -> dict:
-    conn = sqlite3.connect(M15_DB)
-    paths = {}
-    for _, r in pick_pairs.iterrows():
-        m, dt = r["market"], pd.Timestamp(r["date"])
-        start = dt.strftime("%Y-%m-%d 09:00:00")
-        end = (dt + pd.Timedelta(days=1)).strftime("%Y-%m-%d 09:00:00")
-        rows = conn.execute(
-            "SELECT open,high,low,close FROM candles WHERE market=? AND "
-            "timestamp>=? AND timestamp<? ORDER BY timestamp", (m, start, end)
-        ).fetchall()
-        if rows:
-            paths[(m, dt.date())] = rows
-    conn.close()
-    return paths
+def execution_start(date: pd.Timestamp | str) -> pd.Timestamp:
+    """First executable 15m boundary after the 09:05 recommendation."""
+    return pd.Timestamp(date).normalize() + EXECUTION_OFFSET
+
+
+def load_paths(
+    pick_pairs: pd.DataFrame,
+    *,
+    db_path: str | Path = M15_DB,
+) -> dict:
+    """Load only complete [D 09:15, D+1 09:15) execution paths."""
+    assessments = assess_15m_windows(pick_pairs, db_path=db_path)
+    return {
+        key: assessment.bars
+        for key, assessment in assessments.items()
+        if assessment.path_complete
+    }
 
 
 # ============================================================================
@@ -147,13 +152,13 @@ def simulate_path(bars: list, hard_sl, tp, trail) -> tuple[float, str]:
     sl_px = entry * (1 - hard_sl) if hard_sl is not None else None
     tp_px = entry * (1 + tp) if tp is not None else None
     running_high = entry
-    for (o, h, l, c) in bars:
+    for (o, h, low, c) in bars:
         if trail is not None and h > running_high:
             running_high = h
         trail_px = running_high * (1 - trail) if trail is not None else None
-        if sl_px is not None and l <= sl_px:
+        if sl_px is not None and low <= sl_px:
             return -hard_sl, "sl"
-        if trail_px is not None and l <= trail_px:
+        if trail_px is not None and low <= trail_px:
             return trail_px / entry - 1.0, "trail"
         if tp_px is not None and h >= tp_px:
             return tp, "tp"
@@ -182,15 +187,22 @@ def downside_metrics(trades: pd.DataFrame) -> dict:
     cvar95 = float(worst5.mean())                             # 최악 5% 평균
     worst = float(net.min())
     losses = net[net < 0]
-    downside_std = float(np.sqrt(np.mean(np.minimum(net, 0.0) ** 2)))
     # day-equal-weight 누적/MaxDD
     daily = trades.groupby("date")["net"].mean().sort_index()
+    downside_std = float(
+        np.sqrt(np.mean(np.minimum(daily.to_numpy(dtype=float), 0.0) ** 2))
+    )
     eq = (1 + daily).cumprod()
     peak = eq.cummax()
     mdd = float(((eq - peak) / peak).min())
     cum = float(eq.iloc[-1] - 1.0)
-    mu = float(net.mean())
-    sortino = float(mu / downside_std * np.sqrt(365)) if downside_std > 0 else np.nan
+    trade_mu = float(net.mean())
+    daily_mu = float(daily.mean())
+    sortino = (
+        float(daily_mu / downside_std * np.sqrt(365))
+        if downside_std > 0
+        else np.nan
+    )
     # loss histogram
     hist = pd.cut(trades["net"], bins=LOSS_BINS, labels=LOSS_BIN_NAMES)
     hist_frac = hist.value_counts(normalize=True).reindex(LOSS_BIN_NAMES).fillna(0.0)
@@ -206,7 +218,7 @@ def downside_metrics(trades: pd.DataFrame) -> dict:
         pct_tp=float((oc == "tp").mean()),
         pct_eod=float((oc == "eod").mean()),
         # 부수(포기하는 상승)
-        net_mean=mu,
+        net_mean=trade_mu,
         cum=cum,
         hit=float((net > 0).mean()),
         sortino=sortino,

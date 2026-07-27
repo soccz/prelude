@@ -1,0 +1,34 @@
+{
+  "oos_rows": 38682,
+  "oos_dates": 765,
+  "oos_window": [
+    "2024-04-03",
+    "2026-06-01"
+  ],
+  "universe": "static_top100_then_oversold_gate",
+  "n_folds": 6,
+  "embargo": 5,
+  "n_combos_tried": 19,
+  "rsi_grid": [
+    40.0,
+    35.0,
+    30.0
+  ],
+  "ret7d_grid": [
+    -0.08,
+    -0.12,
+    -0.18
+  ],
+  "bounce_band": [
+    0.01,
+    0.12
+  ],
+  "exit_path": "15m SL-3%/TP+5%/EOD net 0.15%",
+  "best_c2_tag": "C2_rsi30_ret7-8_rr",
+  "regime_dist": {
+    "bull_quiet": 17156,
+    "bear_volatile": 14856,
+    "bear_quiet": 5446,
+    "bull_volatile": 1224
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "oos_rows": 42975,
+  "oos_dates": 791,
+  "oos_window": [
+    "2024-04-22",
+    "2026-07-25"
+  ],
+  "universe": "static_top100",
+  "n_folds": 6,
+  "embargo": 5,
+  "n_a1_combos": 8,
+  "dump_labels": {
+    "dump_A": {
+      "up": 0.05,
+      "eod": 0.0
+    },
+    "dump_B": {
+      "up": 0.05,
+      "eod": -0.02
+    }
+  },
+  "cutoff_q_grid": [
+    0.6,
+    0.7,
+    0.8,
+    0.9
+  ],
+  "exit_path": "15m SL-3%/TP+5%/EOD net 0.15%",
+  "r1_baseline": {
+    "net_mean": -0.0029277362129835334,
+    "pct_sl": 0.44276196244700183,
+    "deep_loss_freq_noSL": 0.13506965475469412,
+    "hit": 0.39188370684433677,
+    "cum": -0.8817620219036619,
+    "n_picks": 1651,
+    "coverage": 1.0,
+    "p_min_le_5": 0.2973955178679588,
+    "precision_pump20": 0.036947304663840094
+  },
+  "best_downside_a1": {
+    "dump_label": "dump_B",
+    "cutoff_q": 0.6,
+    "net_mean": -0.0016015171923820738,
+    "pct_sl": 0.35190793458509995,
+    "deep_loss_freq_noSL": 0.07389460932768019,
+    "p_min_le_5": 0.1823137492428831,
+    "precision_pump20": 0.012719563900666263,
+    "cum": -0.7575712070953623,
+    "n_picks": 1651,
+    "coverage": 1.0,
+    "frac_substituted": 0.6365838885523925
+  },
+  "best_netmean_a1": {
+    "dump_label": "dump_B",
+    "cutoff_q": 0.8,
+    "net_mean": -0.001423243520760686,
+    "pct_sl": 0.38764385221078135,
+    "n_picks": 1651,
+    "coverage": 1.0
+  },
+  "regime_dist": {
+    "bear_volatile": 16885,
+    "bull_quiet": 16774,
+    "bear_quiet": 8281,
+    "bull_volatile": 1035
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "universe": "static_top100",
+  "n_folds": 6,
+  "embargo": 5,
+  "n_variants": 4,
+  "top_k": 3,
+  "exit_path": "15m SL-3%/TP+5%/EOD net 0.15%",
+  "breadth_feats": [
+    "mb_breadth20_lag1",
+    "mb_breadth20_ma3",
+    "mb_breadth20_ma7",
+    "mb_qv_trend_7_30",
+    "mb_qv_zscore_30",
+    "mb_breadth20_mom_3_14",
+    "mb_n_pump20_ma7",
+    "mb_adv_ratio_ma7"
+  ],
+  "liq_feats": [
+    "liq_qv_zscore_30d",
+    "liq_qv_ratio_med_14d",
+    "liq_qv_ratio_med_max_3d",
+    "liq_qv_rank_jump_3d",
+    "liq_qv_consec_up"
+  ],
+  "oos_dates_base": 765,
+  "oos_picks_base": 1531,
+  "note": "A3 richer-features challenger \u2014 leak-free D-1 context added to entry head"
+}

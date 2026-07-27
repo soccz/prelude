@@ -1,0 +1,26 @@
+{
+  "oos_rows": 42975,
+  "oos_dates": 791,
+  "oos_window": [
+    "2024-04-22",
+    "2026-07-25"
+  ],
+  "universe": "static_top100",
+  "n_folds": 6,
+  "embargo": 5,
+  "n_ranking_keys_compared": 5,
+  "lambda_grid": [
+    0.5,
+    1.0,
+    2.0,
+    3.0
+  ],
+  "exit_path": "15m SL-3%/TP+5%/EOD net 0.15%",
+  "best_lambda": 3.0,
+  "regime_dist": {
+    "bear_volatile": 16885,
+    "bull_quiet": 16774,
+    "bear_quiet": 8281,
+    "bull_volatile": 1035
+  }
+}

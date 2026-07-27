@@ -54,9 +54,11 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from data.database import list_markets, load_candles  # noqa: E402
+from data.market_universe import is_excluded_signal_market  # noqa: E402
 from scripts.univariate_precursor_lift_v1 import (  # noqa: E402
     build_market_features,
     add_cross_sectional,
+    completed_upbit_d1_mask,
 )
 from scripts.recommendation_scorer_v1 import PRECURSOR_FEATURES  # noqa: E402
 from scripts.regime_split_precursor_v1 import attach_btc_regime  # noqa: E402
@@ -102,7 +104,10 @@ log = logging.getLogger("downside_rank")
 # ============================================================================
 # 1. Panel — leak-free D-1 features + day-D up/down 라벨
 # ============================================================================
-def _add_outcome_labels(g: pd.DataFrame) -> pd.DataFrame:
+def _add_outcome_labels(
+    g: pd.DataFrame,
+    asof_kst: pd.Timestamp | str | None = None,
+) -> pd.DataFrame:
     """한 코인 일봉에 day-D 진입(open) 대비 outcome 라벨 부착 (타겟=미래, leak X).
     build_market_features 가 이미 feature 를 shift(1) 했으므로 여기 outcome 은
     같은 row(day-D) 의 open/high/low/close 로 만든다 → feature(D-1) 와 시점분리."""
@@ -119,11 +124,22 @@ def _add_outcome_labels(g: pd.DataFrame) -> pd.DataFrame:
     for name, thr in DN_THRESH.items():
         g[f"lab_{name}"] = (g["down_low_ret"] <= thr).astype(float)
     g["lab_close_neg"] = (g["eod_ret"] < 0).astype(float)
+    complete = completed_upbit_d1_mask(g["timestamp"], asof_kst)
+    target_cols = (
+        ["up_high_ret", "down_low_ret", "eod_ret", "lab_close_neg"]
+        + [f"lab_{name}" for name in UP_THRESH]
+        + [f"lab_{name}" for name in DN_THRESH]
+    )
+    g.loc[~complete, target_cols] = np.nan
     return g
 
 
 def build_panel(limit_markets):
-    markets = list_markets(D1_DB)
+    markets = [
+        market
+        for market in list_markets(D1_DB)
+        if not is_excluded_signal_market(str(market))
+    ]
     if limit_markets:
         markets = markets[:limit_markets]
     log.info("loading %d markets", len(markets))

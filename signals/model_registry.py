@@ -23,7 +23,7 @@ self-contained: gan_t/xsec_alpha/fin import 0 (prelude 내부 경로 문자열�
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -43,6 +43,10 @@ class MetricSource:
     hit_col: str | None = None  # (옵션) 적중 0/1 컬럼 (3순위 tie-break). 없으면 None.
     # realized_pct_col 이 비용 차감 전(gross)일 때만 채운다. None=이미 net.
     cost_already_deducted: bool = True
+    # Deep-loss는 hard-SL로 잘린 realized가 아니라 완결된 no-SL 경로의
+    # 저점으로 측정한다. 둘 중 하나라도 없으면 승격 근거로 쓰지 않는다.
+    downside_pct_col: str | None = None
+    path_complete_col: str | None = None
 
 
 @dataclass(frozen=True)
@@ -103,7 +107,9 @@ MODELS: list[ModelSpec] = [
         metric=MetricSource(
             status_col="status", closed_value="closed", date_col="date",
             realized_pct_col="realized_pct",   # close_recommend_ledger 가 net(0.15% 차감) 저장
-            hit_col="pump20_hit", cost_already_deducted=True),
+            hit_col="post_send_pump20_hit", cost_already_deducted=True,
+            downside_pct_col="path_min_pct",
+            path_complete_col="path_complete"),
         predict_ref="signals.recommend:score_candidates",
         is_backtest_fallback=True,   # forward 표본 부족 시 기본 챔피언 (백테스트-최선)
         challenger_only=False,
@@ -125,7 +131,9 @@ MODELS: list[ModelSpec] = [
         metric=MetricSource(
             status_col="status", closed_value="closed", date_col="date",
             realized_pct_col="realized_pct",   # close_recommend_ledger 가 net(0.15% 차감) 저장
-            hit_col="pump20_hit", cost_already_deducted=True),
+            hit_col="post_send_pump20_hit", cost_already_deducted=True,
+            downside_pct_col="path_min_pct",
+            path_complete_col="path_complete"),
         predict_ref="signals.recommend:score_candidates",   # ranking='R2' 로 호출
         is_backtest_fallback=False,
         challenger_only=True,    # forward 누적 + evaluator 판정 전까지 챔피언 승격 금지
@@ -151,7 +159,9 @@ MODELS: list[ModelSpec] = [
         metric=MetricSource(
             status_col="status", closed_value="closed", date_col="date",
             realized_pct_col="realized_pct",   # close_recommend_ledger 가 net(0.15% 차감) 저장
-            hit_col="pump20_hit", cost_already_deducted=True),
+            hit_col="post_send_pump20_hit", cost_already_deducted=True,
+            downside_pct_col="path_min_pct",
+            path_complete_col="path_complete"),
         predict_ref="signals.recommend:score_candidates",   # ranking='A1' 로 호출
         is_backtest_fallback=False,
         challenger_only=True,    # forward 누적 + evaluator ADOPT 전까지 챔피언 승격 금지
@@ -176,7 +186,9 @@ MODELS: list[ModelSpec] = [
         metric=MetricSource(
             status_col="status", closed_value="closed", date_col="date",
             realized_pct_col="realized_pct",
-            hit_col="pump20_hit", cost_already_deducted=True),
+            hit_col="post_send_pump20_hit", cost_already_deducted=True,
+            downside_pct_col="path_min_pct",
+            path_complete_col="path_complete"),
         predict_ref="signals.pump_detector_v1:score_pump_candidates",
         is_backtest_fallback=False,
         challenger_only=True,
@@ -201,7 +213,9 @@ MODELS: list[ModelSpec] = [
         metric=MetricSource(
             status_col="status", closed_value="closed", date_col="date",
             realized_pct_col="realized_pct",
-            hit_col="pump20_hit", cost_already_deducted=True),
+            hit_col="post_send_pump20_hit", cost_already_deducted=True,
+            downside_pct_col="path_min_pct",
+            path_complete_col="path_complete"),
         predict_ref="signals.pump_detector_v2:score_pump_v2_candidates",
         is_backtest_fallback=False,
         challenger_only=True,
@@ -222,13 +236,16 @@ MODELS: list[ModelSpec] = [
         metric=MetricSource(
             status_col="status", closed_value="closed", date_col="date",
             realized_pct_col="realized_pct",
-            hit_col="pump20_hit", cost_already_deducted=True),
+            hit_col="post_send_pump20_hit", cost_already_deducted=True,
+            downside_pct_col="path_min_pct",
+            path_complete_col="path_complete"),
         predict_ref="signals.recommend:score_candidates",   # slot='preopen' 로 호출
-        is_backtest_fallback=False,
+        is_backtest_fallback=True,
         challenger_only=True,    # pre-open shadow 표본 적음 → 챌린저로만 관찰
         hypothesis="post-open R1 과 동일 가설. 단 08:50 예고는 진입가 미확정(None)이라 "
                    "09:00 갭/슬리피지 노출이 추가된다 — forward 로 그 비용을 측정한다.",
-        notes="ledger 는 preopen 전용 shadow (open slot 과 분리 평가). 데이터 적으면 "
+        notes="daily_run_preopen 이 output/shadow_ledger_recommend_preopen.csv 에 기록하고 "
+              "daily_close_preopen 이 전용 청산한다(open slot 과 분리 평가). 데이터 적으면 "
               "셀렉터가 게이트(n>=30) 미달로 챔피언 승격 안 함.",
     ),
     # --- distribution 7-head (post-open, paper_ledger) ------------------------
@@ -243,7 +260,9 @@ MODELS: list[ModelSpec] = [
             # net mean / 하방의 기반 = next_close_return_pct (실현 종가 수익률, %).
             # ★ gross → 셀렉터가 왕복 0.15% 차감 (cost_already_deducted=False).
             realized_pct_col="next_close_return_pct",
-            hit_col="hit_h6", cost_already_deducted=False),
+            hit_col="hit_h6", cost_already_deducted=False,
+            downside_pct_col="next_min_return_pct",
+            path_complete_col="path_complete"),
         predict_ref="signals.distribution_engine:DistributionEngine.score_panel",
         is_backtest_fallback=False,
         challenger_only=True,    # ★ 발송 절대 불가로 잠금 (2026-06-01): 사용자 명시 "수정한
@@ -310,14 +329,9 @@ def all_slots() -> list[str]:
 
 def fallback_model(slot: str) -> ModelSpec | None:
     """게이트 통과 모델이 없을 때 쓸 기본 챔피언(백테스트-최선) for slot.
-    여러 개면 첫 번째. preopen 에 fallback 이 없으면 open 의 fallback 을 빌려 쓴다
-    (R1 은 같은 스코어러라 slot 만 다름)."""
+    여러 개면 첫 번째. 각 slot에 명시적으로 등록된 fallback만 허용한다."""
     cands = [m for m in models_for_slot(slot) if m.is_backtest_fallback]
-    if cands:
-        return cands[0]
-    # preopen 에 명시 fallback 이 없으면 R1 open fallback 을 preopen slot 으로 재사용.
-    glob = [m for m in MODELS if m.is_backtest_fallback]
-    return glob[0] if glob else None
+    return cands[0] if cands else None
 
 
 if __name__ == "__main__":

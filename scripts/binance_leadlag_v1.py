@@ -66,7 +66,11 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles  # noqa: E402
+from data.market_universe import is_excluded_signal_market  # noqa: E402
 from signals.validate import PurgedWalkForward  # noqa: E402
+from scripts.univariate_precursor_lift_v1 import (  # noqa: E402
+    completed_upbit_d1_mask,
+)
 
 print = partial(print, flush=True)  # noqa: A001  (재현 로그 — 항상 flush)
 
@@ -88,6 +92,34 @@ STABLE_WRAPPED = {
     "USDT", "USDC", "BUSD", "DAI", "FDUSD", "TUSD", "USDP", "PYUSD", "USDS",
     "USDD", "GUSD", "EUR", "EURT", "WBTC", "WETH", "STETH", "WBETH",
 }
+
+
+def eligible_upbit_markets(upbit_db: str) -> list[str]:
+    """Canonical live-policy KRW universe, before any research ranking."""
+    return [
+        market
+        for market in list_markets(upbit_db)
+        if str(market).startswith("KRW-")
+        and not is_excluded_signal_market(str(market))
+    ]
+
+
+def completed_binance_d1_mask(
+    timestamps: pd.Series,
+    asof_utc: pd.Timestamp | str | None = None,
+) -> pd.Series:
+    """True only for Binance UTC D1 bars whose next 00:00 boundary passed."""
+    if asof_utc is None:
+        now = pd.Timestamp.now(tz="UTC")
+    else:
+        now = pd.Timestamp(asof_utc)
+        if now.tzinfo is None:
+            now = now.tz_localize("UTC")
+        else:
+            now = now.tz_convert("UTC")
+    current_start = now.normalize().tz_localize(None)
+    ts = pd.to_datetime(timestamps, errors="coerce")
+    return ts.notna() & (ts < current_start)
 
 
 # ============================================================================
@@ -132,6 +164,8 @@ def verify_boundary(upbit_db: str, binance_db: str) -> pd.DataFrame:
     ub = ub.copy(); bn = bn.copy()
     ub["timestamp"] = pd.to_datetime(ub["timestamp"])
     bn["timestamp"] = pd.to_datetime(bn["timestamp"])
+    ub = ub[completed_upbit_d1_mask(ub["timestamp"])].copy()
+    bn = bn[completed_binance_d1_mask(bn["timestamp"])].copy()
 
     # 1) time-of-day
     ub_tod = ub["timestamp"].dt.strftime("%H:%M:%S").mode().iloc[0]
@@ -199,7 +233,10 @@ def _upbit_market_features(df: pd.DataFrame) -> pd.DataFrame:
     return d
 
 
-def build_upbit_panel(upbit_db: str) -> pd.DataFrame:
+def build_upbit_panel(
+    upbit_db: str,
+    asof_kst: pd.Timestamp | str | None = None,
+) -> pd.DataFrame:
     """
     Upbit KRW 일봉 → (feature_date 기준) 베이스라인 피처 + (label_date=feature_date+1) 라벨.
 
@@ -209,7 +246,7 @@ def build_upbit_panel(upbit_db: str) -> pd.DataFrame:
       - quote_volume_d1: feature_date 거래대금 (유니버스 랭크용)
     leak-fix: 라벨을 별도 계산 후 feature_date = label_date - 1day 로 self-join.
     """
-    markets = [m for m in list_markets(upbit_db) if str(m).startswith("KRW-")]
+    markets = eligible_upbit_markets(upbit_db)
     feat_rows = []
     for market in markets:
         raw = load_candles(upbit_db, market)
@@ -221,10 +258,16 @@ def build_upbit_panel(upbit_db: str) -> pd.DataFrame:
         d["feature_date"] = d["timestamp"].dt.date
         # entry/label from NEXT row (day D)
         d["label_date"] = (d["timestamp"] + pd.Timedelta(days=1)).dt.date
-        nxt = d[["feature_date", "open", "high", "close", "pump_max_return", "eod_ret_D"]].copy()
+        nxt = d.loc[
+            completed_upbit_d1_mask(d["timestamp"], asof_kst),
+            [
+                "feature_date", "open", "high", "low", "close",
+                "pump_max_return", "eod_ret_D",
+            ],
+        ].copy()
         nxt = nxt.rename(columns={
             "feature_date": "label_date_key", "open": "entry_open_D",
-            "high": "high_D", "close": "close_D",
+            "high": "high_D", "low": "low_D", "close": "close_D",
             "pump_max_return": "pump_max_return_D", "eod_ret_D": "eod_ret_D2",
         })
         # feature row at t join label row at t+1 (=day D)
@@ -250,7 +293,11 @@ def build_upbit_panel(upbit_db: str) -> pd.DataFrame:
 # ============================================================================
 # Binance D-1 피처
 # ============================================================================
-def build_binance_features(binance_db: str, needed_bn_markets: set[str]) -> pd.DataFrame:
+def build_binance_features(
+    binance_db: str,
+    needed_bn_markets: set[str],
+    asof_utc: pd.Timestamp | str | None = None,
+) -> pd.DataFrame:
     """
     Binance D-1 일봉 → 거래소간 lead-lag 피처 (전부 ≤ D-1).
 
@@ -268,6 +315,7 @@ def build_binance_features(binance_db: str, needed_bn_markets: set[str]) -> pd.D
             continue
         d = raw.sort_values("timestamp").copy()
         d["timestamp"] = pd.to_datetime(d["timestamp"])
+        d = d[completed_binance_d1_mask(d["timestamp"], asof_utc)].copy()
         close = d["close"].astype(float)
         qv = d["quote_volume"].astype(float)
         d["b_ret_1d"] = np.log(close / close.shift(1))
@@ -317,13 +365,11 @@ def lift_table(df: pd.DataFrame, target: str, mask_name: str, mask: pd.Series) -
 def net_sim(df: pd.DataFrame, mask: pd.Series, cost: float) -> dict:
     """
     rule 이 잡은 행을 day D open 진입 → TP+5%/SL-3% 보수 모델.
-    경로(high/low intraday)는 일봉만으론 순서 불명 → 보수적으로:
-      - high_D/open-1 >= TP 이고 low 가 SL 안 쳤으면 TP (낙관) 대신,
-      - **보수**: SL 우선 가정 불가하니 day-EOD 와 TP/SL 중 worst-case 가 아니라
-        실현가능 추정 = min(TP 도달, EOD) with SL floor.
+    경로(high/low intraday)는 일봉만으론 순서 불명 → 보수적으로 같은 봉에서
+    TP와 SL이 모두 닿으면 SL을 먼저 적용한다.
     일봉 한계상 정확한 TP/SL 순서를 모름 → 두 가지 다 보고:
       gross_eod  : close_D/open_D - 1 (단순 종가청산)
-      gross_tpsl : TP 도달시 +5%, 아니면 EOD, 단 EOD < SL 이면 SL (-3%) floor
+      gross_tpsl : SL 도달시 -3%, 아니면 TP 도달시 +5%, 아니면 EOD
     net = gross - cost.
     """
     if mask.sum() == 0:
@@ -331,10 +377,16 @@ def net_sim(df: pd.DataFrame, mask: pd.Series, cost: float) -> dict:
     sub = df[mask].copy()
     op = sub["entry_open_D"].astype(float)
     hi = sub["high_D"].astype(float)
+    lo = sub["low_D"].astype(float)
     cl = sub["close_D"].astype(float)
     eod = cl / op - 1.0
     tp_hit = (hi / op - 1.0) >= TP_PCT
-    gross_tpsl = np.where(tp_hit, TP_PCT, np.maximum(eod, SL_PCT))
+    sl_hit = (lo / op - 1.0) <= SL_PCT
+    gross_tpsl = np.select(
+        [sl_hit, tp_hit],
+        [SL_PCT, TP_PCT],
+        default=eod,
+    )
     out = {}
     for name, g in [("eod", eod.values), ("tpsl", np.asarray(gross_tpsl))]:
         net = g - cost
@@ -469,7 +521,7 @@ def run(args) -> None:
             "market", "feature_date", "timestamp", "roc_7d_rank", "u_roc_7d",
             "u_atr_pct_14", "b_ret_1d", "b_ret_7d", "b_vol_surge",
             "bn_minus_upbit_ret_1d", "pump_max_return", target,
-            "entry_open_D", "high_D", "close_D",
+            "entry_open_D", "high_D", "low_D", "close_D",
         ]])
 
     if not fold_lifts:
@@ -550,7 +602,7 @@ def run(args) -> None:
 
 def _mapping_report(args) -> None:
     """--inspect 전용: panel 없이 매핑 가능 코인 % 만 빠르게."""
-    krw = [m for m in list_markets(args.upbit_db) if str(m).startswith("KRW-")]
+    krw = eligible_upbit_markets(args.upbit_db)
     bn_have = set(list_markets(args.binance_db))
     rows = []
     n_map = 0

@@ -1,0 +1,30 @@
+{
+  "schema": "downside_veto_challenger_v1_manifest",
+  "files": {
+    "summary": {
+      "path": "/mnt/20t/prelude/output/downside_veto_challenger_v1_summary.csv",
+      "bytes": 7250,
+      "sha256": "3a435ca6b5758a9f4cc711ec67a56a18fb08f62e3fe0362b1b2138bdf5d53f36"
+    },
+    "paired_ci": {
+      "path": "/mnt/20t/prelude/output/downside_veto_challenger_v1_paired_ci.csv",
+      "bytes": 16363,
+      "sha256": "54d85fea590d6ab5e1064848e8e7e66c0ef3feb67ee39cac1fb9519611fd5536"
+    },
+    "folds": {
+      "path": "/mnt/20t/prelude/output/downside_veto_challenger_v1_folds.csv",
+      "bytes": 23196,
+      "sha256": "4212cf56efc311c23c28bd89696dda8ee70b1209f0449c1a17c74b9ea9705cc5"
+    },
+    "picks": {
+      "path": "/mnt/20t/prelude/output/downside_veto_challenger_v1_picks.csv",
+      "bytes": 3772787,
+      "sha256": "82bdfc65b7e12ef9be3847c485f2c65aa763f792e97ba5f30629381caf3a8350"
+    },
+    "coverage": {
+      "path": "/mnt/20t/prelude/output/downside_veto_challenger_v1_coverage.json",
+      "bytes": 8422,
+      "sha256": "61a1dfc171ca006b983e1c8ce98b99ad3b9b83c81b2fbed38402404852272b3e"
+    }
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "asof": "2026-07-26",
+  "config": {
+    "deep_loss_pct": -5.0,
+    "hyst_k": 5,
+    "margin_deep_loss_pp": 5.0,
+    "margin_net_pp": 0.3,
+    "min_closed": 30,
+    "rolling_n": 30,
+    "round_trip_cost_pct": 0.15
+  },
+  "history": [
+    {
+      "asof": "2026-06-01",
+      "from": null,
+      "reason": "게이트 통과 모델 없음 (forward closed n<30 또는 challenger_only) → 기본 챔피언=백테스트-최선(recommend_r1_open), SHADOW 발송",
+      "slot": "open",
+      "to": "recommend_r1_open"
+    },
+    {
+      "asof": "2026-06-01",
+      "from": null,
+      "reason": "게이트 통과 모델 없음 (forward closed n<30 또는 challenger_only) → 기본 챔피언=백테스트-최선(recommend_r1_open), SHADOW 발송",
+      "slot": "preopen",
+      "to": "recommend_r1_open"
+    }
+  ],
+  "payload_sha256": "f40789cb9e208c9a1f3b8117ac885f904923e4279e9cfb3a428ea0490c8fcd94",
+  "schema_version": "champion_state.v1",
+  "slots": {
+    "open": {
+      "champion_id": "recommend_r1_open",
+      "is_fallback": false,
+      "metric": {
+        "deep_loss_freq": 0.0,
+        "hit_rate": 0.0556,
+        "last_date": "2026-07-25",
+        "n_closed": 90,
+        "n_days": 30,
+        "net_mean_pct": -0.3022
+      },
+      "reason": "유지: 현 챔피언(recommend_r1_open) 이 여전히 하방-우선 최선 [deep_loss=0.000 net=-0.30% n=90]",
+      "since": "2026-06-01"
+    },
+    "preopen": {
+      "champion_id": "recommend_r1_open",
+      "is_fallback": true,
+      "metric": {
+        "deep_loss_freq": 0.0,
+        "hit_rate": 0.0556,
+        "last_date": "2026-07-25",
+        "n_closed": 90,
+        "n_days": 30,
+        "net_mean_pct": -0.3022
+      },
+      "reason": "게이트 통과 모델 없음 (forward closed n<30 또는 challenger_only) → 기본 챔피언=백테스트-최선(recommend_r1_open), SHADOW 발송",
+      "since": "2026-06-01"
+    }
+  },
+  "streaks": {
+    "open": {
+      "challenger_id": null,
+      "count": 0,
+      "last_date": null
+    },
+    "preopen": {
+      "challenger_id": null,
+      "count": 0,
+      "last_date": null
+    }
+  },
+  "updated_at": "2026-07-26T00:36:15+00:00"
+}

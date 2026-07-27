@@ -10,9 +10,11 @@
   7. predictions_YYYYMMDD.csv 저장
 
 사용:
-    python scripts/predict_today.py                    # 라이브
-    python scripts/predict_today.py --dry-run          # 텔레그램 발송 X
-    python scripts/predict_today.py --asof 2026-05-03  # 특정 날짜 시뮬
+    python scripts/predict_today_legacy.py --dry-run
+    python scripts/predict_today_legacy.py --dry-run --asof 2026-05-03
+
+실발송은 이 legacy runner에서 금지한다. canonical sender:
+    python scripts/recommend_send.py --slot open
 """
 from __future__ import annotations
 
@@ -21,27 +23,25 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from data.database import list_markets, load_candles
-from ledger.config import LEDGER_CSV, REGIME_EXPOSURE_CAP, K_POSITIONS
-from ledger.metrics import compute_summary, format_summary
+from ledger.config import K_POSITIONS, LEDGER_CSV
+from ledger.metrics import compute_summary
 from ledger.sizing import size_positions
 from ledger.tracker import simulate_batch
 from notifier.format import (
-    format_daily_alert, format_drift_alert, format_preflight_fail, format_silence_alert,
+    format_daily_alert,
+    format_preflight_fail,
+    format_silence_alert,
 )
 from notifier.telegram import send_telegram
-from ops.drift_detector import DriftState
+from ops.live_send_gate import reject_legacy_live_send
 from ops.preflight import run_preflight
-from signals.calibration import format_accuracy_summary
-from signals.features import assemble_training_panel
-from signals.predict import predict_today
 from signals.models.xgb_phase1 import XGBPhase1
+from signals.predict import predict_today
 
 
 def _latest_ckpt_path() -> tuple[Path, Path] | None:
@@ -75,11 +75,21 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="텔레그램 발송 X")
     parser.add_argument("--skip-preflight", action="store_true")
     args = parser.parse_args()
+    reject_legacy_live_send(
+        parser,
+        requested=not args.dry_run,
+        slot="open",
+        scoring_command="python scripts/predict_today_legacy.py --dry-run",
+    )
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     logger = logging.getLogger("predict_today")
 
-    asof = pd.Timestamp(args.asof) if args.asof else pd.Timestamp.now()
+    asof = (
+        pd.Timestamp(args.asof)
+        if args.asof
+        else pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None)
+    )
 
     # ============================================================
     # 1. 모델 로드
@@ -178,7 +188,6 @@ def main():
     # 6. 정확도 (옵션)
     # ============================================================
     cal_text = None
-    cal_path = Path(f"output/calibration_{ckpt.stem.split('_')[-1]}.json")
     # (calibration_report 는 학습 시 저장됨 — 여기선 표시만)
 
     # ============================================================

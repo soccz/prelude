@@ -36,6 +36,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from signals.features import compute_btc_features
 
 D1_DB = "data/upbit_d1.db"
@@ -94,7 +95,7 @@ def build_market_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_panel(limit_markets):
-    markets = list_markets(D1_DB)
+    markets = signal_eligible_markets(list_markets(D1_DB))
     if limit_markets:
         markets = markets[:limit_markets]
     log.info("loading %d markets (d1)", len(markets))

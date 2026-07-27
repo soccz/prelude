@@ -34,6 +34,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from signals.features import assemble_training_panel, compute_btc_features
 from signals.labels_distribution import compute_distribution_labels
 from signals.setups import detect_setups
@@ -111,7 +112,7 @@ def backtest_strategy(trades: pd.DataFrame, rule: str, cost: float) -> dict:
 
 
 def build_labeled_panel(upbit_d1: str, upbit_4h: str, binance_d1: str) -> pd.DataFrame:
-    krw = list_markets(upbit_d1)
+    krw = signal_eligible_markets(list_markets(upbit_d1))
     candles_d1 = {m: load_candles(upbit_d1, m) for m in krw}
     if Path(binance_d1).exists():
         for m in list_markets(binance_d1):
@@ -127,7 +128,11 @@ def build_labeled_panel(upbit_d1: str, upbit_4h: str, binance_d1: str) -> pd.Dat
     btc_feat = compute_btc_features(btc_d1.copy())
     btc_feat["date_only"] = pd.to_datetime(btc_feat["timestamp"]).dt.date
     btc_regime_map = dict(zip(btc_feat["date_only"], btc_feat["btc_regime"]))
-    krw_4h = [m for m in list_markets(upbit_4h) if m.startswith("KRW-")]
+    krw_4h = [
+        market
+        for market in signal_eligible_markets(list_markets(upbit_4h))
+        if market.startswith("KRW-")
+    ]
     candles_4h = {m: load_candles(upbit_4h, m) for m in krw_4h}
     candles_4h = {k: v for k, v in candles_4h.items() if v is not None and len(v) > 0}
     panel_4h = build_4h_panel_for_labels(candles_4h, btc_regime_map)

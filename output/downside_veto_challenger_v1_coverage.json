@@ -1,0 +1,221 @@
+{
+  "schema": "downside_veto_challenger_v1",
+  "created_at": "2026-07-27T00:07:22.515645+09:00",
+  "research_only": true,
+  "input_oos": "/mnt/20t/prelude/output/cc_filtered_multiday_oos_v1.parquet",
+  "input_oos_sha256": "d1df800c55d21b4d34707e38f060d1f2ab1d74a8df4d8a48250f8040f68ca2b6",
+  "m15_db": "/mnt/20t/prelude/data/upbit_15m.db",
+  "m15_db_sha256": "12a7efca9e4df893f58232fe53695c26d2ea1e90855ee37846171ad78df3764c",
+  "script_sha256": "f87768d7f7060f7d88f5a536f45100027cf3529e2a4a31fbd6e6cbee21bf60b4",
+  "code_lineage": {
+    "schema": "repo_local_python_code_lineage_v1",
+    "entrypoint": "scripts/downside_veto_challenger_v1.py",
+    "files": {
+      "data/__init__.py": {
+        "path": "data/__init__.py",
+        "exists": true,
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "data/database.py": {
+        "path": "data/database.py",
+        "exists": true,
+        "size": 14780,
+        "sha256": "40e5d7e9c1e1ecfd5e91769216dd297fc41018cd3a3d355144071ee8cbdcdddf"
+      },
+      "data/market_universe.py": {
+        "path": "data/market_universe.py",
+        "exists": true,
+        "size": 2094,
+        "sha256": "15b5e2c1c19650d5e3c13bfa0e40eb5025552f4d56e33ac7ef10bb967b16f067"
+      },
+      "ledger/__init__.py": {
+        "path": "ledger/__init__.py",
+        "exists": true,
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "ledger/path_quality.py": {
+        "path": "ledger/path_quality.py",
+        "exists": true,
+        "size": 17503,
+        "sha256": "0c6bb31e33e721c94d4124b6a0742d3f5f02be380093925fe4dcb252f99e49bb"
+      },
+      "ops/__init__.py": {
+        "path": "ops/__init__.py",
+        "exists": true,
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "ops/artifact_provenance.py": {
+        "path": "ops/artifact_provenance.py",
+        "exists": true,
+        "size": 19857,
+        "sha256": "ef33127caf4320c35d46231458ab47887289863a8b5820d5b6a1cb8786a037bc"
+      },
+      "ops/code_lineage.py": {
+        "path": "ops/code_lineage.py",
+        "exists": true,
+        "size": 5794,
+        "sha256": "d56c18566b41a94648dd55e65d9aabe83d8814c4b3faa1d570cc70fcc2ddebc6"
+      },
+      "scripts/downside_veto_challenger_v1.py": {
+        "path": "scripts/downside_veto_challenger_v1.py",
+        "exists": true,
+        "size": 51838,
+        "sha256": "f87768d7f7060f7d88f5a536f45100027cf3529e2a4a31fbd6e6cbee21bf60b4"
+      },
+      "scripts/recall_universe_recommender_v1.py": {
+        "path": "scripts/recall_universe_recommender_v1.py",
+        "exists": true,
+        "size": 22841,
+        "sha256": "df51bb10060d59bebbd981ca4aaad27eb7680d352470da3626f3b63b834bf8bd"
+      },
+      "scripts/recommender_downside_exit_v1.py": {
+        "path": "scripts/recommender_downside_exit_v1.py",
+        "exists": true,
+        "size": 17392,
+        "sha256": "17ceddbe29c4158310b9c5887edea6300f3c7444ab2d7eee5c8a95232bba7d30"
+      },
+      "scripts/univariate_precursor_lift_v1.py": {
+        "path": "scripts/univariate_precursor_lift_v1.py",
+        "exists": true,
+        "size": 19136,
+        "sha256": "6f1e885a4410b9361fb2cafa6ae9da20a4588d5b8b00b55a1d80667343b5db0b"
+      },
+      "signals/__init__.py": {
+        "path": "signals/__init__.py",
+        "exists": true,
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "signals/features.py": {
+        "path": "signals/features.py",
+        "exists": true,
+        "size": 13525,
+        "sha256": "3c24c9fbe9e5b34c27fc51fa18c31a8694b20cc59b7af0ce5d2244a37b97a560"
+      },
+      "signals/labels.py": {
+        "path": "signals/labels.py",
+        "exists": true,
+        "size": 14179,
+        "sha256": "5a65bb781eeb525420c2f90ba908b6471aa93db5f6c2369dac0245abdbfe4619"
+      }
+    },
+    "lineage_sha256": "1db3951a0e1676d3cbb2525222f463af19a5db1c4f75787ad3f8cf6e65441b38"
+  },
+  "source_signatures": {
+    "input_oos": {
+      "path": "/mnt/20t/prelude/output/cc_filtered_multiday_oos_v1.parquet",
+      "bytes": 26884504,
+      "mtime_ns": 1785078203155555278,
+      "sha256": "d1df800c55d21b4d34707e38f060d1f2ab1d74a8df4d8a48250f8040f68ca2b6",
+      "wal": null
+    },
+    "m15_db": {
+      "path": "/mnt/20t/prelude/data/upbit_15m.db",
+      "bytes": 1552896000,
+      "mtime_ns": 1785028041817320393,
+      "sha256": "12a7efca9e4df893f58232fe53695c26d2ea1e90855ee37846171ad78df3764c",
+      "wal": null
+    }
+  },
+  "sources_before_and_after_identical": true,
+  "oos_rows": 80000,
+  "oos_dates": 800,
+  "oos_window": [
+    "2024-04-22",
+    "2026-07-25"
+  ],
+  "candidate_set": "static D-1 Top 100, identical for every policy/date",
+  "top_k": 3,
+  "policies": [
+    "R1_baseline",
+    "veto_within_day_top_third",
+    "veto_train_cal50",
+    "lexicographic_risk_first"
+  ],
+  "current_challenger_trials": 3,
+  "current_grid_note": "3 fixed challenger transforms; no threshold/parameter sweep",
+  "related_prior_policy_variants_minimum": 15,
+  "related_prior_note": "R2 lambda variants 4 + R3 gate variants 3 + A1 variants 8; meta-filter is a separate previously attempted layer",
+  "holdout": {
+    "locked_days": 180,
+    "start": "2026-01-22",
+    "end": "2026-07-25",
+    "preholdout_days": 620,
+    "rule_lock": "q=1/3, calibrated absolute cutoff=0.50, and lexicographic ordering fixed before challenger evaluation"
+  },
+  "absolute_calibration": {
+    "n_rows": 62000,
+    "n_dates": 620,
+    "end_date": "2026-01-21",
+    "predicted_dn5_mean": 0.2646993604075968,
+    "actual_dn5_rate": 0.287758064516129,
+    "scalar_factor": 1.087112806290976,
+    "absolute_cutoff": 0.5
+  },
+  "wf_hygiene": {
+    "input": "6-fold purged walk-forward OOS probabilities, embargo=5, D-1 features and day-D outcomes",
+    "holdout_calibration": "single scalar factor fit only on dates before locked holdout; frozen throughout holdout",
+    "within_day_veto": "cross-sectional p_dn5 ranks from the same observable day only",
+    "outcome_not_used_for_ranking": true,
+    "row_level_checks": "dates are single-fold, folds are chronological/nonoverlapping, and every fold-date has an exact finite Top100",
+    "upstream_train_embargo_provenance": {
+      "status": "legacy_artifact_not_cryptographically_bound",
+      "producer_path": "/mnt/20t/prelude/scripts/cc_filtered_multiday_v1.py",
+      "current_producer_sha256": "c0a0fcfa7cc1c2e6e89588c2fbaff5d092354f2a474d16f8614a717e8b570ccd",
+      "limitation": "the row artifact contains test fold IDs but no train-range manifest, so its claimed upstream five-date embargo cannot be independently reconstructed from this file",
+      "promotion_eligible": false
+    }
+  },
+  "path_rule": "[D 09:15,D+1 09:15) first-executable-bar window; KRW-BTC exact 96-bar completeness + closed next boundary; target-only no-trade gaps flat-filled; incomplete paths excluded through a common-date intersection across all policies",
+  "common_complete_dates": {
+    "n": 419,
+    "start": "2025-05-04",
+    "end": "2026-07-25"
+  },
+  "locked_common_complete_dates": {
+    "n": 178,
+    "start": "2026-01-22",
+    "end": "2026-07-25"
+  },
+  "path_coverage_by_policy": {
+    "R1_baseline": {
+      "complete_pick_rate": 0.53375,
+      "complete_top3_days": 421,
+      "all_days": 800,
+      "flat_filled_pick_rate_among_complete": 0.41451990632318503
+    },
+    "lexicographic_risk_first": {
+      "complete_pick_rate": 0.6308333333333334,
+      "complete_top3_days": 430,
+      "all_days": 800,
+      "flat_filled_pick_rate_among_complete": 0.13143989431968295
+    },
+    "veto_train_cal50": {
+      "complete_pick_rate": 0.5341666666666667,
+      "complete_top3_days": 421,
+      "all_days": 800,
+      "flat_filled_pick_rate_among_complete": 0.41497659906396256
+    },
+    "veto_within_day_top_third": {
+      "complete_pick_rate": 0.53625,
+      "complete_top3_days": 427,
+      "all_days": 800,
+      "flat_filled_pick_rate_among_complete": 0.48951048951048953
+    }
+  },
+  "cost_and_path": {
+    "round_trip_cost": 0.0015,
+    "tp": 0.05,
+    "sl": 0.03,
+    "same_bar_priority": "SL before TP",
+    "daily_candle_cohort": "conservative approximation only; if both daily barriers touch, SL is assigned first"
+  },
+  "bootstrap": {
+    "paired_unit": "date",
+    "draws": 5000,
+    "seed": 42
+  }
+}

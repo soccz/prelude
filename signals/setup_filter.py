@@ -24,8 +24,7 @@ config (placeholder, CLAUDE.md §2.5 — 모두 sweep 가능):
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 import pandas as pd
 
@@ -264,6 +263,7 @@ if __name__ == "__main__":
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from data.database import list_markets, load_candles
+    from data.market_universe import signal_eligible_markets
     from signals.features import assemble_training_panel
 
     parser = argparse.ArgumentParser()
@@ -273,7 +273,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print(f"loading {args.limit} markets...")
-    markets = list_markets(args.db)[: args.limit]
+    markets = signal_eligible_markets(list_markets(args.db))[: args.limit]
     candles = {m: load_candles(args.db, m) for m in markets}
     candles = {k: v for k, v in candles.items() if len(v) > 30}
     btc = load_candles(args.db, args.btc_market)

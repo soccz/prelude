@@ -49,6 +49,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles  # noqa: E402
+from data.market_universe import is_excluded_signal_market  # noqa: E402
 # 재사용: 동일한 leak-free feature 빌더 (univariate_precursor_lift_v1 검증됨)
 from scripts.univariate_precursor_lift_v1 import (  # noqa: E402
     build_market_features,
@@ -102,7 +103,11 @@ COMPOSITE_RANKS = {
 # 1. Panel build (D-1 features) + day-D 라벨 + regime + 동적 유니버스
 # ============================================================================
 def build_panel(limit_markets: int | None) -> pd.DataFrame:
-    markets = list_markets(DB_PATH)
+    markets = [
+        market
+        for market in list_markets(DB_PATH)
+        if not is_excluded_signal_market(str(market))
+    ]
     if limit_markets:
         markets = markets[:limit_markets]
     log.info("loading %d markets", len(markets))
@@ -439,8 +444,9 @@ def main():
                      r["pred_prob"], r["actual_hit"], int(r["n"]))
 
     # ---- 최근 N 거래일 top-K 추천 + 실제 펌프 여부 ----
-    recent_dates = sorted(oos["date"].unique())[-args.recent_days:]
-    recent = oos[oos["date"].isin(recent_dates)].copy()
+    completed_oos = oos.dropna(subset=[MAIN_LABEL]).copy()
+    recent_dates = sorted(completed_oos["date"].unique())[-args.recent_days:]
+    recent = completed_oos[completed_oos["date"].isin(recent_dates)].copy()
     pick_rows = []
     for dt in recent_dates:
         day = recent[recent["date"] == dt].dropna(subset=[best_score])

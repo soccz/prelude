@@ -23,12 +23,17 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from scripts.path_backtest_distribution_v1 import RULES, simulate_path, summarize
 
 
 def build_15m_path_table(upbit_15m: str) -> pd.DataFrame:
     rows = []
-    markets = [m for m in list_markets(upbit_15m) if m.startswith("KRW-")]
+    markets = [
+        market
+        for market in signal_eligible_markets(list_markets(upbit_15m))
+        if market.startswith("KRW-")
+    ]
     for market in markets:
         df = load_candles(upbit_15m, market)
         if df is None or len(df) == 0:

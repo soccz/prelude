@@ -1,0 +1,8 @@
+check,status,detail
+upbit_time_of_day,INFO,09:00:00
+binance_time_of_day,INFO,00:00:00
+btc_ret_corr_lag0,INFO,0.9620
+btc_ret_corr_lag+1,INFO,-0.0196
+btc_ret_corr_lag-1,INFO,-0.0598
+n_overlap_days,INFO,1178
+ALIGNMENT,PASS,date-part join valid (lag0 corr 0.962 is max)

@@ -1,0 +1,5 @@
+both,tp_first,sl_first,sl_first_share,feature,tp,sl
+105,48,57,0.5428571428571428,f_qv_surge_7d,0.1,0.05
+129,69,60,0.46511627906976744,f_qv_surge_30d,0.1,0.05
+144,69,75,0.5208333333333334,f_bounce_off_7d_low,0.1,0.05
+87,42,45,0.5172413793103449,f_atr_xs_decile,0.1,0.05

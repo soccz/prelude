@@ -26,7 +26,6 @@ import optuna
 import pandas as pd
 import xgboost as xgb
 from sklearn.metrics import (
-    brier_score_loss,
     f1_score,
     log_loss,
     accuracy_score,
@@ -283,7 +282,8 @@ if __name__ == "__main__":
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-    from data.database import load_candles, list_markets
+    from data.database import list_markets, load_candles
+    from data.market_universe import signal_eligible_markets
     from signals.features import assemble_training_panel
 
     parser = argparse.ArgumentParser()
@@ -295,7 +295,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print(f"loading {args.limit} markets from {args.db}...")
-    markets = list_markets(args.db)[: args.limit]
+    markets = signal_eligible_markets(list_markets(args.db))[: args.limit]
     candles = {}
     for m in markets:
         d = load_candles(args.db, m)
@@ -310,7 +310,7 @@ if __name__ == "__main__":
     print(f"\ntraining {'(tune)' if args.tune else '(default params)'}...")
     model, metrics = train_full(panel, tune=args.tune, n_trials=args.n_trials)
 
-    print(f"\n=== Validation metrics ===")
+    print("\n=== Validation metrics ===")
     for k, v in metrics.items():
         if isinstance(v, list):
             print(f"  {k}: {v}")

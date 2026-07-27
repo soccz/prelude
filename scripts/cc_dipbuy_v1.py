@@ -64,7 +64,10 @@ from scripts.downside_head_riskreward_v1 import (  # noqa: E402
     DN_THRESH,
 )
 # 라이브 ledger 와 동일한 15m SL/TP/EOD 경로청산.
-from scripts.recommender_downside_exit_v1 import simulate_path  # noqa: E402
+from scripts.recommender_downside_exit_v1 import (  # noqa: E402
+    load_paths as load_execution_paths,
+    simulate_path,
+)
 
 M15_DB = str(_ROOT / "data" / "upbit_15m.db")
 OUT = _ROOT / "output"
@@ -104,20 +107,7 @@ log = logging.getLogger("cc_dipbuy")
 # 1. 15m 경로 로딩 + 진입일 D 경로청산 (라이브 ledger 와 동일)
 # ============================================================================
 def load_paths(pairs: pd.DataFrame) -> dict:
-    conn = sqlite3.connect(M15_DB)
-    paths = {}
-    for _, r in pairs.iterrows():
-        m, dt = r["market"], pd.Timestamp(r["date"])
-        start = dt.strftime("%Y-%m-%d 09:00:00")
-        end = (dt + pd.Timedelta(days=1)).strftime("%Y-%m-%d 09:00:00")
-        rows = conn.execute(
-            "SELECT open,high,low,close FROM candles WHERE market=? AND "
-            "timestamp>=? AND timestamp<? ORDER BY timestamp", (m, start, end)
-        ).fetchall()
-        if rows:
-            paths[(m, dt.date())] = rows
-    conn.close()
-    return paths
+    return load_execution_paths(pairs, db_path=M15_DB)
 
 
 def realize_net(bars: list) -> tuple[float, str, float]:
@@ -145,7 +135,8 @@ def net_metrics(trades: pd.DataFrame) -> dict:
     peak = eq.cummax()
     mdd = float(((eq - peak) / peak).min())
     cum = float(eq.iloc[-1] - 1.0)
-    mu = float(net.mean())
+    trade_mu = float(net.mean())
+    daily_mu = float(daily.mean())
     sd = float(daily.std())
     dstd = float(daily[daily < 0].std()) if (daily < 0).any() else np.nan
     k5 = max(1, int(np.ceil(0.05 * n)))
@@ -157,7 +148,7 @@ def net_metrics(trades: pd.DataFrame) -> dict:
         n_days=int(d["date"].nunique()),
         pct_sl=float((oc == "sl").mean()),
         deep_loss_freq_noSL=float((eod <= DEEP_LOSS).mean()) if len(eod) else np.nan,
-        net_mean=mu,
+        net_mean=trade_mu,
         net_median=float(np.median(net)),
         hit=float((net > 0).mean()),
         precision_pump20=float(d["pump20_hit"].dropna().mean())
@@ -167,8 +158,8 @@ def net_metrics(trades: pd.DataFrame) -> dict:
         worst=float(net.min()),
         mdd=mdd,
         cum=cum,
-        sharpe=float(mu / sd * np.sqrt(365)) if sd and sd > 0 else np.nan,
-        sortino=float(mu / dstd * np.sqrt(365)) if dstd and dstd > 0 else np.nan,
+        sharpe=float(daily_mu / sd * np.sqrt(365)) if sd and sd > 0 else np.nan,
+        sortino=float(daily_mu / dstd * np.sqrt(365)) if dstd and dstd > 0 else np.nan,
         pct_tp=float((oc == "tp").mean()),
         pct_eod=float((oc == "eod").mean()),
     )

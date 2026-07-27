@@ -7,9 +7,25 @@ from __future__ import annotations
 
 import argparse
 import html
-import json
-from datetime import datetime
+import math
+import os
+import sys
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from ledger.portfolio_metrics import normalize_kst_date
+from ops.policy_competition import (
+    POLICY_DB,
+    PolicyArtifactError,
+    load_policy_artifact,
+)
+from scripts.idea_validation_report import (
+    load_idea_validation_artifact,
+    validate_idea_validation_payload,
+)
 
 
 def _fmt(value, suffix: str = "", digits: int = 2) -> str:
@@ -21,6 +37,16 @@ def _fmt(value, suffix: str = "", digits: int = 2) -> str:
         return f"{float(value):,.{digits}f}{suffix}"
     except (TypeError, ValueError):
         return html.escape(str(value))
+
+
+def _finite_number(value, default: float) -> float:
+    if value is None:
+        return default
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    return number if math.isfinite(number) else default
 
 
 def _state_class(state: str) -> str:
@@ -113,7 +139,13 @@ def _model_card(payload: dict) -> str:
     )
     ev = card.get("current_evidence", {})
     trained = card.get("trained_meta_model", {})
-    trained_status = "deployable" if trained.get("deployable") else "shadow"
+    artifact_status = str(trained.get("artifact_status", "")).strip().upper()
+    if artifact_status:
+        trained_status = artifact_status
+    elif trained.get("deployable"):
+        trained_status = "DECLARED_DEPLOYABLE"
+    else:
+        trained_status = "INACTIVE"
     trained_text = (
         f"{html.escape(str(trained.get('model_id', 'not trained')))} "
         f"({trained_status}) · n={_fmt(trained.get('n_samples'), digits=0)} · "
@@ -217,8 +249,18 @@ def _accuracy_section(payload: dict) -> str:
           <p class="muted">{reason}</p>
         </section>
         """
-    status = "DEPLOYABLE" if trained.get("deployable") else "SHADOW"
-    status_class = "good" if trained.get("deployable") else "watch"
+    artifact_status = str(trained.get("artifact_status", "")).strip().upper()
+    if artifact_status:
+        status = artifact_status
+    elif trained.get("deployable"):
+        status = "DECLARED_DEPLOYABLE"
+    else:
+        status = "INACTIVE"
+    status_class = (
+        "good"
+        if status == "DEPLOYED" and trained.get("deployable")
+        else "watch"
+    )
     metrics = trained.get("holdout_metrics", {}) or {}
     threshold = trained.get("holdout_threshold_stats", {}) or {}
     return f"""
@@ -249,14 +291,17 @@ def _accuracy_section(payload: dict) -> str:
 
 def _policy_competition_table(payload: dict) -> str:
     pc = payload.get("policy_competition") or {}
-    rows = [r for r in pc.get("rows", []) if (r.get("n_closed") or 0) > 0]
+    rows = [
+        r for r in pc.get("rows", [])
+        if isinstance(r, dict) and _finite_number(r.get("n_closed"), 0) > 0
+    ]
     if not rows:
         return "<tr><td colspan=\"9\" class=\"muted\">No closed policy competition rows yet.</td></tr>"
     rows.sort(
         key=lambda r: (
-            float(r.get("pump20_recall_pct") or -1),
-            float(r.get("net_mean_pct") or -999),
-            int(r.get("n_closed") or 0),
+            _finite_number(r.get("pump20_recall_pct"), -1),
+            _finite_number(r.get("net_mean_pct"), -999),
+            _finite_number(r.get("n_closed"), 0),
         ),
         reverse=True,
     )
@@ -310,10 +355,68 @@ def _policy_competition_section(payload: dict) -> str:
     """
 
 
-def render_html(payload: dict) -> str:
+def _validated_payload(payload: dict, *, asof=None) -> tuple[dict, str]:
+    if not isinstance(payload, dict):
+        raise ValueError("idea validation artifact must be a JSON object")
+    cutoff = normalize_kst_date(asof)
+    validate_idea_validation_payload(
+        payload,
+        asof=cutoff,
+        require_current=True,
+    )
+    artifact_asof = normalize_kst_date(payload["asof"])
+
+    safe = dict(payload)
+    policy = safe.get("policy_competition")
+    if policy is not None:
+        safe["policy_competition"] = _safe_policy_competition(
+            policy,
+            cutoff=artifact_asof,
+        )
+    return safe, str(cutoff.date())
+
+
+def _safe_policy_competition(policy, *, cutoff) -> dict | None:
+    if not isinstance(policy, dict) or not policy.get("asof"):
+        return None
+    try:
+        policy_asof = normalize_kst_date(policy["asof"])
+    except ValueError:
+        return None
+    cutoff_date = normalize_kst_date(cutoff)
+    if policy_asof > cutoff_date:
+        return None
+    rows = []
+    for row in policy.get("rows", []):
+        if not isinstance(row, dict) or not row.get("asof"):
+            continue
+        try:
+            row_asof = normalize_kst_date(row["asof"])
+        except ValueError:
+            continue
+        if row_asof == policy_asof and row_asof <= cutoff_date:
+            rows.append(row)
+    safe = dict(policy)
+    safe["asof"] = str(policy_asof.date())
+    safe["rows"] = rows
+    return safe
+
+
+def render_html(
+    payload: dict,
+    *,
+    asof=None,
+    policy_competition: dict | None = None,
+) -> str:
+    payload, report_cutoff = _validated_payload(payload, asof=asof)
+    if payload.get("policy_competition") is None and policy_competition is not None:
+        payload["policy_competition"] = _safe_policy_competition(
+            policy_competition,
+            cutoff=payload["asof"],
+        )
     generated = html.escape(str(payload.get("generated_at", "")))
-    now = datetime.now().isoformat(timespec="seconds")
-    return f"""<!doctype html>
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    rendered = f"""<!doctype html>
 <html lang="ko">
 <head>
   <meta charset="utf-8">
@@ -381,7 +484,7 @@ def render_html(payload: dict) -> str:
 <body>
   <header>
     <h1>Prelude Idea Validation</h1>
-    <div class="muted">source generated: {generated} | html generated: {html.escape(now)} | cost: {_fmt(payload.get('round_trip_cost_pct'), '%')}</div>
+    <div class="muted">asof: {html.escape(str(payload.get('asof')))} KST | report cutoff: {html.escape(report_cutoff)} KST | source generated: {generated} | html generated UTC: {html.escape(now)} | cost: {_fmt(payload.get('round_trip_cost_pct'), '%')}</div>
   </header>
   <main>
     {_model_card(payload)}
@@ -415,20 +518,74 @@ def render_html(payload: dict) -> str:
 </body>
 </html>
 """
+    return "\n".join(line.rstrip() for line in rendered.splitlines()) + "\n"
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        directory_fd = os.open(str(path.parent), os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _invalid_html(reason: str) -> str:
+    return (
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<title>Prelude Idea Validation — INVALID</title></head><body>"
+        "<h1>INVALID AS-OF ARTIFACT</h1>"
+        f"<p>{html.escape(reason)}</p>"
+        "<p>No metrics were rendered.</p></body></html>"
+    )
 
 
 def build_html(input_json: str | Path, out_html: str | Path,
-               policy_competition_json: str | Path | None = None) -> None:
-    with open(input_json) as f:
-        payload = json.load(f)
-    if policy_competition_json is not None and "policy_competition" not in payload:
-        pc_path = Path(policy_competition_json)
-        if pc_path.exists():
-            with open(pc_path) as f:
-                payload["policy_competition"] = json.load(f)
+               policy_competition_json: str | Path | None = None,
+               *,
+               asof=None) -> None:
     out = Path(out_html)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(render_html(payload), encoding="utf-8")
+    try:
+        payload = load_idea_validation_artifact(
+            input_json,
+            asof=asof,
+            require_current=True,
+        )
+        policy_override = None
+        if (
+            policy_competition_json is not None
+            and isinstance(payload, dict)
+            and payload.get("policy_competition") is None
+        ):
+            try:
+                pc_path = Path(policy_competition_json)
+                policy_override = load_policy_artifact(
+                    pc_path,
+                    csv_path=pc_path.with_suffix(".csv"),
+                    db_path=POLICY_DB,
+                    asof=payload.get("asof"),
+                    require_current=True,
+                )
+            except PolicyArtifactError:
+                policy_override = None
+        rendered = render_html(
+            payload,
+            asof=asof,
+            policy_competition=policy_override,
+        )
+    except (OSError, ValueError) as exc:
+        _atomic_write_text(out, _invalid_html(str(exc)))
+        raise ValueError(f"cannot render idea validation report: {exc}") from exc
+    _atomic_write_text(out, rendered)
 
 
 def main():
@@ -436,8 +593,14 @@ def main():
     parser.add_argument("--input-json", default="output/idea_validation_summary.json")
     parser.add_argument("--out-html", default="output/idea_validation_report.html")
     parser.add_argument("--policy-competition-json", default="output/policy_competition_summary.json")
+    parser.add_argument("--asof", help="inclusive KST cutoff (default=today KST)")
     args = parser.parse_args()
-    build_html(args.input_json, args.out_html, args.policy_competition_json)
+    build_html(
+        args.input_json,
+        args.out_html,
+        args.policy_competition_json,
+        asof=args.asof,
+    )
     print(f"saved {args.out_html}")
 
 

@@ -37,6 +37,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from ledger.config import ROUND_TRIP_COST_PCT
 from ledger.tracker import simulate_d1_simple
 from signals.features import assemble_training_panel
@@ -214,7 +215,7 @@ def main():
 
     # 1. 데이터 + panel
     log.info("loading...")
-    krw = list_markets(args.upbit_db)
+    krw = signal_eligible_markets(list_markets(args.upbit_db))
     candles = {m: load_candles(args.upbit_db, m) for m in krw}
     if Path(args.binance_db).exists():
         bn = list_markets(args.binance_db)

@@ -55,7 +55,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -66,6 +65,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from data.database import connect_readonly  # noqa: E402
 # R1 과 동일한 leak-free head 파이프 재사용 (recommend.py / r2_challenger 와 동일 빌더).
 from scripts.downside_head_riskreward_v1 import (  # noqa: E402
     build_panel,
@@ -78,8 +78,7 @@ from scripts.downside_head_riskreward_v1 import (  # noqa: E402
 )
 # r2_challenger 와 동일한 15m 경로청산 + net 지표 (라이브 ledger 손익경로).
 from scripts.r2_challenger_compare_v1 import (  # noqa: E402
-    load_paths,
-    realize_net,
+    load_realized_paths,
     net_metrics,
     UP_ANCHOR,       # "lab_up_10"
     DN_ANCHOR,       # "lab_dn_05"
@@ -121,8 +120,12 @@ def add_dump_labels(panel: pd.DataFrame) -> list:
     cols = []
     for name, sp in DUMP_LABELS.items():
         lab = f"lab_{name}"
-        panel[lab] = ((panel["up_high_ret"] >= sp["up"]) &
-                      (panel["eod_ret"] < sp["eod"])).astype(float)
+        complete = panel[["up_high_ret", "eod_ret"]].notna().all(axis=1)
+        panel[lab] = (
+            (panel["up_high_ret"] >= sp["up"])
+            & (panel["eod_ret"] < sp["eod"])
+        ).astype(float)
+        panel.loc[~complete, lab] = np.nan
         cols.append(lab)
     return cols
 
@@ -133,7 +136,8 @@ def add_dump_labels(panel: pd.DataFrame) -> list:
 def _r1_order(oos: pd.DataFrame) -> pd.DataFrame:
     """R1 = p_up10/max(p_dn5,eps) 내림차순. tie-break: p_dn10↑작게→p_up10↑크게→exp_downside↑.
     각 날 내 정렬된 rank 를 r1_rank 로 부여(1=최상위)."""
-    up = f"p_{UP_ANCHOR}"; dn = f"p_{DN_ANCHOR}"
+    up = f"p_{UP_ANCHOR}"
+    dn = f"p_{DN_ANCHOR}"
     d = oos.copy()
     d["R1"] = d[up] / np.maximum(d[dn], RR_EPS)
     d = d.sort_values(
@@ -262,30 +266,43 @@ def main():
     log.info("=== walk-forward heads (R1 동일 빌더 + sustainability head) ===")
     oos = walk_forward_heads(panel, feats, label_cols, N_FOLDS, EMBARGO)
     if oos.empty:
-        log.error("no OOS folds — abort"); sys.exit(1)
-    up = f"p_{UP_ANCHOR}"; dn = f"p_{DN_ANCHOR}"
-    oos = oos.dropna(subset=[up, dn]).copy()
+        log.error("no OOS folds — abort")
+        sys.exit(1)
+    up = f"p_{UP_ANCHOR}"
+    dn = f"p_{DN_ANCHOR}"
+    oos = oos.dropna(
+        subset=[up, dn, "up_high_ret", "down_low_ret", "eod_ret", *dump_cols]
+    ).copy()
     log.info("OOS rows=%d dates %s..%s folds=%s",
              len(oos), oos["date"].min(), oos["date"].max(),
              sorted(oos["fold"].unique()))
 
     # --- 3) 15m 경로 net (r2_challenger 와 동일 simulate_path) ---
-    conn = sqlite3.connect(M15_DB)
-    m15_min = conn.execute("SELECT MIN(timestamp) FROM candles").fetchone()[0]
-    conn.close()
+    with connect_readonly(M15_DB) as connection:
+        m15_min = connection.execute(
+            "SELECT MIN(timestamp) FROM candles"
+        ).fetchone()[0]
     m15_start = pd.Timestamp(m15_min).date()
     oos = oos[oos["date"] >= m15_start].reset_index(drop=True)
     pairs = oos[["market", "date"]].drop_duplicates()
-    bars_map = load_paths(pairs)
-    oos = oos[oos.apply(lambda r: (r["market"], r["date"]) in bars_map,
-                        axis=1)].reset_index(drop=True)
-    nets, outs, eods, p20 = [], [], [], []
-    for _, r in oos.iterrows():
-        net, oc, eod_net = realize_net(bars_map[(r["market"], r["date"])])
-        nets.append(net); outs.append(oc); eods.append(eod_net)
-        p20.append(1 if (r["up_high_ret"] >= 0.20) else 0)
-    oos["net"] = nets; oos["outcome"] = outs
-    oos["eod_net"] = eods; oos["pump20_hit"] = p20
+    realized = load_realized_paths(pairs)
+    keys = list(zip(oos["market"], oos["date"], strict=True))
+    complete = np.fromiter(
+        (key in realized for key in keys),
+        dtype=bool,
+        count=len(keys),
+    )
+    oos = oos.loc[complete].reset_index(drop=True)
+    realized_rows = [
+        realized[key]
+        for key, keep in zip(keys, complete, strict=True)
+        if keep
+    ]
+    oos[["net", "outcome", "eod_net"]] = pd.DataFrame(
+        realized_rows,
+        index=oos.index,
+    )
+    oos["pump20_hit"] = (oos["up_high_ret"] >= 0.20).astype(int)
     oos = oos.dropna(subset=["net"]).reset_index(drop=True)
     all_dates = oos["date"].nunique()
     log.info("OOS w/ 15m net: rows=%d dates=%d (outcome %s)",
@@ -295,7 +312,8 @@ def main():
     ordered = _r1_order(oos)
     r1_picks = topk_r1(ordered, TOP_K)
     rows = []
-    m = net_metrics(r1_picks); m.update(degeneracy_stats(r1_picks, all_dates))
+    m = net_metrics(r1_picks)
+    m.update(degeneracy_stats(r1_picks, all_dates))
     m.update(daily_downside(r1_picks))
     m.update(policy="R1_baseline", dump_label="-", cutoff_q="-", K=TOP_K,
              frac_substituted=0.0, frac_kept_dumpprone=0.0)
@@ -311,7 +329,8 @@ def main():
     for dname in DUMP_LABELS:
         dcol = f"p_lab_{dname}"
         if dcol not in ordered.columns:
-            log.warning("missing %s — skip", dcol); continue
+            log.warning("missing %s — skip", dcol)
+            continue
         for q in CUTOFF_Q_GRID:
             picks = a1_reselect(ordered, dcol, q, TOP_K)
             m = net_metrics(picks)

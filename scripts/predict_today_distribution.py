@@ -24,16 +24,16 @@ Paper ledger schema (사용자 정의):
 
 사용:
     python scripts/predict_today_distribution.py                  # Stage 1 dry-run
-    python scripts/predict_today_distribution.py --send-telegram  # Stage 2
     python scripts/predict_today_distribution.py --asof 2025-11-06
+
+실발송은 이 legacy/manual runner에서 금지한다. canonical sender:
+    python scripts/recommend_send.py --slot open
 """
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -42,10 +42,13 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
+from ledger.csv_store import atomic_write_csv, atomic_write_json, ledger_lock
 from ledger.shadow import append_shadow_ledger
 from notifier.format import format_distribution_beta
 from ops.decision_policy import active_only, apply_distribution_policy, decision_counts
 from ops.decision_policy import POLICY_ID, POLICY_SUMMARY, POLICY_VERSION
+from ops.live_send_gate import reject_legacy_live_send
 from ops.recommendation_quality import (
     DEFAULT_META_MODEL_DIR,
     META_POLICY_ID,
@@ -91,7 +94,7 @@ PAPER_LEDGER_COLS = [
 
 
 def build_panel_for_asof(upbit_db: str, binance_db: str, asof: pd.Timestamp) -> pd.DataFrame:
-    krw = list_markets(upbit_db)
+    krw = signal_eligible_markets(list_markets(upbit_db))
     candles = {m: load_candles(upbit_db, m, until=asof) for m in krw}
     if Path(binance_db).exists():
         for m in list_markets(binance_db):
@@ -201,25 +204,31 @@ def append_to_paper_ledger(alerts: pd.DataFrame, asof: pd.Timestamp,
 
     new_df = pd.DataFrame(rows)[PAPER_LEDGER_COLS]
     p = Path(ledger_path)
-
-    if p.exists():
-        existing = pd.read_csv(p)
-        if "date" in existing.columns and asof.strftime("%Y-%m-%d") in set(existing["date"].astype(str)):
-            # A paper-ledger date is one decision snapshot. Re-running the
-            # script later the same day must not inflate that day's top-K.
+    with ledger_lock(p):
+        if p.exists():
+            existing = pd.read_csv(p)
+            if (
+                "date" in existing.columns
+                and asof.strftime("%Y-%m-%d")
+                in set(existing["date"].astype(str))
+            ):
+                # A paper-ledger date is one decision snapshot. Re-running the
+                # script later the same day must not inflate that day's top-K.
+                return 0
+            # 중복 방지: 같은 (date, coin) 은 덮어쓰지 X (entered 상태 유지)
+            exist_keys = set(zip(existing["date"], existing["coin"]))
+            mask_new = ~new_df.apply(
+                lambda r: (r["date"], r["coin"]) in exist_keys,
+                axis=1,
+            )
+            to_append = new_df[mask_new]
+            if len(to_append) > 0:
+                combined = pd.concat([existing, to_append], ignore_index=True)
+                atomic_write_csv(combined, p)
+                return len(to_append)
             return 0
-        # 중복 방지: 같은 (date, coin) 은 덮어쓰지 X (entered 상태 유지)
-        exist_keys = set(zip(existing["date"], existing["coin"]))
-        mask_new = ~new_df.apply(lambda r: (r["date"], r["coin"]) in exist_keys, axis=1)
-        to_append = new_df[mask_new]
-        if len(to_append) > 0:
-            combined = pd.concat([existing, to_append], ignore_index=True)
-            combined.to_csv(p, index=False)
-            return len(to_append)
-        return 0
-    else:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        new_df.to_csv(p, index=False)
+
+        atomic_write_csv(new_df, p)
         return len(new_df)
 
 
@@ -245,7 +254,11 @@ def main():
     parser.add_argument("--asof", type=str, help="기준 시점 YYYY-MM-DD (default=now)")
     parser.add_argument("--top-k", type=int, default=10)
     parser.add_argument("--universe", default="top100", choices=["top50", "top100", "all"])
-    parser.add_argument("--send-telegram", action="store_true")
+    parser.add_argument(
+        "--send-telegram",
+        action="store_true",
+        help="disabled; use recommend_send.py --slot open",
+    )
     parser.add_argument("--send-silence-telegram", action="store_true",
                         help="Send a Telegram silence/empty message when no ACTIVE recommendation exists")
     parser.add_argument("--disable-meta-filter", action="store_true",
@@ -257,11 +270,21 @@ def main():
     parser.add_argument("--shadow-ledger", default=SHADOW_LEDGER_PATH)
     parser.add_argument("--meta-model-dir", default=DEFAULT_META_MODEL_DIR)
     args = parser.parse_args()
+    reject_legacy_live_send(
+        parser,
+        requested=args.send_telegram,
+        slot="open",
+        scoring_command="python scripts/predict_today_distribution.py",
+    )
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     log = logging.getLogger("predict_dist")
 
-    asof = pd.Timestamp(args.asof) if args.asof else pd.Timestamp.now()
+    asof = (
+        pd.Timestamp(args.asof)
+        if args.asof
+        else pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None)
+    )
     date_str = asof.strftime("%Y%m%d")
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -295,7 +318,10 @@ def main():
     calibrator = BucketCalibrator.load(args.out_dir)
     decisions = apply_distribution_policy(candidates, btc_regime=btc_regime, calibrator=calibrator)
     history = load_channel_history(args.paper_ledger, args.shadow_ledger, "distribution")
-    trained_meta = load_trained_meta_model(args.meta_model_dir)
+    trained_meta = load_trained_meta_model(
+        args.meta_model_dir,
+        enabled=not args.disable_meta_filter,
+    )
     decisions = apply_recommendation_quality(
         decisions,
         history,
@@ -406,8 +432,7 @@ def main():
         "dry_run": dry_run,
     }
     log_path = out_dir / f"distribution_log_{date_str}.json"
-    with open(log_path, "w") as f:
-        json.dump(log_payload, f, indent=2, ensure_ascii=False, default=str)
+    atomic_write_json(log_payload, log_path)
     log.info(f"saved {log_path}")
 
     # 6) Append to paper ledger

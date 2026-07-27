@@ -35,7 +35,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -46,6 +45,8 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from data.database import connect_readonly  # noqa: E402
+from ledger.path_quality import assess_15m_windows  # noqa: E402
 # R1 과 동일한 leak-free head 파이프 재사용 (recommend.py 가 import 하는 바로 그 빌더).
 from scripts.downside_head_riskreward_v1 import (  # noqa: E402
     build_panel,
@@ -57,7 +58,10 @@ from scripts.downside_head_riskreward_v1 import (  # noqa: E402
     DN_THRESH,
 )
 # 라이브 ledger 와 동일한 15m SL/TP/EOD 경로청산 (recommend.py 청산경로).
-from scripts.recommender_downside_exit_v1 import simulate_path  # noqa: E402
+from scripts.recommender_downside_exit_v1 import (  # noqa: E402
+    load_paths as load_execution_paths,
+    simulate_path,
+)
 
 D1_DB = str(_ROOT / "data" / "upbit_d1.db")
 M15_DB = str(_ROOT / "data" / "upbit_15m.db")
@@ -80,6 +84,7 @@ TOP_K = 3                    # 매일 top-3 (recommend.py TOP_K)
 UNIVERSE_TOP_N = 100
 N_FOLDS = 6
 EMBARGO = 5
+PATH_DATE_BATCH_SIZE = 20
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s",
@@ -88,24 +93,11 @@ log = logging.getLogger("r2_challenger")
 
 
 # ============================================================================
-# 1. 15m 경로 로딩 + 진입일 D 경로청산 (라이브 ledger 와 동일)
+# 1. 15m 경로 로딩 + 진입일 D 09:15 실행가능 경로청산
 # ============================================================================
 def load_paths(pairs: pd.DataFrame) -> dict:
-    """(market, date) → [09:00 D, 09:00 D+1) 의 15m 봉 (open,high,low,close) 리스트."""
-    conn = sqlite3.connect(M15_DB)
-    paths = {}
-    for _, r in pairs.iterrows():
-        m, dt = r["market"], pd.Timestamp(r["date"])
-        start = dt.strftime("%Y-%m-%d 09:00:00")
-        end = (dt + pd.Timedelta(days=1)).strftime("%Y-%m-%d 09:00:00")
-        rows = conn.execute(
-            "SELECT open,high,low,close FROM candles WHERE market=? AND "
-            "timestamp>=? AND timestamp<? ORDER BY timestamp", (m, start, end)
-        ).fetchall()
-        if rows:
-            paths[(m, dt.date())] = rows
-    conn.close()
-    return paths
+    """(market, date) → complete [09:15 D, 09:15 D+1) execution path."""
+    return load_execution_paths(pairs, db_path=M15_DB)
 
 
 def realize_net(bars: list) -> tuple[float, str, float]:
@@ -124,6 +116,34 @@ def realize_net(bars: list) -> tuple[float, str, float]:
         return np.nan, "nodata", np.nan
     eod_net = (eod_gross - ROUND_TRIP_COST) if np.isfinite(eod_gross) else np.nan
     return gross - ROUND_TRIP_COST, outcome, eod_net
+
+
+def load_realized_paths(
+    pairs: pd.DataFrame,
+    *,
+    db_path: str | Path = M15_DB,
+    date_batch_size: int = PATH_DATE_BATCH_SIZE,
+) -> dict:
+    """Load paths in bounded date batches and retain only realized outcomes."""
+    if date_batch_size <= 0:
+        raise ValueError("date_batch_size must be positive")
+    dates = np.sort(pairs["date"].unique())
+    realized = {}
+    with connect_readonly(db_path) as connection:
+        for offset in range(0, len(dates), date_batch_size):
+            batch_dates = dates[offset : offset + date_batch_size]
+            assessments = assess_15m_windows(
+                pairs[pairs["date"].isin(batch_dates)],
+                connection=connection,
+            )
+            realized.update(
+                {
+                    key: realize_net(assessment.bars)
+                    for key, assessment in assessments.items()
+                    if assessment.path_complete
+                }
+            )
+    return realized
 
 
 # ============================================================================
@@ -214,37 +234,47 @@ def main():
     log.info("=== walk-forward heads (R1 과 동일 빌더, top100 universe) ===")
     oos = walk_forward_heads(panel, feats, label_cols, N_FOLDS, EMBARGO)
     if oos.empty:
-        log.error("no OOS folds — abort"); sys.exit(1)
+        log.error("no OOS folds — abort")
+        sys.exit(1)
     log.info("OOS rows=%d dates %s..%s folds=%s",
              len(oos), oos["date"].min(), oos["date"].max(),
              sorted(oos["fold"].unique()))
 
-    up = f"p_{UP_ANCHOR}"; dn = f"p_{DN_ANCHOR}"
+    up = f"p_{UP_ANCHOR}"
+    dn = f"p_{DN_ANCHOR}"
     oos = oos.dropna(subset=[up, dn]).copy()
 
     # --- 3) 15m 경로 커버리지 (라이브 ledger 손익경로) ---
-    conn = sqlite3.connect(M15_DB)
-    m15_min = conn.execute("SELECT MIN(timestamp) FROM candles").fetchone()[0]
-    conn.close()
+    with connect_readonly(M15_DB) as connection:
+        m15_min = connection.execute(
+            "SELECT MIN(timestamp) FROM candles"
+        ).fetchone()[0]
     m15_start = pd.Timestamp(m15_min).date()
     oos = oos[oos["date"] >= m15_start].reset_index(drop=True)
     log.info("OOS in 15m window (>= %s): rows=%d dates=%d",
              m15_start, len(oos), oos["date"].nunique())
 
-    # 모든 후보의 15m 경로 1회 로드 후 net/outcome 부착 (정렬키와 무관 → 픽마다 1회).
+    # 모든 후보 경로를 날짜 batch로 읽고 즉시 결과만 보존한다. 정렬키와 무관하므로
+    # 각 후보의 net/outcome은 한 번만 계산하되 8만×96 봉을 메모리에 쌓지 않는다.
     pairs = oos[["market", "date"]].drop_duplicates()
-    bars_map = load_paths(pairs)
-    oos = oos[oos.apply(lambda r: (r["market"], r["date"]) in bars_map,
-                        axis=1)].reset_index(drop=True)
-    nets, outs, eods, p20 = [], [], [], []
-    for _, r in oos.iterrows():
-        net, oc, eod_net = realize_net(bars_map[(r["market"], r["date"])])
-        nets.append(net); outs.append(oc); eods.append(eod_net)
-        p20.append(1 if (r["up_high_ret"] >= 0.20) else 0)
-    oos["net"] = nets
-    oos["outcome"] = outs
-    oos["eod_net"] = eods
-    oos["pump20_hit"] = p20
+    realized = load_realized_paths(pairs)
+    keys = list(zip(oos["market"], oos["date"], strict=True))
+    complete = np.fromiter(
+        (key in realized for key in keys),
+        dtype=bool,
+        count=len(keys),
+    )
+    oos = oos.loc[complete].reset_index(drop=True)
+    realized_rows = [
+        realized[key]
+        for key, keep in zip(keys, complete, strict=True)
+        if keep
+    ]
+    oos[["net", "outcome", "eod_net"]] = pd.DataFrame(
+        realized_rows,
+        index=oos.index,
+    )
+    oos["pump20_hit"] = (oos["up_high_ret"] >= 0.20).astype(int)
     oos = oos.dropna(subset=["net"]).reset_index(drop=True)
     log.info("OOS with 15m net path: rows=%d dates=%d (outcome dist: %s)",
              len(oos), oos["date"].nunique(), oos["outcome"].value_counts().to_dict())
@@ -259,8 +289,10 @@ def main():
     log.info("SELECTION: 정렬키 %d개 비교 (R1 + R2 λ%s), 동일 OOS·유니버스·청산경로",
              n_combos, LAMBDA_GRID)
     rows = []
-    rank_keys = [("R1_ratio", "R1", "-")] + \
-                [(f"R2_penalized", f"R2_lam{lam}", f"lam={lam}") for lam in LAMBDA_GRID]
+    rank_keys = [("R1_ratio", "R1", "-")] + [
+        ("R2_penalized", f"R2_lam{lam}", f"lam={lam}")
+        for lam in LAMBDA_GRID
+    ]
     for policy, col, param in rank_keys:
         picks = topk_picks(oos, col, TOP_K)
         m = net_metrics(picks)

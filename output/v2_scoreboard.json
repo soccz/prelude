@@ -1,0 +1,77 @@
+{
+  "asof": "2026-07-27",
+  "ci95": null,
+  "closed_n": 0,
+  "companion_metric_note": "day_equal fields are diagnostic only; do not replace the frozen 2026-09-01 per-trade decision metric retroactively",
+  "cost_already_deducted": true,
+  "criteria": {
+    "2레짐_or_t>=2": false,
+    "CI_0_제외": false,
+    "mean>0": false,
+    "n>=200": false
+  },
+  "criteria_met": 0,
+  "day_cluster_ci95": null,
+  "day_equal_mean_net_pct": null,
+  "days_to_judgment": 36,
+  "early_kill_breached": false,
+  "evidence_scope": "verified_post_contract_closed_positions_only",
+  "legacy_diagnostic": {
+    "ci95": [
+      -0.314,
+      0.7315
+    ],
+    "closed_n": 205,
+    "contract_cutoff_exclusive": "2026-07-27",
+    "day_cluster_ci95": [
+      -0.4464,
+      0.6105
+    ],
+    "day_equal_mean_net_pct": 0.082,
+    "mean_net_pct": 0.2087,
+    "operational": false,
+    "per_day_t": 0.304,
+    "regimes": [
+      "bear_quiet",
+      "bear_volatile"
+    ],
+    "scope": "pre_contract_legacy_rows_only",
+    "terminal_eligible": false,
+    "trade_days": 45
+  },
+  "mean_net_pct": null,
+  "per_day_t": null,
+  "post_judgment_closed_excluded": 0,
+  "preregistered_metric": "per_trade_mean_net_pct",
+  "provenance": {
+    "delivery_failed_dates": [],
+    "delivery_success_dates": [],
+    "healthy_candidate_dates": [],
+    "healthy_dates": [],
+    "healthy_zero_pick_dates": [],
+    "legacy_baseline_verified": true,
+    "legacy_scorecard_rows": 205,
+    "legacy_scorecard_sha256": "ac01dddebbd1e70fe9d6f034292470982ecd237bd684422946b938fc82794451",
+    "verified_closed_positions": 0
+  },
+  "regimes": [],
+  "round_trip_cost_pp": 0.15,
+  "scorecard_status": "insufficient_verified_evidence",
+  "status": "insufficient_verified_evidence",
+  "terminal_evidence_cutoff_exclusive": "2026-09-01",
+  "terminal_evidence_eligible": false,
+  "terminal_metric_values": {
+    "ci95": null,
+    "mean_net_pct": null,
+    "per_day_t": null
+  },
+  "terminal_reason": "no_verified_post_contract_closed_positions",
+  "terminal_state": {
+    "effective": false,
+    "judgment_day": "2026-09-01",
+    "status": "pending",
+    "verdict": null
+  },
+  "terminal_verdict": null,
+  "trade_days": 0
+}

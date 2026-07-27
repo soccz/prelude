@@ -44,11 +44,14 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import is_excluded_signal_market
 from signals.features import compute_btc_features
 # 재사용: 동일한 leak-free feature 빌더
 from scripts.univariate_precursor_lift_v1 import (
     build_market_features,
     add_cross_sectional,
+    completed_upbit_d1_mask,
+    expanding_purged_date_folds,
 )
 
 DB_PATH = "data/upbit_d1.db"
@@ -89,7 +92,11 @@ LABELS = ["lab_pump20", "lab_pump15"]
 # 1. Panel build (D-1 features) + BTC regime (D-1) join
 # ============================================================================
 def build_panel(limit_markets: int | None) -> pd.DataFrame:
-    markets = list_markets(DB_PATH)
+    markets = [
+        market
+        for market in list_markets(DB_PATH)
+        if not is_excluded_signal_market(str(market))
+    ]
     if limit_markets:
         markets = markets[:limit_markets]
     log.info("loading %d markets", len(markets))
@@ -152,17 +159,11 @@ def regime_walk_forward(panel: pd.DataFrame, feat: str, label: str,
         return _empty_wf()
 
     all_dates = np.sort(panel["date"].unique())
-    fold_size = len(all_dates) // (n_folds + 1)
     oos_precs, oos_ns, base_rates, sel_dirs = [], [], [], []
 
-    for k in range(1, n_folds + 1):
-        train_end_idx = fold_size * k
-        test_start_idx = train_end_idx + embargo_days
-        test_end_idx = min(fold_size * (k + 1) + train_end_idx, len(all_dates))
-        if test_start_idx >= len(all_dates):
-            break
-        train_dates = set(all_dates[:train_end_idx])
-        test_dates = set(all_dates[test_start_idx:test_end_idx])
+    for train_dates, test_dates in expanding_purged_date_folds(
+        all_dates, n_folds, embargo_days
+    ):
         tr = d[d["date"].isin(train_dates)]
         te = d[d["date"].isin(test_dates)]
         if len(tr) < 200 or len(te) < 100:
@@ -266,16 +267,10 @@ def regime_net_pnl(panel: pd.DataFrame, feat: str, label: str, regime: str,
                 "win_rate": np.nan, "tp_rate": np.nan, "sl_rate": np.nan}
 
     all_dates = np.sort(panel["date"].unique())
-    fold_size = len(all_dates) // (n_folds + 1)
     sel_frames = []  # OOS selected rows across folds
-    for k in range(1, n_folds + 1):
-        train_end_idx = fold_size * k
-        test_start_idx = train_end_idx + embargo_days
-        test_end_idx = min(fold_size * (k + 1) + train_end_idx, len(all_dates))
-        if test_start_idx >= len(all_dates):
-            break
-        train_dates = set(all_dates[:train_end_idx])
-        test_dates = set(all_dates[test_start_idx:test_end_idx])
+    for train_dates, test_dates in expanding_purged_date_folds(
+        all_dates, n_folds, embargo_days
+    ):
         tr = d[d["date"].isin(train_dates)]
         te = d[d["date"].isin(test_dates)]
         if len(tr) < 200 or len(te) < 100:
@@ -316,20 +311,15 @@ def discover_regime_setups(panel: pd.DataFrame, regime: str, label: str,
         return []
 
     all_dates = np.sort(panel["date"].unique())
-    fold_size = len(all_dates) // (n_folds + 1)
+    folds = expanding_purged_date_folds(all_dates, n_folds, embargo_days)
     # 마지막 fold 사용 (가장 큰 train, OOS test) — discovery는 1 fold OOS로 충분
-    k = n_folds
-    train_end_idx = fold_size * k
-    test_start_idx = train_end_idx + embargo_days
-    test_end_idx = min(len(all_dates), fold_size * (k + 1) + train_end_idx)
-    if test_start_idx >= len(all_dates):
+    if not folds:
         # fold가 부족하면 70/30 시간분할
         cut = int(len(all_dates) * 0.7)
         train_dates = set(all_dates[:cut])
         test_dates = set(all_dates[cut + embargo_days:])
     else:
-        train_dates = set(all_dates[:train_end_idx])
-        test_dates = set(all_dates[test_start_idx:test_end_idx])
+        train_dates, test_dates = folds[-1]
     tr = d[d["date"].isin(train_dates)]
     te = d[d["date"].isin(test_dates)]
     if len(tr) < 400 or len(te) < 150:
@@ -429,6 +419,9 @@ def main():
         raw.append(df)
     rawdf = pd.concat(raw, ignore_index=True)
     rawdf["timestamp"] = pd.to_datetime(rawdf["timestamp"])
+    rawdf = rawdf[
+        completed_upbit_d1_mask(rawdf["timestamp"])
+    ].copy()
     rawdf = rawdf.rename(columns={"open": "open_D", "high": "high_D",
                                   "low": "low_D", "close": "close_D"})
     panel = panel.merge(rawdf, on=["market", "timestamp"], how="left")

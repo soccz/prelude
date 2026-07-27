@@ -26,10 +26,11 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from ledger.config import ROUND_TRIP_COST_PCT
 from ledger.tracker import simulate_d1_simple
 from signals.features import assemble_training_panel
-from signals.labels import cumulative_probs, expected_max_return, DEFAULT_BIN_CENTERS
+from signals.labels import DEFAULT_BIN_CENTERS, cumulative_probs, expected_max_return
 from signals.models.xgb_phase1 import XGBPhase1, prepare_features
 from signals.validate import PurgedWalkForward
 
@@ -112,7 +113,7 @@ def run_backtest(
 
     # 1. 데이터 + panel
     logger.info("loading...")
-    krw = list_markets(upbit_db)[: limit]
+    krw = signal_eligible_markets(list_markets(upbit_db))[:limit]
     candles = {m: load_candles(upbit_db, m) for m in krw}
     if Path(binance_db).exists():
         bn = list_markets(binance_db)[: limit]

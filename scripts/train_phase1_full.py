@@ -28,6 +28,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from signals.calibration import calibration_report, format_accuracy_summary
 from signals.features import assemble_training_panel
 from signals.labels import DEFAULT_BIN_CENTERS
@@ -61,7 +62,9 @@ def main():
     # 1. 데이터 로드
     # ====================
     logger.info("loading KRW + BINANCE...")
-    krw_markets = list_markets(args.upbit_db)[: args.limit]
+    krw_markets = signal_eligible_markets(
+        list_markets(args.upbit_db)
+    )[: args.limit]
     candles = {m: load_candles(args.upbit_db, m) for m in krw_markets}
     if Path(args.binance_db).exists():
         bn_markets = list_markets(args.binance_db)[: args.limit]

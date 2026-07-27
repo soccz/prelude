@@ -32,7 +32,9 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -40,10 +42,13 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import is_excluded_signal_market
 
 DB_PATH = "data/upbit_d1.db"
 OUT_DIR = Path("output")
 EPS = 1e-12
+KST = ZoneInfo("Asia/Seoul")
+UPBIT_D1_OPEN_HOUR = 9
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
@@ -53,9 +58,82 @@ log = logging.getLogger("univ_lift")
 
 
 # ============================================================================
+# 0. Shared research-time hygiene
+# ============================================================================
+def current_upbit_session_start(
+    asof_kst: datetime | pd.Timestamp | str | None = None,
+) -> pd.Timestamp:
+    """Return the current Upbit D1 session start as a naive KST wall clock.
+
+    Upbit stores D1 timestamps as timezone-naive KST 09:00 boundaries.  The row
+    whose timestamp equals the current session start is still forming and must
+    never be used as a realized target.  ``asof_kst`` exists so audits/tests can
+    reproduce the exact cutoff instead of depending on the host clock.
+    """
+    if asof_kst is None:
+        now = pd.Timestamp.now(tz=KST)
+    else:
+        now = pd.Timestamp(asof_kst)
+        if now.tzinfo is None:
+            now = now.tz_localize(KST)
+        else:
+            now = now.tz_convert(KST)
+    session_start = now.normalize() + pd.Timedelta(hours=UPBIT_D1_OPEN_HOUR)
+    if now < session_start:
+        session_start -= pd.Timedelta(days=1)
+    return session_start.tz_localize(None)
+
+
+def completed_upbit_d1_mask(
+    timestamps: pd.Series,
+    asof_kst: datetime | pd.Timestamp | str | None = None,
+) -> pd.Series:
+    """True only for Upbit D1 rows whose full 24-hour session has closed."""
+    ts = pd.to_datetime(timestamps, errors="coerce")
+    return ts.notna() & (ts < current_upbit_session_start(asof_kst))
+
+
+def expanding_purged_date_folds(
+    dates: np.ndarray,
+    n_folds: int,
+    embargo_days: int,
+) -> list[tuple[set, set]]:
+    """Build disjoint expanding-window test folds with an index-day embargo.
+
+    The previous research scripts accidentally added ``train_end`` twice when
+    calculating ``test_end``.  That made later test windows overlap and counted
+    some OOS dates two or three times.  This single implementation is shared by
+    the legacy research chain so the boundary cannot drift again.
+    """
+    ordered = np.asarray(sorted(pd.unique(dates)))
+    if n_folds <= 0:
+        raise ValueError("n_folds must be positive")
+    if embargo_days < 0:
+        raise ValueError("embargo_days must be non-negative")
+    fold_size = len(ordered) // (n_folds + 1)
+    if fold_size <= embargo_days:
+        return []
+
+    folds: list[tuple[set, set]] = []
+    for k in range(1, n_folds + 1):
+        train_end = fold_size * k
+        test_start = train_end + embargo_days
+        test_end = len(ordered) if k == n_folds else fold_size * (k + 1)
+        if test_start >= test_end:
+            continue
+        folds.append(
+            (set(ordered[:train_end]), set(ordered[test_start:test_end]))
+        )
+    return folds
+
+
+# ============================================================================
 # 1. Panel build — 모든 feature 는 D-1 까지의 값 (leak-free)
 # ============================================================================
-def build_market_features(df: pd.DataFrame) -> pd.DataFrame:
+def build_market_features(
+    df: pd.DataFrame,
+    asof_kst: datetime | pd.Timestamp | str | None = None,
+) -> pd.DataFrame:
     """한 코인의 일봉 → (1) day-D 라벨, (2) D-1 이전 precursor feature.
 
     핵심 leak 규칙:
@@ -66,29 +144,28 @@ def build_market_features(df: pd.DataFrame) -> pd.DataFrame:
     g = df.sort_values("timestamp").reset_index(drop=True).copy()
     if "market" not in g.columns:
         g["market"] = g.attrs.get("_market", "UNKNOWN")
-    o, h, l, c = g["open"], g["high"], g["low"], g["close"]
+    open_, high, low, close = g["open"], g["high"], g["low"], g["close"]
     v = g["volume"]
-    qv = g["quote_volume"].fillna(v * c)  # quote_volume 결측 시 근사
+    qv = g["quote_volume"].fillna(v * close)  # quote_volume 결측 시 근사
 
     # ---- 라벨 (day D, 타겟) ----
-    g["lab_pump20"] = ((h / (o + EPS) - 1.0) >= 0.20).astype(float)
-    g["lab_pump15"] = ((h / (o + EPS) - 1.0) >= 0.15).astype(float)
-    g["lab_pumpc20"] = ((c / (o + EPS) - 1.0) >= 0.20).astype(float)
-    g["intraday_high_ret"] = h / (o + EPS) - 1.0  # 진단용 (라벨 origin)
+    g["lab_pump20"] = ((high / (open_ + EPS) - 1.0) >= 0.20).astype(float)
+    g["lab_pump15"] = ((high / (open_ + EPS) - 1.0) >= 0.15).astype(float)
+    g["lab_pumpc20"] = ((close / (open_ + EPS) - 1.0) >= 0.20).astype(float)
+    g["intraday_high_ret"] = high / (open_ + EPS) - 1.0  # 진단용 (라벨 origin)
 
     # ---- '오늘까지' raw 지표 (아직 shift 안 함) ----
     raw = pd.DataFrame(index=g.index)
-    log_ret = np.log(c / c.shift(1) + EPS)
+    log_ret = np.log(close / close.shift(1) + EPS)
 
     # 모멘텀 / ROC
     for N in (1, 3, 7, 14):
-        raw[f"ret_{N}d"] = c / c.shift(N) - 1.0
-    raw["roc_3d"] = c.pct_change(3)
-    raw["roc_7d"] = c.pct_change(7)
+        raw[f"ret_{N}d"] = close / close.shift(N) - 1.0
+    raw["roc_3d"] = close.pct_change(3)
+    raw["roc_7d"] = close.pct_change(7)
 
     # 연속 상승일 (오늘 포함 streak)
-    up = (c > c.shift(1)).astype(int)
-    streak = up * 0
+    up = (close > close.shift(1)).astype(int)
     s = 0
     up_vals = up.values
     streak_vals = np.zeros(len(up_vals))
@@ -98,16 +175,27 @@ def build_market_features(df: pd.DataFrame) -> pd.DataFrame:
     raw["up_streak"] = streak_vals
 
     # 변동성: ATR%, RV, 볼밴 폭
-    tr = pd.concat([(h - l), (h - c.shift(1)).abs(), (l - c.shift(1)).abs()], axis=1).max(axis=1)
-    raw["atr_pct_14"] = tr.rolling(14, min_periods=7).mean() / (c + EPS)
+    tr = pd.concat(
+        [
+            (high - low),
+            (high - close.shift(1)).abs(),
+            (low - close.shift(1)).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    raw["atr_pct_14"] = tr.rolling(14, min_periods=7).mean() / (close + EPS)
     raw["rv_7d"] = log_ret.rolling(7, min_periods=4).std()
     raw["rv_21d"] = log_ret.rolling(21, min_periods=10).std()
     # range_contraction: 이전 7d 폭 / 최근 7d 폭 (>1 = 조용해짐)
-    rng7 = (h.rolling(7).max() - l.rolling(7).min()) / (c + EPS)
-    rng7_prev = (h.shift(7).rolling(7).max() - l.shift(7).rolling(7).min()) / (c.shift(7) + EPS)
+    rng7 = (
+        high.rolling(7).max() - low.rolling(7).min()
+    ) / (close + EPS)
+    rng7_prev = (
+        high.shift(7).rolling(7).max() - low.shift(7).rolling(7).min()
+    ) / (close.shift(7) + EPS)
     raw["range_contraction_7d"] = rng7_prev / (rng7 + EPS)
-    bb_std = c.rolling(20).std()
-    bb_mid = c.rolling(20).mean()
+    bb_std = close.rolling(20).std()
+    bb_mid = close.rolling(20).mean()
     raw["bb_width"] = (4 * bb_std) / (bb_mid + EPS)
     # 볼밴 squeeze: bb_width 가 최근 60일 분위 하위 (조용)
     raw["bb_width_pctile_60"] = raw["bb_width"].rolling(60, min_periods=30).rank(pct=True)
@@ -125,19 +213,19 @@ def build_market_features(df: pd.DataFrame) -> pd.DataFrame:
     raw["qv_spiked_yday"] = (raw["qv_surge_7d"].shift(1) >= 3.0).astype(float)
 
     # 위치 (최근 N일 고점/저점 대비)
-    hh20 = h.rolling(20).max()
-    ll20 = l.rolling(20).min()
-    raw["pos_in_20d_range"] = (c - ll20) / (hh20 - ll20 + EPS)
-    raw["dist_from_20d_high"] = c / (hh20 + EPS) - 1.0   # <=0, 0 에 가까우면 신고가 근접
-    hh60 = h.rolling(60).max()
-    raw["dist_from_60d_high"] = c / (hh60 + EPS) - 1.0
+    hh20 = high.rolling(20).max()
+    ll20 = low.rolling(20).min()
+    raw["pos_in_20d_range"] = (close - ll20) / (hh20 - ll20 + EPS)
+    raw["dist_from_20d_high"] = close / (hh20 + EPS) - 1.0
+    hh60 = high.rolling(60).max()
+    raw["dist_from_60d_high"] = close / (hh60 + EPS) - 1.0
     raw["near_20d_high"] = (raw["dist_from_20d_high"] >= -0.03).astype(float)
     # 직전 dump 후 반등: 최근 7d 최저 대비 현재 위치 + 7d 전 대비 하락 후
-    raw["drawdown_7d"] = c / (h.rolling(7).max() + EPS) - 1.0
-    raw["bounce_off_7d_low"] = c / (l.rolling(7).min() + EPS) - 1.0
+    raw["drawdown_7d"] = close / (high.rolling(7).max() + EPS) - 1.0
+    raw["bounce_off_7d_low"] = close / (low.rolling(7).min() + EPS) - 1.0
 
     # RSI 14
-    delta = c.diff()
+    delta = close.diff()
     gain = delta.where(delta > 0, 0.0).rolling(14, min_periods=7).mean()
     loss = (-delta.where(delta < 0, 0.0)).rolling(14, min_periods=7).mean()
     raw["rsi_14"] = 100 - 100 / (1 + gain / (loss + EPS))
@@ -150,13 +238,25 @@ def build_market_features(df: pd.DataFrame) -> pd.DataFrame:
         [g[["market", "timestamp", "lab_pump20", "lab_pump15", "lab_pumpc20",
             "intraday_high_ret"]], shifted], axis=1
     )
+    # The current 09:00 KST row is a still-forming candle.  Keep its D-1
+    # features for live/as-of scoring, but never treat its partial high/close as
+    # a realized miss or outcome.
+    complete = completed_upbit_d1_mask(out["timestamp"], asof_kst)
+    target_cols = [
+        "lab_pump20", "lab_pump15", "lab_pumpc20", "intraday_high_ret",
+    ]
+    out.loc[~complete, target_cols] = np.nan
     # day D 의 거래대금(어제 기준 유니버스 필터용): D-1 qv 를 별도 보관
     out["f_universe_qv"] = qv.shift(1)
     return out
 
 
 def build_panel(limit_markets: int | None) -> pd.DataFrame:
-    markets = list_markets(DB_PATH)
+    markets = [
+        market
+        for market in list_markets(DB_PATH)
+        if not is_excluded_signal_market(str(market))
+    ]
     if limit_markets:
         markets = markets[:limit_markets]
     log.info("loading %d markets", len(markets))
@@ -241,19 +341,13 @@ def walk_forward_lift(panel: pd.DataFrame, feat: str, label: str,
                       n_folds: int = 5, embargo_days: int = 5) -> dict:
     """시간순 OOS lift: train 절반에서 top-decile cutoff 정하고 test 에서 precision."""
     dates = np.sort(panel["date"].unique())
-    fold_size = len(dates) // (n_folds + 1)
     oos_precs, oos_ns, base_rates = [], [], []
     d = panel[[feat, label, "date"]].dropna()
     if len(d) < 1000:
         return {"oos_lift": np.nan, "oos_prec": np.nan, "oos_n": 0, "n_folds_used": 0}
-    for k in range(1, n_folds + 1):
-        train_end_idx = fold_size * k
-        test_start_idx = train_end_idx + embargo_days
-        test_end_idx = min(fold_size * (k + 1) + train_end_idx, len(dates))
-        if test_start_idx >= len(dates):
-            break
-        train_dates = set(dates[:train_end_idx])
-        test_dates = set(dates[test_start_idx:test_end_idx])
+    for train_dates, test_dates in expanding_purged_date_folds(
+        dates, n_folds, embargo_days
+    ):
         tr = d[d["date"].isin(train_dates)]
         te = d[d["date"].isin(test_dates)]
         if len(tr) < 300 or len(te) < 200:

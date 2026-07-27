@@ -28,6 +28,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from signals.calibration import calibration_report
 from signals.features import assemble_training_panel
 from signals.models.xgb_phase1 import (
@@ -110,7 +111,7 @@ def run_retrain(
     logger.info(f"=== retrain {tag} ===")
 
     # 1. 데이터 + panel
-    krw_markets = list_markets(upbit_db)
+    krw_markets = signal_eligible_markets(list_markets(upbit_db))
     candles = {m: load_candles(upbit_db, m) for m in krw_markets}
     if Path(binance_db).exists():
         bn = list_markets(binance_db)

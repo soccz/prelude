@@ -38,11 +38,11 @@ from sklearn.utils.class_weight import compute_sample_weight
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from signals.features import assemble_training_panel, compute_btc_features
-from signals.labels_distribution import HEADS, compute_distribution_labels, MAX_BARS
+from signals.labels_distribution import HEADS, MAX_BARS, compute_distribution_labels
 from signals.models.xgb_phase1 import EXCLUDE_COLS
 from signals.validate import PurgedWalkForward
-
 
 LEAK_COLS = {"net_under_tp", "max_return", "label", "label_tail",
              "next_open", "next_high", "next_low", "next_close",
@@ -145,7 +145,7 @@ def main():
 
     # data
     log.info("loading daily + 4h...")
-    krw = list_markets(args.upbit_d1)
+    krw = signal_eligible_markets(list_markets(args.upbit_d1))
     candles_d1 = {m: load_candles(args.upbit_d1, m) for m in krw}
     if Path(args.binance_d1).exists():
         for m in list_markets(args.binance_d1):
@@ -158,7 +158,11 @@ def main():
     panel["date_only"] = panel["timestamp"].dt.date
     panel["quote_volume_d1"] = panel.get("quote_volume", np.nan)
 
-    krw_4h = [m for m in list_markets(args.upbit_4h) if m.startswith("KRW-")]
+    krw_4h = [
+        m
+        for m in signal_eligible_markets(list_markets(args.upbit_4h))
+        if m.startswith("KRW-")
+    ]
     candles_4h = {m: load_candles(args.upbit_4h, m) for m in krw_4h}
     candles_4h = {k: v for k, v in candles_4h.items() if v is not None and len(v) > 0}
     btc_feat = compute_btc_features(btc_d1.copy())

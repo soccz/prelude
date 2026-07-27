@@ -18,9 +18,11 @@
   - Same-day close-out 가능 (09:30 에 09:00 첫 15m bar 사용).
 
 사용:
-    python scripts/predict_preopen_trigger.py                  # default Stage 2 (telegram ON)
-    python scripts/predict_preopen_trigger.py --no-telegram    # dry-run
-    python scripts/predict_preopen_trigger.py --asof 2026-05-06 08:55
+    python scripts/predict_preopen_trigger.py --no-telegram    # record/scoring only
+    python scripts/predict_preopen_trigger.py --no-telegram --asof "2026-05-06 08:55"
+
+실발송은 이 legacy/manual runner에서 금지한다. canonical sender:
+    python scripts/recommend_send.py --slot preopen
 """
 from __future__ import annotations
 
@@ -28,7 +30,6 @@ import argparse
 import json
 import logging
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -39,11 +40,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
+from ledger.csv_store import atomic_write_csv, atomic_write_json, ledger_lock
 from ledger.shadow import append_shadow_ledger
 from notifier.format import format_preopen_beta
 from notifier.telegram import send_telegram
 from ops.decision_policy import PREOPEN_DEMOTED, active_only, apply_preopen_policy, decision_counts
 from ops.decision_policy import POLICY_ID, POLICY_SUMMARY, POLICY_VERSION
+from ops.live_send_gate import reject_legacy_live_send
 from ops.recommendation_quality import (
     DEFAULT_META_MODEL_DIR,
     META_POLICY_ID,
@@ -129,6 +133,41 @@ def should_send_telegram(send_tg: bool, alerts: pd.DataFrame, send_silence: bool
     return send_tg and (len(alerts) > 0 or send_silence)
 
 
+def append_to_paper_ledger(rows: list[dict], ledger_path: str) -> int:
+    """Append pre-open rows with duplicate detection in one locked transaction."""
+    if not rows:
+        return 0
+
+    new_df = pd.DataFrame(rows)[PAPER_LEDGER_COLS]
+    p = Path(ledger_path)
+    with ledger_lock(p):
+        if p.exists():
+            existing = pd.read_csv(p)
+            if (
+                "date" in existing.columns
+                and str(new_df.iloc[0]["date"])
+                in set(existing["date"].astype(str))
+            ):
+                # One pre-open decision day is one immutable candidate
+                # snapshot. A later re-score must not inflate that day's
+                # cohort with newly appearing candidates.
+                return 0
+            keys = set(zip(existing["date"], existing["coin"]))
+            mask = ~new_df.apply(
+                lambda row: (row["date"], row["coin"]) in keys,
+                axis=1,
+            )
+            to_append = new_df[mask]
+            if len(to_append) == 0:
+                return 0
+            combined = pd.concat([existing, to_append], ignore_index=True)
+            atomic_write_csv(combined, p)
+            return len(to_append)
+
+        atomic_write_csv(new_df, p)
+        return len(new_df)
+
+
 def build_panel_for_asof(upbit_d1: str, upbit_15m: str, binance_d1: str,
                           asof: pd.Timestamp) -> tuple:
     """Build daily panel + 15m precursor at 08:55 timing.
@@ -137,7 +176,7 @@ def build_panel_for_asof(upbit_d1: str, upbit_15m: str, binance_d1: str,
     15m: 08:30 snapshot (07:00-08:30 bars, fully closed).
     """
     # Daily — load all up to asof (including in-progress yesterday)
-    krw = list_markets(upbit_d1)
+    krw = signal_eligible_markets(list_markets(upbit_d1))
     candles_d1 = {m: load_candles(upbit_d1, m, until=asof) for m in krw}
     if Path(binance_d1).exists():
         for m in list_markets(binance_d1):
@@ -173,7 +212,11 @@ def build_panel_for_asof(upbit_d1: str, upbit_15m: str, binance_d1: str,
     # Full-history precursor recomputation takes several minutes and makes an
     # 08:55 alert arrive too late. Three days provide enough prior 15m bars for
     # the 24h rolling features used by build_15m_precursor.
-    krw_15m = [m for m in list_markets(upbit_15m) if m.startswith("KRW-")]
+    krw_15m = [
+        market
+        for market in signal_eligible_markets(list_markets(upbit_15m))
+        if market.startswith("KRW-")
+    ]
     since_15m = asof_ts - pd.Timedelta(days=3)
     candles_15m = {m: load_candles(upbit_15m, m, since=since_15m, until=asof) for m in krw_15m}
     candles_15m = {k: v for k, v in candles_15m.items() if v is not None and len(v) > 100}
@@ -197,23 +240,35 @@ def main():
     parser.add_argument("--top-k", type=int, default=10)
     parser.add_argument("--universe", default="top100", choices=["top50", "top100", "all"])
     parser.add_argument("--no-telegram", action="store_true",
-                        help="default: telegram ON. specify to disable.")
+                        help="required: this runner is record/scoring only")
     parser.add_argument("--send-silence-telegram", action="store_true",
                         help="Send a Telegram silence/empty message when no ACTIVE recommendation exists")
     parser.add_argument("--disable-meta-filter", action="store_true",
                         help="Disable historical recommendation-quality demotion")
     parser.add_argument("--allow-late-run", action="store_true",
-                        help="Allow telegram/ledger outside 08:45-08:59 for intentional manual tests.")
+                        help="Allow record-only ledger outside the window; never enables Telegram.")
     parser.add_argument("--out-dir", default="output")
     parser.add_argument("--paper-ledger", default=PAPER_LEDGER_PATH)
     parser.add_argument("--shadow-ledger", default=SHADOW_LEDGER_PATH)
     parser.add_argument("--meta-model-dir", default=DEFAULT_META_MODEL_DIR)
     args = parser.parse_args()
+    reject_legacy_live_send(
+        parser,
+        requested=not args.no_telegram,
+        slot="preopen",
+        scoring_command=(
+            "python scripts/predict_preopen_trigger.py --no-telegram"
+        ),
+    )
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     log = logging.getLogger("preopen")
 
-    asof = pd.Timestamp(args.asof) if args.asof else pd.Timestamp.now()
+    asof = (
+        pd.Timestamp(args.asof)
+        if args.asof
+        else pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None)
+    )
     date_str = asof.strftime("%Y%m%d")
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -293,7 +348,10 @@ def main():
     # Decision policy — preopen 은 live edge 가 약해 기본 WATCH_ONLY 중심.
     decisions = apply_preopen_policy(candidates, btc_regime=btc_regime)
     history = load_channel_history(args.paper_ledger, args.shadow_ledger, "preopen")
-    trained_meta = load_trained_meta_model(args.meta_model_dir)
+    trained_meta = load_trained_meta_model(
+        args.meta_model_dir,
+        enabled=not args.disable_meta_filter,
+    )
     decisions = apply_recommendation_quality(
         decisions,
         history,
@@ -395,8 +453,7 @@ def main():
             for _, r in decisions.iterrows()
         ],
     }
-    with open(log_path, "w") as f:
-        json.dump(log_payload, f, indent=2, ensure_ascii=False, default=str)
+    atomic_write_json(log_payload, log_path)
     log.info(f"saved {log_path}")
 
     # Append to paper_ledger_preopen.csv (date = today, predicted day = today)
@@ -464,22 +521,11 @@ def main():
         n_shadow = append_shadow_ledger(decisions, asof, args.shadow_ledger, "preopen")
         log.info(f"shadow_ledger: {n_shadow} new rows → {args.shadow_ledger}")
         if rows:
-            new_df = pd.DataFrame(rows)[PAPER_LEDGER_COLS]
-            p = Path(args.paper_ledger)
-            if p.exists():
-                existing = pd.read_csv(p)
-                keys = set(zip(existing["date"], existing["coin"]))
-                mask = ~new_df.apply(lambda r: (r["date"], r["coin"]) in keys, axis=1)
-                to_append = new_df[mask]
-                if len(to_append) > 0:
-                    pd.concat([existing, to_append], ignore_index=True).to_csv(p, index=False)
-                    log.info(f"appended {len(to_append)} rows to {p}")
-                else:
-                    log.info(f"paper_ledger: 0 new rows → {p}")
+            n_new = append_to_paper_ledger(rows, args.paper_ledger)
+            if n_new > 0:
+                log.info(f"appended {n_new} rows to {args.paper_ledger}")
             else:
-                p.parent.mkdir(parents=True, exist_ok=True)
-                new_df.to_csv(p, index=False)
-                log.info(f"created {p} with {len(new_df)} rows")
+                log.info(f"paper_ledger: 0 new rows → {args.paper_ledger}")
         else:
             log.info(f"paper_ledger: 0 active rows → {args.paper_ledger}")
     else:

@@ -1,0 +1,5 @@
+model,n,tp5_sl3_net_mean,tp10_nosl_net_mean,tp5_nosl_net_mean,eod_net_mean,tp5_sl2_net_mean,tp10_sl5_net_mean,tp8_sl3_net_mean,tp5_sl3_net_sum,tp10_nosl_net_sum,tp5_nosl_net_sum,eod_net_sum,tp5_sl2_net_sum,tp10_sl5_net_sum,tp8_sl3_net_sum,tp5_sl3_deep_loss_n,tp10_nosl_deep_loss_n,tp5_nosl_deep_loss_n,eod_deep_loss_n,tp5_sl2_deep_loss_n,tp10_sl5_deep_loss_n,tp8_sl3_deep_loss_n
+recommend_r1,30,-1.289,-1.236,-0.432,-1.705,-1.217,-1.576,-1.505,-38.66,-37.09,-12.97,-51.15,-36.5,-47.27,-45.16,0,9,7,9,0,16,0
+recommend_r2,30,-1.334,-1.628,-1.059,-1.891,-1.02,-1.839,-1.361,-40.03,-48.85,-31.76,-56.72,-30.59,-55.17,-40.83,0,5,5,5,0,12,0
+recommend_a1,27,-1.007,-0.803,-1.118,-0.98,-0.977,-0.77,-0.949,-27.19,-21.68,-30.18,-26.47,-26.37,-20.8,-25.64,0,4,4,4,0,10,0
+pump_hunter,105,-1.257,-3.715,-2.429,-4.121,-0.905,-2.041,-1.402,-132.03,-390.12,-255.0,-432.71,-95.0,-214.3,-147.18,0,37,30,38,0,62,0

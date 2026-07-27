@@ -39,6 +39,7 @@ from sklearn.utils.class_weight import compute_sample_weight
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from signals.labels_preopen import PREOPEN_HEADS, compute_preopen_labels
 from signals.precursors import FIFTEEN_M_FEATURES as PRECURSOR_15M_FEATURES
 from signals.precursors import build_15m_precursor
@@ -95,11 +96,15 @@ def main():
 
     print(f"=== Pre-open Trigger v1 — {len(TARGET_HEADS)} heads ===\n")
     print(f"Heads: {TARGET_HEADS}")
-    print(f"Target: 09:00 직후 첫 15m/30m/1h 펌프 hit\n")
+    print("Target: 09:00 직후 첫 15m/30m/1h 펌프 hit\n")
 
     # === 1) 15m candles → precursor + preopen labels ===
     log.info("loading 15m candles...")
-    krw_15m = [m for m in list_markets(args.upbit_15m) if m.startswith("KRW-")]
+    krw_15m = [
+        m
+        for m in signal_eligible_markets(list_markets(args.upbit_15m))
+        if m.startswith("KRW-")
+    ]
     candles_15m = {m: load_candles(args.upbit_15m, m) for m in krw_15m}
     candles_15m = {k: v for k, v in candles_15m.items() if v is not None and len(v) > 100}
     log.info(f"  15m markets: {len(candles_15m)}")

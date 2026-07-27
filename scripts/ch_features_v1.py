@@ -66,6 +66,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from data.market_universe import is_excluded_signal_market  # noqa: E402
 # R1 과 동일한 leak-free head 파이프 (recommend.py 가 쓰는 바로 그 빌더).
 from scripts.downside_head_riskreward_v1 import (  # noqa: E402
     build_panel,
@@ -80,7 +81,10 @@ from scripts.downside_head_riskreward_v1 import (  # noqa: E402
     CAL_BUCKETS,
 )
 # 라이브 ledger 와 동일한 15m SL/TP/EOD 경로청산.
-from scripts.recommender_downside_exit_v1 import simulate_path  # noqa: E402
+from scripts.recommender_downside_exit_v1 import (  # noqa: E402
+    load_paths as load_execution_paths,
+    simulate_path,
+)
 # 새 D-1 맥락 feature 소스 (검증된 leak-free 빌더 — 그대로 재사용, 수정 X).
 import scripts.market_breadth_discovery_v1 as mb  # noqa: E402
 import scripts.liquidity_dynamics_discovery_v1 as liq  # noqa: E402
@@ -129,6 +133,11 @@ def build_breadth_features() -> pd.DataFrame:
     """시장-레벨(날짜당 1행) D-1 브레드스 맥락. 모든 feature 는 빌더가 .shift(1) →
     row(date=D) 값은 D-1 까지. date 로 coin panel 에 join (추가 shift 불필요)."""
     df = mb.load_candles()
+    df = df[
+        ~df["market"]
+        .astype(str)
+        .map(is_excluded_signal_market)
+    ].copy()
     g = mb.build_coin_pump_flags(df)
     panel = mb.build_daily_panel(g)
     btc = mb.build_btc_features(df)
@@ -146,6 +155,11 @@ def build_liq_features() -> pd.DataFrame:
     """코인-레벨 D-1 유동성 맥락. liq.build_features 의 feature 는 '그 행 t 까지'이므로
     (market,D) 의 D-1 맥락 = 그 코인의 **D-1 행** feature → market 별 .shift(1)."""
     df = liq.load_all(Path(D1_DB))
+    df = df[
+        ~df["market"]
+        .astype(str)
+        .map(is_excluded_signal_market)
+    ].copy()
     feat = liq.build_features(df)   # row t = t 까지 feature
     feat = feat.sort_values(["market", "timestamp"]).reset_index(drop=True)
     present = [c for c in LIQ_FEATS if c in feat.columns]
@@ -253,19 +267,7 @@ def feature_importance(panel, feats, label_col, n_folds, embargo) -> dict:
 # 3. 15m 경로 net (라이브 ledger 손익경로) — r2_challenger_compare_v1 와 동일
 # ============================================================================
 def load_paths(pairs: pd.DataFrame) -> dict:
-    conn = sqlite3.connect(M15_DB)
-    paths = {}
-    for _, r in pairs.iterrows():
-        m, dt = r["market"], pd.Timestamp(r["date"])
-        s = dt.strftime("%Y-%m-%d 09:00:00")
-        e = (dt + pd.Timedelta(days=1)).strftime("%Y-%m-%d 09:00:00")
-        rows = conn.execute(
-            "SELECT open,high,low,close FROM candles WHERE market=? AND "
-            "timestamp>=? AND timestamp<? ORDER BY timestamp", (m, s, e)).fetchall()
-        if rows:
-            paths[(m, dt.date())] = rows
-    conn.close()
-    return paths
+    return load_execution_paths(pairs, db_path=M15_DB)
 
 
 def realize_net(bars: list):
@@ -286,7 +288,7 @@ def net_metrics(trades: pd.DataFrame) -> dict:
     daily = d.groupby("date")["net"].mean().sort_index()
     eq = (1 + daily).cumprod(); peak = eq.cummax()
     mdd = float(((eq - peak) / peak).min())
-    mu = float(net.mean()); sd = float(daily.std())
+    trade_mu = float(net.mean()); daily_mu = float(daily.mean()); sd = float(daily.std())
     dstd = float(daily[daily < 0].std()) if (daily < 0).any() else np.nan
     k5 = max(1, int(np.ceil(0.05 * n)))
     cvar95 = float(np.sort(net)[:k5].mean())
@@ -296,7 +298,7 @@ def net_metrics(trades: pd.DataFrame) -> dict:
         n=int(n), n_days=int(d["date"].nunique()),
         pct_sl=float((oc == "sl").mean()),
         deep_loss_freq_noSL=float((eod <= DEEP_LOSS).mean()) if len(eod) else np.nan,
-        net_mean=mu,
+        net_mean=trade_mu,
         hit=float((net > 0).mean()),
         precision_pump20=float(d["pump20_hit"].dropna().mean())
         if d["pump20_hit"].notna().any() else np.nan,
@@ -304,8 +306,8 @@ def net_metrics(trades: pd.DataFrame) -> dict:
         net_median=float(np.median(net)),
         cvar95=cvar95, worst=float(net.min()), mdd=mdd,
         cum=float(eq.iloc[-1] - 1.0),
-        sharpe=float(mu / sd * np.sqrt(365)) if sd and sd > 0 else np.nan,
-        sortino=float(mu / dstd * np.sqrt(365)) if dstd and dstd > 0 else np.nan,
+        sharpe=float(daily_mu / sd * np.sqrt(365)) if sd and sd > 0 else np.nan,
+        sortino=float(daily_mu / dstd * np.sqrt(365)) if dstd and dstd > 0 else np.nan,
         pct_tp=float((oc == "tp").mean()), pct_eod=float((oc == "eod").mean()),
     )
 

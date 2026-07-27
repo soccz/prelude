@@ -1,0 +1,34 @@
+{
+  "oos_rows": 38682,
+  "oos_dates": 765,
+  "oos_window": [
+    "2024-04-03",
+    "2026-06-01"
+  ],
+  "universe": "static_top100_D-1",
+  "n_folds": 6,
+  "embargo": 5,
+  "n_ranking_keys": 9,
+  "top_k": 3,
+  "sus_thresh": {
+    "sus3": 0.03,
+    "sus5": 0.05,
+    "sus_net": 0.006500000000000001
+  },
+  "fwd_thresh": {
+    "fwd1": 0.03
+  },
+  "exit_path": "15m SL-3%/TP+5%/EOD net 0.15%",
+  "base_rates": {
+    "lab_up_10": 0.07546132576285927,
+    "lab_dn_05": 0.2533866110915103,
+    "lab_sus3": 0.1778022104252648,
+    "lab_sus5": 0.09274104219828187,
+    "lab_sus_net": 0.3909761480837238,
+    "lab_fwd1": 0.17558323821411267
+  },
+  "r1_baseline_net_mean": -0.002843470284278759,
+  "best_c1_label": "C1_sus_net",
+  "best_c1_net_mean": -0.0017290737485504853,
+  "leak_self_alarm": false
+}

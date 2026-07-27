@@ -44,8 +44,10 @@ from sklearn.tree import DecisionTreeClassifier
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import is_excluded_signal_market
 from signals.features import assemble_training_panel
 from signals.validate import PurgedWalkForward
+from scripts.univariate_precursor_lift_v1 import completed_upbit_d1_mask
 
 
 # 학습 제외 컬럼 (leak + 메타). next_* 는 별도 prefix 필터.
@@ -61,6 +63,33 @@ META_COLS = {
     # 타겟/보조 라벨 (절대 피처로 X)
     "pump20", "pump15", "pump_max_return", "eod_ret_D",
 }
+
+
+def eligible_upbit_markets(db_path: str) -> list[str]:
+    """Upbit KRW research targets under the canonical live universe."""
+    return [
+        market
+        for market in list_markets(db_path)
+        if str(market).startswith("KRW-")
+        and not is_excluded_signal_market(str(market))
+    ]
+
+
+def validate_upbit_target_panel(panel: pd.DataFrame) -> None:
+    """Fail closed if a target panel escapes the canonical Upbit KRW universe."""
+    invalid_targets = sorted(
+        {
+            str(market)
+            for market in panel["market"].dropna().unique()
+            if not str(market).startswith("KRW-")
+            or is_excluded_signal_market(str(market))
+        }
+    )
+    if invalid_targets:
+        raise RuntimeError(
+            "pump-rule target panel escaped canonical Upbit universe: "
+            f"{invalid_targets}"
+        )
 
 
 def feature_cols_from(df: pd.DataFrame) -> list[str]:
@@ -170,7 +199,14 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--upbit-d1", default="data/upbit_d1.db")
     p.add_argument("--upbit-4h", default="data/upbit_4h.db")
-    p.add_argument("--binance-d1", default="data/binance_d1.db")
+    p.add_argument(
+        "--binance-d1",
+        default="data/binance_d1.db",
+        help=(
+            "legacy compatibility only; Binance rows are not valid Upbit "
+            "targets and are not loaded"
+        ),
+    )
     p.add_argument("--target", default="pump20", choices=["pump20", "pump15"])
     p.add_argument("--max-depth", type=int, default=3)
     p.add_argument("--min-leaf", type=int, default=300)
@@ -190,14 +226,12 @@ def main():
 
     # ---- load daily panel ----
     log.info("loading daily panel + features...")
-    krw = list_markets(args.upbit_d1)
+    krw = eligible_upbit_markets(args.upbit_d1)
     candles_d1 = {m: load_candles(args.upbit_d1, m) for m in krw}
-    if Path(args.binance_d1).exists():
-        for m in list_markets(args.binance_d1):
-            candles_d1[m] = load_candles(args.binance_d1, m)
     candles_d1 = {k: v for k, v in candles_d1.items() if v is not None and len(v) > 30}
     btc_d1 = load_candles(args.upbit_d1, "KRW-BTC")
     panel = assemble_training_panel(candles_d1, btc_d1, normalize=True)
+    validate_upbit_target_panel(panel)
     panel["timestamp"] = pd.to_datetime(panel["timestamp"])
     panel = panel.sort_values(["market", "timestamp"]).reset_index(drop=True)
     panel["date_only"] = panel["timestamp"].dt.date
@@ -206,7 +240,7 @@ def main():
     # ---- 4h features (optional) ----
     if args.use_4h and Path(args.upbit_4h).exists():
         log.info("building 4h range_contraction features...")
-        krw_4h = [m for m in list_markets(args.upbit_4h) if m.startswith("KRW-")]
+        krw_4h = eligible_upbit_markets(args.upbit_4h)
         candles_4h = {m: load_candles(args.upbit_4h, m) for m in krw_4h}
         f4h = build_4h_features(candles_4h)
         if len(f4h):
@@ -233,6 +267,9 @@ def main():
             "pump_max_return": mr,
             "eod_ret_D": eod,
         })
+        dd = dd.loc[
+            completed_upbit_d1_mask(d["timestamp"]).to_numpy()
+        ].copy()
         lab_rows.append(dd)
     label_df = pd.concat(lab_rows, ignore_index=True)
     label_df["pump20"] = (label_df["pump_max_return"] >= 0.20).astype(int)

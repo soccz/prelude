@@ -32,14 +32,17 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from ledger.config import ROUND_TRIP_COST_PCT
 from ledger.tracker import simulate_d1_simple
-from signals.features import assemble_training_panel
-from signals.validate import PurgedWalkForward
 from scripts.pattern_sweep_v1 import (
-    filter_quiet_contraction, filter_reversal_after_drop, filter_full_universe,
+    filter_full_universe,
+    filter_quiet_contraction,
+    filter_reversal_after_drop,
     summarize,
 )
+from signals.features import assemble_training_panel
+from signals.validate import PurgedWalkForward
 
 
 # ============================================================================
@@ -142,7 +145,7 @@ def main():
     print(f"=== Execution Sweep v1 (top-K={args.top_k}, cost왕복 {ROUND_TRIP_COST_PCT*100:.2f}%) ===\n")
 
     log.info("loading...")
-    krw = list_markets(args.upbit_db)
+    krw = signal_eligible_markets(list_markets(args.upbit_db))
     candles = {m: load_candles(args.upbit_db, m) for m in krw}
     if Path(args.binance_db).exists():
         for m in list_markets(args.binance_db):

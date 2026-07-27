@@ -1,0 +1,166 @@
+{
+  "recent": [
+    {
+      "date": "2026-07-12",
+      "n_rec": 3,
+      "n_hit": 1,
+      "items": [
+        "MMT(p=5% act=+6.3% miss)",
+        "T(p=5% act=+28.5% HIT)",
+        "KAT(p=5% act=+3.1% miss)"
+      ]
+    },
+    {
+      "date": "2026-07-13",
+      "n_rec": 3,
+      "n_hit": 0,
+      "items": [
+        "BLAST(p=5% act=+14.1% miss)",
+        "AGLD(p=5% act=+1.1% miss)",
+        "T(p=5% act=+6.1% miss)"
+      ]
+    },
+    {
+      "date": "2026-07-14",
+      "n_rec": 3,
+      "n_hit": 1,
+      "items": [
+        "BLAST(p=5% act=+24.3% HIT)",
+        "ELSA(p=5% act=+7.4% miss)",
+        "ZBT(p=5% act=+6.3% miss)"
+      ]
+    },
+    {
+      "date": "2026-07-15",
+      "n_rec": 3,
+      "n_hit": 1,
+      "items": [
+        "B3(p=5% act=+5.0% miss)",
+        "BLAST(p=5% act=+14.9% miss)",
+        "VANA(p=5% act=+21.6% HIT)"
+      ]
+    },
+    {
+      "date": "2026-07-16",
+      "n_rec": 3,
+      "n_hit": 0,
+      "items": [
+        "XEC(p=5% act=+5.9% miss)",
+        "B3(p=5% act=+9.9% miss)",
+        "VANA(p=5% act=+8.1% miss)"
+      ]
+    },
+    {
+      "date": "2026-07-17",
+      "n_rec": 3,
+      "n_hit": 0,
+      "items": [
+        "FLOCK(p=5% act=+7.1% miss)",
+        "B3(p=5% act=+2.8% miss)",
+        "KAITO(p=5% act=+11.8% miss)"
+      ]
+    },
+    {
+      "date": "2026-07-18",
+      "n_rec": 3,
+      "n_hit": 1,
+      "items": [
+        "XEC(p=5% act=+26.4% HIT)",
+        "KAITO(p=5% act=+0.2% miss)",
+        "FLOCK(p=5% act=-0.0% miss)"
+      ]
+    },
+    {
+      "date": "2026-07-19",
+      "n_rec": 3,
+      "n_hit": 1,
+      "items": [
+        "BONK(p=5% act=+26.6% HIT)",
+        "XEC(p=5% act=+11.7% miss)",
+        "TOSHI(p=5% act=+3.9% miss)"
+      ]
+    },
+    {
+      "date": "2026-07-20",
+      "n_rec": 3,
+      "n_hit": 0,
+      "items": [
+        "BONK(p=5% act=+4.7% miss)",
+        "TRAC(p=5% act=+14.4% miss)",
+        "KAITO(p=5% act=+7.8% miss)"
+      ]
+    },
+    {
+      "date": "2026-07-21",
+      "n_rec": 3,
+      "n_hit": 0,
+      "items": [
+        "TRAC(p=5% act=+17.1% miss)",
+        "MET2(p=5% act=+1.2% miss)",
+        "PUMP(p=5% act=+2.4% miss)"
+      ]
+    },
+    {
+      "date": "2026-07-22",
+      "n_rec": 3,
+      "n_hit": 1,
+      "items": [
+        "ERA(p=5% act=+47.8% HIT)",
+        "TRAC(p=5% act=+0.4% miss)",
+        "LA(p=5% act=+1.8% miss)"
+      ]
+    },
+    {
+      "date": "2026-07-23",
+      "n_rec": 3,
+      "n_hit": 1,
+      "items": [
+        "ERA(p=5% act=+19.9% miss)",
+        "MIRA(p=5% act=+8.4% miss)",
+        "ZAMA(p=5% act=+25.4% HIT)"
+      ]
+    },
+    {
+      "date": "2026-07-24",
+      "n_rec": 3,
+      "n_hit": 0,
+      "items": [
+        "ERA(p=5% act=+15.1% miss)",
+        "LA(p=5% act=+19.8% miss)",
+        "ZAMA(p=5% act=+4.5% miss)"
+      ]
+    },
+    {
+      "date": "2026-07-25",
+      "n_rec": 3,
+      "n_hit": 1,
+      "items": [
+        "LA(p=5% act=+3.1% miss)",
+        "ORDER(p=5% act=+1.9% miss)",
+        "ZAMA(p=5% act=+20.4% HIT)"
+      ]
+    }
+  ],
+  "summary": {
+    "lab_pump20": {
+      "warm_total": 1213,
+      "warm_recall_top3": 0.2539159109645507,
+      "cold_total": 1717,
+      "cold_recall_top3": 0.0,
+      "net_diag_top3": {
+        "net_mean": -0.017552282234752744,
+        "n": 3120
+      }
+    },
+    "lab_pump15": {
+      "warm_total": 2222,
+      "warm_recall_top3": 0.22457245724572458,
+      "cold_total": 3397,
+      "cold_recall_top3": 0.0,
+      "net_diag_top3": {
+        "net_mean": -0.017552282234752744,
+        "n": 3120
+      }
+    }
+  }
+}

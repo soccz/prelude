@@ -26,6 +26,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from signals.features import compute_btc_features
 from scripts.backfill_paper_ledger import build_4h_panel_for_labels
 
@@ -46,7 +47,11 @@ def build_path_table(upbit_d1: str, upbit_4h: str) -> pd.DataFrame:
     btc_feat = compute_btc_features(btc_d1.copy())
     btc_feat["date_only"] = pd.to_datetime(btc_feat["timestamp"]).dt.date
     btc_regime_map = dict(zip(btc_feat["date_only"], btc_feat["btc_regime"]))
-    krw_4h = [m for m in list_markets(upbit_4h) if m.startswith("KRW-")]
+    krw_4h = [
+        market
+        for market in signal_eligible_markets(list_markets(upbit_4h))
+        if market.startswith("KRW-")
+    ]
     candles_4h = {m: load_candles(upbit_4h, m) for m in krw_4h}
     candles_4h = {k: v for k, v in candles_4h.items() if v is not None and len(v) > 0}
     paths = build_4h_panel_for_labels(candles_4h, btc_regime_map)

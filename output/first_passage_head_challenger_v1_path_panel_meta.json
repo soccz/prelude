@@ -1,0 +1,220 @@
+{
+  "cache_sha256": "745d804c36d0fe2bd2f5166676d4c4af69bb99babf21211ffadfc543b813efde",
+  "path_meta": {
+    "benchmark_complete_dates": 445,
+    "canonical_complete_crosscheck_n": 10,
+    "canonical_crosscheck_n": 20,
+    "exact_100_target_complete_dates": 183,
+    "first_nonbenchmark_15m_date": "2025-05-02",
+    "panel": {
+      "base_dn5": 0.2526086956521739,
+      "base_safe_up10": 0.061406105457909345,
+      "base_up10": 0.07364477335800185,
+      "completed_label_cutoff": "2026-07-25",
+      "date_end": "2026-07-25",
+      "date_start": "2023-08-10",
+      "dates": 1081,
+      "dates_with_exact_100": 1081,
+      "feature_count": 24,
+      "features": [
+        "f_qv_surge_30d",
+        "f_qv_surge_7d",
+        "f_qv_ma7_vs_ma30",
+        "f_vol_surge_7d",
+        "f_bounce_off_7d_low",
+        "f_ret_1d",
+        "f_ret_3d",
+        "f_ret_7d",
+        "f_ret_14d",
+        "f_roc_3d",
+        "f_roc_7d",
+        "f_atr_pct_14",
+        "f_rv_7d",
+        "f_rv_21d",
+        "f_log_qv",
+        "f_pos_in_20d_range",
+        "f_drawdown_7d",
+        "f_rsi_14",
+        "f_up_streak",
+        "f_ret3d_xs_decile",
+        "f_ret7d_xs_decile",
+        "f_atr_xs_decile",
+        "f_qvsurge_xs_decile",
+        "f_qv_rank_pct"
+      ],
+      "markets": 255,
+      "max_candidates_per_date": 100,
+      "median_candidates_per_date": 100.0,
+      "min_history_prior_bars": 70,
+      "rows": 108100
+    },
+    "path_dates": 450,
+    "path_quality_counts": {
+      "benchmark_gap": 500,
+      "complete": 28585,
+      "flat_filled": 15489,
+      "market_start_horizon_incomplete": 100,
+      "target_no_observations": 326
+    },
+    "path_rows": 45000,
+    "target_complete_rows": 44074,
+    "target_incomplete_rows": 926
+  },
+  "signature": {
+    "code_lineage": {
+      "entrypoint": "scripts/first_passage_head_challenger_v1.py",
+      "files": {
+        "data/__init__.py": {
+          "exists": true,
+          "path": "data/__init__.py",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0
+        },
+        "data/database.py": {
+          "exists": true,
+          "path": "data/database.py",
+          "sha256": "40e5d7e9c1e1ecfd5e91769216dd297fc41018cd3a3d355144071ee8cbdcdddf",
+          "size": 14780
+        },
+        "data/market_universe.py": {
+          "exists": true,
+          "path": "data/market_universe.py",
+          "sha256": "15b5e2c1c19650d5e3c13bfa0e40eb5025552f4d56e33ac7ef10bb967b16f067",
+          "size": 2094
+        },
+        "ledger/__init__.py": {
+          "exists": true,
+          "path": "ledger/__init__.py",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0
+        },
+        "ledger/path_quality.py": {
+          "exists": true,
+          "path": "ledger/path_quality.py",
+          "sha256": "0c6bb31e33e721c94d4124b6a0742d3f5f02be380093925fe4dcb252f99e49bb",
+          "size": 17503
+        },
+        "ledger/portfolio_metrics.py": {
+          "exists": true,
+          "path": "ledger/portfolio_metrics.py",
+          "sha256": "2bfeb38efabecd7d091a17a33af149b08b188ba75f68d5af0f4adc9266133ef7",
+          "size": 7455
+        },
+        "ops/__init__.py": {
+          "exists": true,
+          "path": "ops/__init__.py",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0
+        },
+        "ops/artifact_provenance.py": {
+          "exists": true,
+          "path": "ops/artifact_provenance.py",
+          "sha256": "ef33127caf4320c35d46231458ab47887289863a8b5820d5b6a1cb8786a037bc",
+          "size": 19857
+        },
+        "ops/code_lineage.py": {
+          "exists": true,
+          "path": "ops/code_lineage.py",
+          "sha256": "d56c18566b41a94648dd55e65d9aabe83d8814c4b3faa1d570cc70fcc2ddebc6",
+          "size": 5794
+        },
+        "scripts/downside_head_riskreward_v1.py": {
+          "exists": true,
+          "path": "scripts/downside_head_riskreward_v1.py",
+          "sha256": "e7b40b3d4a0d5d6bd12d9b3d81a14a649253870aee28405149e2ff3e806e88e3",
+          "size": 26161
+        },
+        "scripts/downside_veto_challenger_v1.py": {
+          "exists": true,
+          "path": "scripts/downside_veto_challenger_v1.py",
+          "sha256": "f87768d7f7060f7d88f5a536f45100027cf3529e2a4a31fbd6e6cbee21bf60b4",
+          "size": 51838
+        },
+        "scripts/first_passage_head_challenger_v1.py": {
+          "exists": true,
+          "path": "scripts/first_passage_head_challenger_v1.py",
+          "sha256": "923eb07be9ef550e9ca42eac2f96060f91c745eeac04be173aaf8ed0b7779297",
+          "size": 85934
+        },
+        "scripts/recall_universe_recommender_v1.py": {
+          "exists": true,
+          "path": "scripts/recall_universe_recommender_v1.py",
+          "sha256": "df51bb10060d59bebbd981ca4aaad27eb7680d352470da3626f3b63b834bf8bd",
+          "size": 22841
+        },
+        "scripts/recommendation_scorer_v1.py": {
+          "exists": true,
+          "path": "scripts/recommendation_scorer_v1.py",
+          "sha256": "3b0aeef50f4a0f9dbb8a088bb9b6ba45033a4e473e9e2ffa2f1ebad75706f8cf",
+          "size": 26458
+        },
+        "scripts/recommender_downside_exit_v1.py": {
+          "exists": true,
+          "path": "scripts/recommender_downside_exit_v1.py",
+          "sha256": "17ceddbe29c4158310b9c5887edea6300f3c7444ab2d7eee5c8a95232bba7d30",
+          "size": 17392
+        },
+        "scripts/regime_split_precursor_v1.py": {
+          "exists": true,
+          "path": "scripts/regime_split_precursor_v1.py",
+          "sha256": "1f84e8707306bc2ac118a5761681f76fcff0ffe33a36602463b72f65ea8b73e4",
+          "size": 22129
+        },
+        "scripts/safeup_head_challenger_v1.py": {
+          "exists": true,
+          "path": "scripts/safeup_head_challenger_v1.py",
+          "sha256": "c228200c184ad0b39bb51a79cc68c9c0ad3c310be4db57dff42542b44edead3a",
+          "size": 105623
+        },
+        "scripts/univariate_precursor_lift_v1.py": {
+          "exists": true,
+          "path": "scripts/univariate_precursor_lift_v1.py",
+          "sha256": "6f1e885a4410b9361fb2cafa6ae9da20a4588d5b8b00b55a1d80667343b5db0b",
+          "size": 19136
+        },
+        "signals/__init__.py": {
+          "exists": true,
+          "path": "signals/__init__.py",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0
+        },
+        "signals/features.py": {
+          "exists": true,
+          "path": "signals/features.py",
+          "sha256": "3c24c9fbe9e5b34c27fc51fa18c31a8694b20cc59b7af0ce5d2244a37b97a560",
+          "size": 13525
+        },
+        "signals/labels.py": {
+          "exists": true,
+          "path": "signals/labels.py",
+          "sha256": "5a65bb781eeb525420c2f90ba908b6471aa93db5f6c2369dac0245abdbfe4619",
+          "size": 14179
+        }
+      },
+      "lineage_sha256": "d9242a43c8bdb8d6963112669480c9dc334f9f3b8d35e98dbaaaefec8bbe7e56",
+      "schema": "repo_local_python_code_lineage_v1"
+    },
+    "completed_label_cutoff": "2026-07-25",
+    "d1_db": {
+      "mtime_ns": 1785025945916314043,
+      "path": "/mnt/20t/prelude/data/upbit_d1.db",
+      "sha256": "6ef27b75286d54248f4efdb522de70ef5caceb557c33096cd7ec9f9c307730ce",
+      "size": 33353728,
+      "wal": null
+    },
+    "expected_15m_bars": 96,
+    "limit_markets": null,
+    "m15_db": {
+      "mtime_ns": 1785028041817320393,
+      "path": "/mnt/20t/prelude/data/upbit_15m.db",
+      "sha256": "12a7efca9e4df893f58232fe53695c26d2ea1e90855ee37846171ad78df3764c",
+      "size": 1552896000,
+      "wal": null
+    },
+    "minimum_prior_history": 70,
+    "path_semantics_sha256": "3e1e78b5fece45d33a3559f3f31ae92868a116c081c90bf02f26482455ea7ed2",
+    "safeup_script_sha256": "c228200c184ad0b39bb51a79cc68c9c0ad3c310be4db57dff42542b44edead3a",
+    "schema": "first_passage_head_challenger_v1_path_panel_v3",
+    "universe_top_n": 100
+  }
+}

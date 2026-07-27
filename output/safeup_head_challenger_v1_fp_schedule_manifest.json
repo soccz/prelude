@@ -1,0 +1,21 @@
+{
+  "schema": "safeup_head_challenger_v1_fp_schedule_manifest",
+  "gzip_mtime": 0,
+  "files": {
+    "predictions": {
+      "path": "/mnt/20t/prelude/output/safeup_head_challenger_v1_fp_schedule_predictions.csv.gz",
+      "bytes": 4221181,
+      "sha256": "bf8f3982c4cb7d3016f7aa8a2d9f6fde8cff3cfa0de0d0f30f990a7b189a0532"
+    },
+    "contract": {
+      "path": "/mnt/20t/prelude/output/safeup_head_challenger_v1_fp_schedule_contract.json",
+      "bytes": 51057,
+      "sha256": "ad226e015e175b40ce45c3b4d0d85a5dbe699da2314e473c7601e59d050d0763"
+    },
+    "coverage": {
+      "path": "/mnt/20t/prelude/output/safeup_head_challenger_v1_fp_schedule_coverage.json",
+      "bytes": 20164,
+      "sha256": "261ee698dff20d3b27ba8c7ade4f8ed8ab73d3390a1d5aa568d61b546a2980b9"
+    }
+  }
+}

@@ -29,7 +29,7 @@
   - 진입선택 = recommendation_scorer 의 cal_xgb (모든 feature D-1 shift, calibration
     train-only). 그대로 import 재사용.
   - dump_risk 라벨/cut/logit = **train fold(과거) 에서만 fit**, OOS test 에 적용만.
-  - 경로 = day-D [09:00 D, 09:00 D+1) 15m 봉 시간순 단일패스. 미래봉 미리보기 X.
+  - 경로 = day-D [09:15 D, 09:15 D+1) 15m 봉 시간순 단일패스. 미래봉 미리보기 X.
     봉내 SL·TP 동시 → SL 먼저(보수). intraday_min/close 는 in-trade outcome (leak X).
   - 라벨/유니버스/사이징/알림 변경 X — 이건 검증 (사용자 컨펌 영역 안 건드림).
 
@@ -44,7 +44,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -53,7 +52,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from data.database import list_markets, load_candles  # noqa: E402
+from data.database import connect_readonly, list_markets, load_candles  # noqa: E402
+from data.market_universe import is_excluded_signal_market  # noqa: E402
 from scripts.univariate_precursor_lift_v1 import (  # noqa: E402
     build_market_features,
     add_cross_sectional,
@@ -65,6 +65,8 @@ from scripts.recommendation_scorer_v1 import (  # noqa: E402
     PRECURSOR_FEATURES,
     MAIN_LABEL,
 )
+from ledger.path_quality import assess_15m_window  # noqa: E402
+from scripts.recommender_downside_exit_v1 import execution_start  # noqa: E402
 
 D1_DB = "data/upbit_d1.db"
 M15_DB = "data/upbit_15m.db"
@@ -98,7 +100,11 @@ log = logging.getLogger("ds_aware")
 # 1. Panel + scorer OOS (leak-free, 그대로 재사용)
 # ============================================================================
 def build_panel(limit_markets):
-    markets = list_markets(D1_DB)
+    markets = [
+        market
+        for market in list_markets(D1_DB)
+        if not is_excluded_signal_market(str(market))
+    ]
     if limit_markets:
         markets = markets[:limit_markets]
     log.info("loading %d markets", len(markets))
@@ -123,13 +129,12 @@ def build_panel(limit_markets):
 # 2. 15m 하방 경로: open→intraday min, open→close, 하드 -5% SL net
 # ============================================================================
 def load_15m_window(conn, market, dt):
-    start = pd.Timestamp(dt).strftime("%Y-%m-%d 09:00:00")
-    end = (pd.Timestamp(dt) + pd.Timedelta(days=1)).strftime("%Y-%m-%d 09:00:00")
-    rows = conn.execute(
-        "SELECT open,high,low,close FROM candles WHERE market=? AND "
-        "timestamp>=? AND timestamp<? ORDER BY timestamp", (market, start, end)
-    ).fetchall()
-    return rows
+    assessment = assess_15m_window(
+        market,
+        execution_start(dt),
+        connection=conn,
+    )
+    return assessment.bars if assessment.path_complete else []
 
 
 def path_downside(bars, hard_sl):
@@ -153,12 +158,12 @@ def path_downside(bars, hard_sl):
     running_high = entry
     stopped = False
     sl_gross = None
-    for (o, h, l, c) in bars:
-        if l < running_min:
-            running_min = l
+    for o, h, low, c in bars:
+        if low < running_min:
+            running_min = low
         if h > running_high:
             running_high = h
-        if (not stopped) and l <= sl_px:
+        if (not stopped) and low <= sl_px:
             stopped = True
             sl_gross = -hard_sl   # 봉내 SL 우선 (보수)
     last_c = bars[-1][3]
@@ -181,20 +186,19 @@ def path_downside(bars, hard_sl):
 def attach_paths(picks: pd.DataFrame, m15_start) -> pd.DataFrame:
     """픽들에 15m 하방경로 부착. 15m 윈도우 내 픽만."""
     picks = picks[picks["date"] >= m15_start].copy()
-    conn = sqlite3.connect(M15_DB)
     recs = []
     cache = {}
-    for _, r in picks.iterrows():
-        key = (r["market"], r["date"])
-        if key not in cache:
-            cache[key] = load_15m_window(conn, r["market"], r["date"])
-        dd = path_downside(cache[key], HARD_SL)
-        if dd is None:
-            continue
-        rec = r.to_dict()
-        rec.update(dd)
-        recs.append(rec)
-    conn.close()
+    with connect_readonly(M15_DB) as conn:
+        for _, r in picks.iterrows():
+            key = (r["market"], r["date"])
+            if key not in cache:
+                cache[key] = load_15m_window(conn, r["market"], r["date"])
+            dd = path_downside(cache[key], HARD_SL)
+            if dd is None:
+                continue
+            rec = r.to_dict()
+            rec.update(dd)
+            recs.append(rec)
     return pd.DataFrame(recs)
 
 
@@ -438,9 +442,10 @@ def main():
     log.info("pick pool (daily top-%d): rows=%d", PICK_POOL, len(pool))
 
     # ---- 15m 하방 경로 부착 ----
-    conn = sqlite3.connect(M15_DB)
-    m15_min = conn.execute("SELECT MIN(timestamp) FROM candles").fetchone()[0]
-    conn.close()
+    with connect_readonly(M15_DB) as conn:
+        m15_min = conn.execute(
+            "SELECT MIN(timestamp) FROM candles"
+        ).fetchone()[0]
     m15_start = pd.Timestamp(m15_min).date()
     picks = attach_paths(pool, m15_start)
     n_total = pool[pool["date"] >= m15_start].shape[0]

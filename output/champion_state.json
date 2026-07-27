@@ -1,0 +1,163 @@
+{
+  "asof": "2026-07-27",
+  "config": {
+    "deep_loss_basis": "complete_no_sl_path_min",
+    "deep_loss_pct": -5.0,
+    "hyst_k": 5,
+    "margin_deep_loss_pp": 5.0,
+    "margin_net_pp": 0.3,
+    "min_closed": 30,
+    "min_net_mean_pct": 0.0,
+    "net_gate_basis": "round_trip_cost_deducted_forward_mean_gt_threshold",
+    "rolling_n": 30,
+    "round_trip_cost_pct": 0.15
+  },
+  "history": [
+    {
+      "asof": "2026-06-01",
+      "from": null,
+      "reason": "게이트 통과 모델 없음 (forward closed n<30 또는 challenger_only) → 기본 챔피언=백테스트-최선(recommend_r1_open), SHADOW 발송",
+      "slot": "open",
+      "to": "recommend_r1_open"
+    },
+    {
+      "asof": "2026-06-01",
+      "from": null,
+      "reason": "게이트 통과 모델 없음 (forward closed n<30 또는 challenger_only) → 기본 챔피언=백테스트-최선(recommend_r1_open), SHADOW 발송",
+      "slot": "preopen",
+      "to": "recommend_r1_open"
+    }
+  ],
+  "input_manifest": {
+    "asof": "2026-07-27",
+    "files": {
+      "ledger:distribution_engine": {
+        "exists": true,
+        "path": "output/paper_ledger.csv",
+        "sha256": "5004b65876a0515199154dc085220b6ebc30637616ccb9a025931723bded8b0a",
+        "size": 82854
+      },
+      "ledger:pump_hunter": {
+        "exists": true,
+        "path": "output/shadow_ledger_pump_hunter.csv",
+        "sha256": "c4b241b81aba70a35547b86938da4107eb9461c233026e449a486d2cbbb25219",
+        "size": 339368
+      },
+      "ledger:pump_hunter_v2": {
+        "exists": true,
+        "path": "output/shadow_ledger_pump_hunter_v2.csv",
+        "sha256": "3e45cc152780addf0caf8e40114142ada208a9bbb0779e676e5933a18bcc8846",
+        "size": 81970
+      },
+      "ledger:recommend_r1_open": {
+        "exists": true,
+        "path": "output/shadow_ledger_recommend.csv",
+        "sha256": "a6f9c9726437e257ff616197b3dbcc439163bfdea6137bce3d31ebae5e5d06a2",
+        "size": 39655
+      },
+      "ledger:recommend_r1_preopen": {
+        "exists": false,
+        "path": "output/shadow_ledger_recommend_preopen.csv"
+      },
+      "ledger:recommend_r1_sustain_open": {
+        "exists": true,
+        "path": "output/shadow_ledger_recommend_sustain.csv",
+        "sha256": "71d5958e06d8394cc8b7f7d8e89f135a9a5f024e535075c642c0254c59938b77",
+        "size": 39093
+      },
+      "ledger:recommend_r2_open": {
+        "exists": true,
+        "path": "output/shadow_ledger_recommend_r2.csv",
+        "sha256": "28ff75eb3d9eb0a1c8b0ce1301008162109e9a5ac09cfc39d2c2b7277aa87110",
+        "size": 39815
+      },
+      "source:champion_selector": {
+        "exists": true,
+        "path": "ops/champion_selector.py",
+        "sha256": "5359b520189680af8343d9e02729d91fafbe3c3326bbb7efbe7a4234311450da",
+        "size": 40154
+      },
+      "source:ledger_config": {
+        "exists": true,
+        "path": "ledger/config.py",
+        "sha256": "71ab3229c1cd3c0aa8573079f2584e73b26923270856e8edfd8c1ba31c321b3b",
+        "size": 3689
+      },
+      "source:model_registry": {
+        "exists": true,
+        "path": "signals/model_registry.py",
+        "sha256": "96db1a4b45f7394e199176317ca949ccd0e744ab53eb3fee4ada7156ca38e1d0",
+        "size": 20108
+      }
+    },
+    "schema": "champion_selector_input.v1"
+  },
+  "migrations": [
+    {
+      "asof": "2026-07-26",
+      "from_payload_sha256": "f40789cb9e208c9a1f3b8117ac885f904923e4279e9cfb3a428ea0490c8fcd94",
+      "history_entries_preserved": 2,
+      "legacy_asof": "2026-07-26",
+      "migrated_at": "2026-07-26T08:56:42+00:00",
+      "reason": "adopt complete no-SL path downside basis and positive cost-deducted forward-net absolute gate",
+      "schema": "champion_state_migration.v1",
+      "slot_rewrites": [
+        {
+          "from": "recommend_r1_open",
+          "reason": "legacy cross-slot fallback identity corrected",
+          "slot": "preopen",
+          "to": "recommend_r1_preopen"
+        }
+      ]
+    }
+  ],
+  "payload_sha256": "24bf94e8e4f8bc930e09cedde5d9b893c43f9becd2894b782373e1f09756f941",
+  "schema_version": "champion_state.v1",
+  "slots": {
+    "open": {
+      "champion_id": "recommend_r1_open",
+      "is_fallback": true,
+      "metric": {
+        "deep_loss_freq": 0.3333,
+        "hit_rate": 0.0,
+        "last_date": "2026-07-25",
+        "n_closed": 90,
+        "n_days": 30,
+        "n_downside": 3,
+        "n_downside_days": 1,
+        "net_mean_pct": -0.3022
+      },
+      "reason": "게이트 통과 모델 없음 (표본/완결경로 부족, 비용차감 net_mean<=+0.0000%, 또는 challenger_only) → 기본 챔피언=백테스트-최선(recommend_r1_open), SHADOW 발송",
+      "since": "2026-06-01"
+    },
+    "preopen": {
+      "champion_id": "recommend_r1_preopen",
+      "is_fallback": true,
+      "metric": {
+        "deep_loss_freq": null,
+        "hit_rate": null,
+        "last_date": null,
+        "n_closed": 0,
+        "n_days": 0,
+        "n_downside": 0,
+        "n_downside_days": 0,
+        "net_mean_pct": null
+      },
+      "reason": "게이트 통과 모델 없음 (표본/완결경로 부족, 비용차감 net_mean<=+0.0000%, 또는 challenger_only) → 기본 챔피언=백테스트-최선(recommend_r1_preopen), SHADOW 발송",
+      "since": "2026-07-26"
+    }
+  },
+  "streaks": {
+    "open": {
+      "challenger_id": null,
+      "count": 0,
+      "last_date": null
+    },
+    "preopen": {
+      "challenger_id": null,
+      "count": 0,
+      "last_date": null
+    }
+  },
+  "updated_at": "2026-07-27T00:36:34+00:00"
+}

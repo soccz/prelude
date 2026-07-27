@@ -1,0 +1,16 @@
+{
+  "n_picks_top_kmax": 5885,
+  "n_days": 395,
+  "kmax": 5,
+  "m15_window": [
+    "2023-05-03 18:45:00",
+    "2026-05-31 10:00:00"
+  ],
+  "regime_dist": {
+    "bull_quiet": 2625,
+    "bear_volatile": 2260,
+    "bear_quiet": 810,
+    "bull_volatile": 190
+  },
+  "n_combos": 96
+}

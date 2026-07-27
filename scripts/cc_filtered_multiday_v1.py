@@ -73,6 +73,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from data.market_universe import is_excluded_signal_market  # noqa: E402
 # A1/R1 과 동일한 leak-free head 파이프 재사용 (read-only import; 공유 라이브 파일 아님 —
 # 연구 스크립트). 코드는 복제하지 않고 동일 빌더를 호출만 한다(A1 baseline byte-일치 보장).
 from scripts.downside_head_riskreward_v1 import (  # noqa: E402
@@ -108,6 +109,28 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger("cc_c3")
 
 
+def _reject_contaminated_oos(frame: pd.DataFrame) -> None:
+    excluded = sorted(
+        {
+            str(market)
+            for market in frame["market"].dropna().unique()
+            if is_excluded_signal_market(str(market))
+        }
+    )
+    if excluded:
+        raise RuntimeError(
+            "cached C3 OOS contains excluded signal markets "
+            f"{excluded}; rerun without --use-cache"
+        )
+    required_outcomes = ["up_high_ret", "down_low_ret", "eod_ret", "lab_dump_B"]
+    missing = [column for column in required_outcomes if column not in frame]
+    if missing or frame[required_outcomes].isna().any(axis=None):
+        raise RuntimeError(
+            "cached C3 OOS contains incomplete outcome labels; "
+            "rerun without --use-cache"
+        )
+
+
 # ============================================================================
 # 1. OOS 빌드 (A1 동일 빌더) — 캐시 가능
 # ============================================================================
@@ -115,8 +138,12 @@ def add_dump_labels(panel):
     cols = []
     for name, sp in DUMP_LABELS.items():
         lab = f"lab_{name}"
-        panel[lab] = ((panel["up_high_ret"] >= sp["up"]) &
-                      (panel["eod_ret"] < sp["eod"])).astype(float)
+        complete = panel[["up_high_ret", "eod_ret"]].notna().all(axis=1)
+        panel[lab] = (
+            (panel["up_high_ret"] >= sp["up"])
+            & (panel["eod_ret"] < sp["eod"])
+        ).astype(float)
+        panel.loc[~complete, lab] = np.nan
         cols.append(lab)
     return cols
 
@@ -138,7 +165,9 @@ def build_oos(limit_markets):
              {c: round(float(panel[c].mean()), 4) for c in dump_cols})
     oos = walk_forward_heads(panel, feats, label_cols, N_FOLDS, EMBARGO)
     up = f"p_{UP_ANCHOR}"; dn = f"p_{DN_ANCHOR}"
-    oos = oos.dropna(subset=[up, dn]).copy()
+    oos = oos.dropna(
+        subset=[up, dn, "up_high_ret", "down_low_ret", "eod_ret", *dump_cols]
+    ).copy()
     return oos
 
 
@@ -201,6 +230,11 @@ def load_d1():
     df = pd.read_sql("SELECT market, timestamp, open, high, low, close, quote_volume "
                      "FROM candles", conn)
     conn.close()
+    df = df[
+        ~df["market"]
+        .astype(str)
+        .map(is_excluded_signal_market)
+    ].copy()
     df["ts"] = pd.to_datetime(df["timestamp"])
     df["bar_date"] = df["ts"].dt.date
     df = df.sort_values(["market", "ts"]).reset_index(drop=True)
@@ -352,6 +386,7 @@ def main():
     # --- 1) OOS (A1 동일 빌더) ---
     if args.use_cache and cache.exists():
         oos = pd.read_parquet(cache)
+        _reject_contaminated_oos(oos)
         oos["date"] = pd.to_datetime(oos["date"]).dt.date
         log.info("loaded cached OOS rows=%d", len(oos))
     else:

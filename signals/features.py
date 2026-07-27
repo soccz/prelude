@@ -22,6 +22,11 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from data.market_universe import (
+    signal_eligible_markets,
+    signal_market_exclusions,
+)
+
 # ============================================================================
 # Lookback 격자 (placeholder, CLAUDE.md §2.5)
 # ============================================================================
@@ -300,6 +305,13 @@ def assemble_training_panel(
     """
     from signals.labels import label_panel  # 순환 import 방지
 
+    excluded = signal_market_exclusions(candles_by_market)
+    if excluded:
+        raise ValueError(
+            "candles_by_market contains excluded signal markets: "
+            + ", ".join(excluded)
+        )
+
     # 1. BTC features
     btc_feat = compute_btc_features(btc_d1)
 
@@ -346,7 +358,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print("loading...")
-    markets = list_markets(args.db)[: args.limit]
+    markets = signal_eligible_markets(list_markets(args.db))[: args.limit]
     candles = {}
     for m in markets:
         d = load_candles(args.db, m)
@@ -361,9 +373,9 @@ if __name__ == "__main__":
     print(f"\nPanel shape: {panel.shape}")
     print(f"Columns ({len(panel.columns)}):")
     print("  ", ", ".join(panel.columns.tolist()))
-    print(f"\n=== 라벨 분포 ===")
+    print("\n=== 라벨 분포 ===")
     print(panel["label"].value_counts().sort_index())
-    print(f"\n=== 샘플 (5 행) ===")
+    print("\n=== 샘플 (5 행) ===")
     sample_cols = [
         "market", "timestamp", "label", "return_5d", "range_contraction_7d",
         "btc_return_5d", "btc_intensity_d", "btc_regime",

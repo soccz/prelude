@@ -45,6 +45,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from signals.features import compute_btc_features
 
 
@@ -222,7 +223,11 @@ def main():
     log.info(f"  BTC regime dates: {len(btc_regime_map):,}")
 
     log.info("loading KRW 4h candles...")
-    krw = [m for m in list_markets(args.upbit_4h) if m.startswith("KRW-")]
+    krw = [
+        market
+        for market in signal_eligible_markets(list_markets(args.upbit_4h))
+        if market.startswith("KRW-")
+    ]
     if args.limit_markets:
         krw = krw[: args.limit_markets]
     candles_4h = {m: load_candles(args.upbit_4h, m) for m in krw}

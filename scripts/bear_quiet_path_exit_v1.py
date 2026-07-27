@@ -40,6 +40,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from signals.features import compute_btc_features
 from scripts.univariate_precursor_lift_v1 import (
     build_market_features,
@@ -81,7 +82,7 @@ log = logging.getLogger("bq_path")
 # 1. d1 panel (D-1 features) + bear_quiet day flag
 # ============================================================================
 def build_panel(limit_markets: int | None) -> pd.DataFrame:
-    markets = list_markets(D1_DB)
+    markets = signal_eligible_markets(list_markets(D1_DB))
     if limit_markets:
         markets = markets[:limit_markets]
     log.info("d1 loading %d markets", len(markets))

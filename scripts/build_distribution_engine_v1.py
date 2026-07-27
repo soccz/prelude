@@ -38,11 +38,11 @@ from sklearn.utils.class_weight import compute_sample_weight
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from signals.features import assemble_training_panel, compute_btc_features
-from signals.labels_distribution import HEADS, compute_distribution_labels, MAX_BARS
+from signals.labels_distribution import HEADS, MAX_BARS, compute_distribution_labels
 from signals.models.xgb_phase1 import EXCLUDE_COLS
 from signals.validate import PurgedWalkForward
-
 
 LEAK_COLS = {"net_under_tp", "max_return", "label", "label_tail",
              "next_open", "next_high", "next_low", "next_close",
@@ -160,7 +160,7 @@ def main():
     # 1) Daily panel (features)
     # =========================================================================
     log.info("loading daily candles for features...")
-    krw = list_markets(args.upbit_d1)
+    krw = signal_eligible_markets(list_markets(args.upbit_d1))
     if args.limit_markets:
         krw = krw[: args.limit_markets]
     candles_d1 = {m: load_candles(args.upbit_d1, m) for m in krw}
@@ -187,7 +187,11 @@ def main():
     # 2) 4h panel + labels
     # =========================================================================
     log.info("loading 4h candles for labels...")
-    krw_4h = [m for m in list_markets(args.upbit_4h) if m.startswith("KRW-")]
+    krw_4h = [
+        m
+        for m in signal_eligible_markets(list_markets(args.upbit_4h))
+        if m.startswith("KRW-")
+    ]
     if args.limit_markets:
         krw_4h = krw_4h[: args.limit_markets]
     candles_4h = {m: load_candles(args.upbit_4h, m) for m in krw_4h}

@@ -12,6 +12,7 @@ from scipy import stats
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from signals.features import compute_btc_features
 from scripts.univariate_precursor_lift_v1 import build_market_features, add_cross_sectional
 
@@ -22,7 +23,7 @@ BPH=4
 
 def build_panel():
     frames=[]
-    for m in list_markets(D1_DB):
+    for m in signal_eligible_markets(list_markets(D1_DB)):
         df=load_candles(D1_DB,m)
         if df is None or len(df)<70: continue
         df=df.copy(); df["market"]=m

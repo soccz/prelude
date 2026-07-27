@@ -61,11 +61,12 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles  # noqa: E402
-from scripts.univariate_precursor_lift_v1 import (  # noqa: E402
-    build_market_features,
-    add_cross_sectional,
-)
+from data.market_universe import signal_eligible_markets  # noqa: E402
 from scripts.regime_split_precursor_v1 import attach_btc_regime  # noqa: E402
+from scripts.univariate_precursor_lift_v1 import (  # noqa: E402
+    add_cross_sectional,
+    build_market_features,
+)
 
 DB_PATH = "data/upbit_d1.db"
 OUT_DIR = Path("output")
@@ -96,7 +97,7 @@ log = logging.getLogger("upside_dist")
 # 1. Panel build (leak-free) + multi-threshold up/down labels
 # ============================================================================
 def build_panel(asof: pd.Timestamp | None, limit_markets: int | None) -> pd.DataFrame:
-    markets = list_markets(DB_PATH)
+    markets = signal_eligible_markets(list_markets(DB_PATH))
     if limit_markets:
         markets = markets[:limit_markets]
     frames = []
@@ -262,7 +263,7 @@ def compare_engine(panel: pd.DataFrame) -> pd.DataFrame:
 
     # engine 은 자체 feature set 이 필요 → assemble_training_panel 로 별도 빌드 후 우리 라벨 join.
     try:
-        krw = list_markets(DB_PATH)
+        krw = signal_eligible_markets(list_markets(DB_PATH))
         candles = {m: load_candles(DB_PATH, m) for m in krw}
         candles = {k: v for k, v in candles.items() if v is not None and len(v) > 30}
         btc = load_candles(DB_PATH, "KRW-BTC")

@@ -56,6 +56,11 @@ import numpy as np
 import pandas as pd
 
 _ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from data.market_universe import is_excluded_signal_market  # noqa: E402
+
 D1_DB = str(_ROOT / "data" / "upbit_d1.db")
 OUT = _ROOT / "output"
 PICKS = OUT / "r2_challenger_picks_v1.csv"
@@ -76,6 +81,26 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger("ch_multiday")
 
 
+def _excluded_signal_markets(frame: pd.DataFrame) -> list[str]:
+    return sorted(
+        {
+            str(market)
+            for market in frame["market"].dropna().unique()
+            if is_excluded_signal_market(str(market))
+        }
+    )
+
+
+def _reject_contaminated_picks(picks: pd.DataFrame) -> None:
+    excluded = _excluded_signal_markets(picks)
+    if excluded:
+        raise RuntimeError(
+            "R2 picks contain excluded signal markets "
+            f"{excluded}; regenerate r2_challenger_picks_v1.csv from the "
+            "canonical research universe"
+        )
+
+
 # ============================================================================
 # 1. 일봉 경로 로딩
 # ============================================================================
@@ -86,6 +111,11 @@ def load_d1() -> pd.DataFrame:
         "SELECT market, timestamp, open, high, low, close, quote_volume FROM candles",
         conn)
     conn.close()
+    df = df[
+        ~df["market"]
+        .astype(str)
+        .map(is_excluded_signal_market)
+    ].copy()
     df["ts"] = pd.to_datetime(df["timestamp"])
     df["bar_date"] = df["ts"].dt.date
     df = df.sort_values(["market", "ts"]).reset_index(drop=True)
@@ -247,6 +277,7 @@ def metrics(trades: pd.DataFrame, n_hold: int) -> dict:
 def main():
     OUT.mkdir(exist_ok=True)
     picks = pd.read_csv(PICKS)
+    _reject_contaminated_picks(picks)
     picks = picks[picks["policy"] == "R1_ratio"].copy()
     picks["entry_date"] = pd.to_datetime(picks["date"]).dt.date
     log.info("R1 entry set: %d entries, %d days, %d markets",

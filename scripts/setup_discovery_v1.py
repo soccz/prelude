@@ -40,6 +40,7 @@ from sklearn.tree import DecisionTreeClassifier
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from signals.features import assemble_training_panel, compute_btc_features
 from signals.labels_distribution import HEADS, compute_distribution_labels, MAX_BARS
 from signals.models.xgb_phase1 import EXCLUDE_COLS
@@ -74,7 +75,7 @@ def feature_cols_from(df, label_cols):
         if c.startswith("next_"):
             continue
         dt = df[c].dtype
-        if dt == object or "datetime" in str(dt):
+        if pd.api.types.is_object_dtype(dt) or "datetime" in str(dt):
             continue
         cols.append(c)
     return cols
@@ -97,8 +98,10 @@ def build_4h_panel_for_labels(candles_4h, btc_regime_map):
             closes = g2["close"].values.astype(float)
             highs = g2["high"].values.astype(float)[:MAX_BARS]
             lows = g2["low"].values.astype(float)[:MAX_BARS]
-            highs_p = np.full(MAX_BARS, np.nan); lows_p = np.full(MAX_BARS, np.nan)
-            highs_p[:n] = highs[:n]; lows_p[:n] = lows[:n]
+            highs_p = np.full(MAX_BARS, np.nan)
+            lows_p = np.full(MAX_BARS, np.nan)
+            highs_p[:n] = highs[:n]
+            lows_p[:n] = lows[:n]
             rows.append({
                 "market": market, "date_only": date,
                 "open_4h": float(opens[0]), "close_4h": float(closes[-1]),
@@ -151,7 +154,7 @@ def main():
 
     # ===== load data (same path as sweep) =====
     log.info("loading panel + labels...")
-    krw = list_markets(args.upbit_d1)
+    krw = signal_eligible_markets(list_markets(args.upbit_d1))
     candles_d1 = {m: load_candles(args.upbit_d1, m) for m in krw}
     if Path(args.binance_d1).exists():
         for m in list_markets(args.binance_d1):
@@ -164,7 +167,11 @@ def main():
     panel["date_only"] = panel["timestamp"].dt.date
     panel["quote_volume_d1"] = panel.get("quote_volume", np.nan)
 
-    krw_4h = [m for m in list_markets(args.upbit_4h) if m.startswith("KRW-")]
+    krw_4h = [
+        m
+        for m in signal_eligible_markets(list_markets(args.upbit_4h))
+        if m.startswith("KRW-")
+    ]
     candles_4h = {m: load_candles(args.upbit_4h, m) for m in krw_4h}
     candles_4h = {k: v for k, v in candles_4h.items() if v is not None and len(v) > 0}
     btc_feat = compute_btc_features(btc_d1.copy())

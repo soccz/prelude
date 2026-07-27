@@ -48,10 +48,12 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import is_excluded_signal_market
 from signals.features import compute_btc_features
 from scripts.univariate_precursor_lift_v1 import (
     build_market_features,
     add_cross_sectional,
+    expanding_purged_date_folds,
 )
 
 DB_PATH = "data/upbit_d1.db"
@@ -90,7 +92,11 @@ CAL_BUCKETS = 10            # calibration 분위 버킷
 # 1. Panel build (leak-free) + day-D OHLC (청산 진단용) + BTC regime/breadth
 # ============================================================================
 def build_panel(limit_markets: int | None) -> pd.DataFrame:
-    markets = list_markets(DB_PATH)
+    markets = [
+        market
+        for market in list_markets(DB_PATH)
+        if not is_excluded_signal_market(str(market))
+    ]
     if limit_markets:
         markets = markets[:limit_markets]
     log.info("loading %d markets", len(markets))
@@ -175,19 +181,7 @@ def add_score_and_universe(panel: pd.DataFrame) -> pd.DataFrame:
 # 3. Walk-forward fold 경계
 # ============================================================================
 def make_folds(dates: np.ndarray, n_folds: int, embargo: int):
-    fold_size = len(dates) // (n_folds + 1)
-    folds = []
-    for k in range(1, n_folds + 1):
-        train_end = fold_size * k
-        test_start = train_end + embargo
-        test_end = min(fold_size * (k + 1) + train_end, len(dates))
-        if test_start >= len(dates):
-            break
-        folds.append((
-            set(dates[:train_end]),
-            set(dates[test_start:test_end]),
-        ))
-    return folds
+    return expanding_purged_date_folds(dates, n_folds, embargo)
 
 
 # ============================================================================
@@ -374,7 +368,8 @@ def evaluate(panel: pd.DataFrame, label: str):
 #    (회고이므로 마지막 fold OOF 가 아니라 "최신일은 미래 라벨 관측" 인정 — 회고용)
 # ============================================================================
 def recent_recommendations(panel: pd.DataFrame, label: str, n_days: int, top_k: int):
-    p = panel.dropna(subset=["score"]).copy()
+    # 회고 전용: 아직 닫히지 않은 최신 D1 row를 miss로 세지 않는다.
+    p = panel.dropna(subset=["score", label]).copy()
     dates = np.sort(p["date"].unique())
     # calibration 은 마지막 n_days 직전까지로만 적합 (추천일 D-1까지 정보 정합)
     cutoff = dates[-(n_days + 1)] if len(dates) > n_days + 1 else dates[0]

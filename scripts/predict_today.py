@@ -15,8 +15,10 @@
 
 사용:
     python scripts/predict_today.py                # Stage 1 dry-run (default)
-    python scripts/predict_today.py --send-telegram # Stage 2
     python scripts/predict_today.py --asof 2026-05-03  # 시뮬레이션
+
+실발송은 이 legacy/manual runner에서 금지한다. canonical sender:
+    python scripts/recommend_send.py --slot open
 """
 from __future__ import annotations
 
@@ -24,7 +26,6 @@ import argparse
 import json
 import logging
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -32,14 +33,16 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from notifier.format import format_detector_beta
+from ops.live_send_gate import reject_legacy_live_send
 from signals.detector import DetectorV1
 from signals.features import assemble_training_panel
 
 
 def build_panel_for_asof(upbit_db: str, binance_db: str, asof: pd.Timestamp) -> pd.DataFrame:
     """asof 시점까지의 데이터로 panel 생성, 각 마켓의 마지막 row 반환."""
-    krw = list_markets(upbit_db)
+    krw = signal_eligible_markets(list_markets(upbit_db))
     candles = {m: load_candles(upbit_db, m, until=asof) for m in krw}
     if Path(binance_db).exists():
         for m in list_markets(binance_db):
@@ -74,14 +77,24 @@ def main():
     parser.add_argument("--config", default="output/detector_threshold.json")
     parser.add_argument("--asof", type=str, help="기준 시점 YYYY-MM-DD (default=now)")
     parser.add_argument("--send-telegram", action="store_true",
-                        help="Stage 2 - telegram 발송. 미지정 시 dry-run (stdout 만)")
+                        help="disabled; use recommend_send.py --slot open")
     parser.add_argument("--out-dir", default="output")
     args = parser.parse_args()
+    reject_legacy_live_send(
+        parser,
+        requested=args.send_telegram,
+        slot="open",
+        scoring_command="python scripts/predict_today.py",
+    )
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     log = logging.getLogger("predict_today")
 
-    asof = pd.Timestamp(args.asof) if args.asof else pd.Timestamp.now()
+    asof = (
+        pd.Timestamp(args.asof)
+        if args.asof
+        else pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None)
+    )
     date_str = asof.strftime("%Y%m%d")
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

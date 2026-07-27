@@ -68,9 +68,11 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from data.database import list_markets, load_candles  # noqa: E402
+from data.market_universe import is_excluded_signal_market  # noqa: E402
 from scripts.univariate_precursor_lift_v1 import (  # noqa: E402
     build_market_features,
     add_cross_sectional,
+    completed_upbit_d1_mask,
 )
 from scripts.regime_split_precursor_v1 import attach_btc_regime  # noqa: E402
 # R1 과 동일한 leak-free 헤드 학습/calibration 파이프 (정당 비교의 핵심).
@@ -80,7 +82,10 @@ from scripts.downside_head_riskreward_v1 import (  # noqa: E402
     EPS,
 )
 # 라이브 R1 ledger 와 동일한 15m SL/TP/EOD 경로청산.
-from scripts.recommender_downside_exit_v1 import simulate_path  # noqa: E402
+from scripts.recommender_downside_exit_v1 import (  # noqa: E402
+    load_paths as load_execution_paths,
+    simulate_path,
+)
 
 D1_DB = str(_ROOT / "data" / "upbit_d1.db")
 M15_DB = str(_ROOT / "data" / "upbit_15m.db")
@@ -127,7 +132,10 @@ _UP_THRESH = {"up_05": 0.05, "up_10": 0.10, "up_15": 0.15, "up_20": 0.20}
 _DN_THRESH = {"dn_03": -0.03, "dn_05": -0.05, "dn_10": -0.10}
 
 
-def _add_all_labels(g: pd.DataFrame) -> pd.DataFrame:
+def _add_all_labels(
+    g: pd.DataFrame,
+    asof_kst: pd.Timestamp | str | None = None,
+) -> pd.DataFrame:
     """day-D open 대비 R1 outcome 라벨 + C1 sustained 라벨 부착.
     feature 는 build_market_features 에서 이미 shift(1) 됨 → 여기 라벨은 same-row
     (day-D) open/high/low/close 로 만든다 (타겟=미래, 시점분리).
@@ -155,14 +163,31 @@ def _add_all_labels(g: pd.DataFrame) -> pd.DataFrame:
     g["next_close_ret"] = next_close / (g["close"] + EPS) - 1.0
     for name, thr in FWD_THRESH.items():
         lab = (g["next_close_ret"] >= thr).astype(float)
-        # 마지막 행은 미래 없음 → NaN (학습/평가 dropna)
-        lab[g["close"].shift(-1).isna()] = np.nan
+        # D+1 close가 완전히 확정된 경우에만 라벨로 인정한다.
+        next_complete = completed_upbit_d1_mask(
+            g["timestamp"], asof_kst
+        ).shift(-1, fill_value=False)
+        lab[~next_complete] = np.nan
         g[f"lab_{name}"] = lab
+    complete = completed_upbit_d1_mask(g["timestamp"], asof_kst)
+    same_day_targets = (
+        ["up_high_ret", "down_low_ret", "eod_ret", "eod_open_ret"]
+        + [f"lab_{name}" for name in _UP_THRESH]
+        + [f"lab_{name}" for name in _DN_THRESH]
+        + [f"lab_{name}" for name in SUS_THRESH]
+    )
+    g.loc[~complete, same_day_targets] = np.nan
+    next_complete = complete.shift(-1, fill_value=False)
+    g.loc[~next_complete, "next_close_ret"] = np.nan
     return g
 
 
 def build_panel_c1(limit_markets):
-    markets = list_markets(D1_DB)
+    markets = [
+        market
+        for market in list_markets(D1_DB)
+        if not is_excluded_signal_market(str(market))
+    ]
     if limit_markets:
         markets = markets[:limit_markets]
     log.info("loading %d markets", len(markets))
@@ -197,20 +222,7 @@ def build_panel_c1(limit_markets):
 # 2. 15m 경로 net (R1 r2_challenger 와 byte-identical 경로)
 # ============================================================================
 def load_paths(pairs: pd.DataFrame) -> dict:
-    conn = sqlite3.connect(M15_DB)
-    paths = {}
-    for _, r in pairs.iterrows():
-        m, dt = r["market"], pd.Timestamp(r["date"])
-        start = dt.strftime("%Y-%m-%d 09:00:00")
-        end = (dt + pd.Timedelta(days=1)).strftime("%Y-%m-%d 09:00:00")
-        rows = conn.execute(
-            "SELECT open,high,low,close FROM candles WHERE market=? AND "
-            "timestamp>=? AND timestamp<? ORDER BY timestamp", (m, start, end)
-        ).fetchall()
-        if rows:
-            paths[(m, dt.date())] = rows
-    conn.close()
-    return paths
+    return load_execution_paths(pairs, db_path=M15_DB)
 
 
 def realize_net(bars: list):
@@ -237,7 +249,8 @@ def net_metrics(trades: pd.DataFrame, self_label: str | None) -> dict:
     peak = eq.cummax()
     mdd = float(((eq - peak) / peak).min())
     cum = float(eq.iloc[-1] - 1.0)
-    mu = float(net.mean())
+    trade_mu = float(net.mean())
+    daily_mu = float(daily.mean())
     sd = float(daily.std())
     dstd = float(daily[daily < 0].std()) if (daily < 0).any() else np.nan
     k5 = max(1, int(np.ceil(0.05 * n)))
@@ -254,7 +267,7 @@ def net_metrics(trades: pd.DataFrame, self_label: str | None) -> dict:
         n_days=int(d["date"].nunique()),
         pct_sl=float((oc == "sl").mean()),
         deep_loss_freq_noSL=float((eod <= DEEP_LOSS).mean()) if len(eod) else np.nan,
-        net_mean=mu,
+        net_mean=trade_mu,
         net_median=float(np.median(net)),
         hit=float((net > 0).mean()),
         precision_self=prec_self,                                      # 자기 라벨 적중
@@ -264,8 +277,8 @@ def net_metrics(trades: pd.DataFrame, self_label: str | None) -> dict:
         worst=float(net.min()),
         mdd=mdd,
         cum=cum,
-        sharpe=float(mu / sd * np.sqrt(365)) if sd and sd > 0 else np.nan,
-        sortino=float(mu / dstd * np.sqrt(365)) if dstd and dstd > 0 else np.nan,
+        sharpe=float(daily_mu / sd * np.sqrt(365)) if sd and sd > 0 else np.nan,
+        sortino=float(daily_mu / dstd * np.sqrt(365)) if dstd and dstd > 0 else np.nan,
         pct_tp=float((oc == "tp").mean()),
         pct_eod=float((oc == "eod").mean()),
     )

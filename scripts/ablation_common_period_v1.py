@@ -37,6 +37,7 @@ from sklearn.utils.class_weight import compute_sample_weight
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from signals.features import assemble_training_panel, compute_btc_features
 from signals.labels_distribution import HEADS, compute_distribution_labels
 from signals.models.xgb_phase1 import EXCLUDE_COLS
@@ -95,7 +96,7 @@ def feature_cols_daily(df: pd.DataFrame, label_cols: list[str], precursor_cols: 
         if c.startswith("next_"):
             continue
         dt = df[c].dtype
-        if dt == object or "datetime" in str(dt):
+        if pd.api.types.is_object_dtype(dt) or "datetime" in str(dt):
             continue
         cols.append(c)
     return cols
@@ -153,7 +154,7 @@ def weighted_summary(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_daily_panel(upbit_d1: str, binance_d1: str) -> pd.DataFrame:
-    krw = list_markets(upbit_d1)
+    krw = signal_eligible_markets(list_markets(upbit_d1))
     candles_d1 = {m: load_candles(upbit_d1, m) for m in krw}
     if Path(binance_d1).exists():
         for m in list_markets(binance_d1):
@@ -200,7 +201,11 @@ def main() -> None:
     cache_dir = Path(args.cache_dir)
 
     log.info("loading 4h labels + 4h precursor...")
-    krw_4h = [m for m in list_markets(args.upbit_4h) if m.startswith("KRW-")]
+    krw_4h = [
+        m
+        for m in signal_eligible_markets(list_markets(args.upbit_4h))
+        if m.startswith("KRW-")
+    ]
     candles_4h = {m: load_candles(args.upbit_4h, m) for m in krw_4h}
     candles_4h = {k: v for k, v in candles_4h.items() if v is not None and len(v) > 0}
     panel_4h_label = cached_frame(
@@ -221,7 +226,11 @@ def main() -> None:
     pre4, pre4_cols = prefix_columns(pre4, PRE4H, "p4h_")
 
     log.info("loading 1h precursor...")
-    krw_1h = [m for m in list_markets(args.upbit_1h) if m.startswith("KRW-")]
+    krw_1h = [
+        m
+        for m in signal_eligible_markets(list_markets(args.upbit_1h))
+        if m.startswith("KRW-")
+    ]
     candles_1h = {m: load_candles(args.upbit_1h, m) for m in krw_1h}
     candles_1h = {k: v for k, v in candles_1h.items() if v is not None and len(v) > 30}
     pre1 = cached_frame(
@@ -232,7 +241,11 @@ def main() -> None:
     pre1, pre1_cols = prefix_columns(pre1, PRE1H, "p1h_")
 
     log.info("loading 15m precursor...")
-    krw_15m = [m for m in list_markets(args.upbit_15m) if m.startswith("KRW-")]
+    krw_15m = [
+        m
+        for m in signal_eligible_markets(list_markets(args.upbit_15m))
+        if m.startswith("KRW-")
+    ]
     candles_15m = {m: load_candles(args.upbit_15m, m) for m in krw_15m}
     candles_15m = {k: v for k, v in candles_15m.items() if v is not None and len(v) > 100}
     pre15 = cached_frame(

@@ -130,7 +130,7 @@ def calibration_report(
     }
     """
     from signals.labels import (
-        cumulative_probs, expected_max_return,
+        cumulative_probs,
         approx_ci_from_bins, DEFAULT_BIN_CENTERS,
     )
     if bin_centers is None:
@@ -231,9 +231,10 @@ if __name__ == "__main__":
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from data.database import load_candles, list_markets
+    from data.database import list_markets, load_candles
+    from data.market_universe import signal_eligible_markets
     from signals.features import assemble_training_panel
-    from signals.models.xgb_phase1 import XGBPhase1, prepare_features, train_full
+    from signals.models.xgb_phase1 import prepare_features, train_full
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", default="data/upbit_d1.db")
@@ -242,7 +243,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print(f"loading {args.limit} markets...")
-    markets = list_markets(args.db)[: args.limit]
+    markets = signal_eligible_markets(list_markets(args.db))[: args.limit]
     candles = {m: load_candles(args.db, m) for m in markets}
     candles = {k: v for k, v in candles.items() if len(v) > 0}
     btc = load_candles(args.db, args.btc_market)

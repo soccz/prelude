@@ -29,6 +29,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from signals.precursors import FIFTEEN_M_HIT_THRESHOLDS, build_15m_event_table, cached_frame
 
 
@@ -105,8 +106,13 @@ def main() -> None:
     events = cached_frame(
         args.cache_path,
         lambda: build_15m_event_table(
-            {m: load_candles(args.upbit_15m, m)
-             for m in list_markets(args.upbit_15m) if m.startswith("KRW-")},
+            {
+                market: load_candles(args.upbit_15m, market)
+                for market in signal_eligible_markets(
+                    list_markets(args.upbit_15m)
+                )
+                if market.startswith("KRW-")
+            },
             min_bars=args.min_bars,
         ),
         refresh=args.refresh_cache,

@@ -27,6 +27,10 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import latest_timestamp, list_markets, load_candles
+from data.market_universe import (
+    is_excluded_signal_market,
+    signal_eligible_markets,
+)
 from signals.calibration import IsotonicCalibrator
 from signals.features import assemble_training_panel
 from signals.labels import (
@@ -45,7 +49,10 @@ logger = logging.getLogger("predict")
 # ============================================================================
 def is_tradable_market(market: str) -> bool:
     """추천 가능 universe = 업비트 KRW only (실거래 가능)."""
-    return market.startswith("KRW-")
+    return (
+        market.startswith("KRW-")
+        and not is_excluded_signal_market(market)
+    )
 
 
 # ============================================================================
@@ -84,7 +91,7 @@ def predict_today(
         asof = pd.Timestamp.now()
 
     # 1. 데이터 로드
-    krw_markets = list_markets(upbit_db)
+    krw_markets = signal_eligible_markets(list_markets(upbit_db))
     candles = {m: load_candles(upbit_db, m, until=asof) for m in krw_markets}
     candles = {k: v for k, v in candles.items() if len(v) >= 30}
 

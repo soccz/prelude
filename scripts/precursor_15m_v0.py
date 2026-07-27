@@ -95,6 +95,7 @@ from sklearn.utils.class_weight import compute_sample_weight
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from signals.features import assemble_training_panel, compute_btc_features
 from signals.labels_distribution import HEADS, compute_distribution_labels, MAX_BARS
 from signals.models.xgb_phase1 import EXCLUDE_COLS
@@ -188,7 +189,8 @@ def build_15m_precursor(candles_15m: dict, btc_df: pd.DataFrame) -> pd.DataFrame
 
             opn = float(r["open"]) if r["open"] > 0 else np.nan
             cls = float(r["close"])
-            hi = float(r["high"]); lo = float(r["low"])
+            hi = float(r["high"])
+            lo = float(r["low"])
             vol = float(r["volume"])
             vol_24h_mean = float(r["vol_24h_mean_prior"]) if pd.notna(r["vol_24h_mean_prior"]) else np.nan
             high_24h_prior = float(r["high_24h_prior"]) if pd.notna(r["high_24h_prior"]) else np.nan
@@ -207,7 +209,8 @@ def build_15m_precursor(candles_15m: dict, btc_df: pd.DataFrame) -> pd.DataFrame
                 pre30m_vol_sum = float(win_30m["volume"].sum())
                 pre30m_vol_ratio = (pre30m_vol_sum / (vol_24h_mean * 2)) if (pd.notna(vol_24h_mean) and vol_24h_mean > 0) else np.nan
             else:
-                pre30m_ret = np.nan; pre30m_vol_ratio = np.nan
+                pre30m_ret = np.nan
+                pre30m_vol_ratio = np.nan
 
             # 1h
             if len(win_1h) >= 1:
@@ -216,7 +219,8 @@ def build_15m_precursor(candles_15m: dict, btc_df: pd.DataFrame) -> pd.DataFrame
                 pre1h_vol_sum = float(win_1h["volume"].sum())
                 pre1h_vol_ratio = (pre1h_vol_sum / (vol_24h_mean * 4)) if (pd.notna(vol_24h_mean) and vol_24h_mean > 0) else np.nan
             else:
-                pre1h_ret = np.nan; pre1h_vol_ratio = np.nan
+                pre1h_ret = np.nan
+                pre1h_vol_ratio = np.nan
 
             # 3h
             if len(win_3h) >= 1:
@@ -228,7 +232,9 @@ def build_15m_precursor(candles_15m: dict, btc_df: pd.DataFrame) -> pd.DataFrame
                 pre3h_low = float(win_3h["low"].min())
                 pre3h_range_pct = ((pre3h_high - pre3h_low) / w3h_open) if w3h_open > 0 else np.nan
             else:
-                pre3h_ret = np.nan; pre3h_vol_ratio = np.nan; pre3h_range_pct = np.nan
+                pre3h_ret = np.nan
+                pre3h_vol_ratio = np.nan
+                pre3h_range_pct = np.nan
 
             # breakout & btc
             breakout_24h_high = (cls / high_24h_prior - 1) if (pd.notna(high_24h_prior) and high_24h_prior > 0) else np.nan
@@ -242,7 +248,10 @@ def build_15m_precursor(candles_15m: dict, btc_df: pd.DataFrame) -> pd.DataFrame
                 cum_low = float(day_bars["low"].min())
                 cum_vol = float(day_bars["volume"].sum())
             else:
-                day_open = np.nan; cum_high = np.nan; cum_low = np.nan; cum_vol = np.nan
+                day_open = np.nan
+                cum_high = np.nan
+                cum_low = np.nan
+                cum_vol = np.nan
 
             cum_max_ret_to_0830 = (cum_high / day_open - 1) if (pd.notna(day_open) and day_open > 0) else np.nan
             cum_dd_to_0830 = (cum_low / day_open - 1) if (pd.notna(day_open) and day_open > 0) else np.nan
@@ -294,7 +303,7 @@ def feature_cols_baseline(df, label_cols):
         if c.startswith("next_"):
             continue
         dt = df[c].dtype
-        if dt == object or "datetime" in str(dt):
+        if pd.api.types.is_object_dtype(dt) or "datetime" in str(dt):
             continue
         cols.append(c)
     return cols
@@ -336,8 +345,10 @@ def build_4h_panel_for_labels(candles_4h, btc_regime_map):
             closes = g2["close"].values.astype(float)
             highs = g2["high"].values.astype(float)[:MAX_BARS]
             lows = g2["low"].values.astype(float)[:MAX_BARS]
-            highs_p = np.full(MAX_BARS, np.nan); lows_p = np.full(MAX_BARS, np.nan)
-            highs_p[:n] = highs[:n]; lows_p[:n] = lows[:n]
+            highs_p = np.full(MAX_BARS, np.nan)
+            lows_p = np.full(MAX_BARS, np.nan)
+            highs_p[:n] = highs[:n]
+            lows_p[:n] = lows[:n]
             rows.append({
                 "market": market, "date_only": date,
                 "open_4h": float(opens[0]), "close_4h": float(closes[-1]),
@@ -370,7 +381,7 @@ def main():
 
     # === 1) daily panel + label ===
     log.info("loading daily panel...")
-    krw = list_markets(args.upbit_d1)
+    krw = signal_eligible_markets(list_markets(args.upbit_d1))
     candles_d1 = {m: load_candles(args.upbit_d1, m) for m in krw}
     if Path(args.binance_d1).exists():
         for m in list_markets(args.binance_d1):
@@ -385,7 +396,11 @@ def main():
 
     # === 2) labels (4h based, leak fix) ===
     log.info("loading 4h candles + computing labels...")
-    krw_4h = [m for m in list_markets(args.upbit_4h) if m.startswith("KRW-")]
+    krw_4h = [
+        m
+        for m in signal_eligible_markets(list_markets(args.upbit_4h))
+        if m.startswith("KRW-")
+    ]
     candles_4h = {m: load_candles(args.upbit_4h, m) for m in krw_4h}
     candles_4h = {k: v for k, v in candles_4h.items() if v is not None and len(v) > 0}
     btc_feat = compute_btc_features(btc_d1.copy())
@@ -399,7 +414,11 @@ def main():
 
     # === 3) 15m precursor ===
     log.info("loading 15m candles + computing precursor (08:30 snapshot)...")
-    krw_15m = [m for m in list_markets(args.upbit_15m) if m.startswith("KRW-")]
+    krw_15m = [
+        m
+        for m in signal_eligible_markets(list_markets(args.upbit_15m))
+        if m.startswith("KRW-")
+    ]
     candles_15m = {m: load_candles(args.upbit_15m, m) for m in krw_15m}
     candles_15m = {k: v for k, v in candles_15m.items() if v is not None and len(v) > 100}
     log.info(f"  15m markets: {len(candles_15m)}")

@@ -37,6 +37,7 @@ from sklearn.utils.class_weight import compute_sample_weight
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from signals.features import assemble_training_panel
 from signals.models.xgb_phase1 import EXCLUDE_COLS
 from signals.precursors import (
@@ -76,7 +77,7 @@ TOPK_PCTS = [0.005, 0.01, 0.02, 0.05]
 
 
 def load_daily_panel(upbit_d1: str, binance_d1: str) -> pd.DataFrame:
-    krw = list_markets(upbit_d1)
+    krw = signal_eligible_markets(list_markets(upbit_d1))
     candles_d1 = {m: load_candles(upbit_d1, m) for m in krw}
     if Path(binance_d1).exists():
         for m in list_markets(binance_d1):
@@ -99,7 +100,7 @@ def safe_daily_feature_cols(df: pd.DataFrame) -> list[str]:
         if c.startswith("next_"):
             continue
         dt = df[c].dtype
-        if dt == object or "datetime" in str(dt):
+        if pd.api.types.is_object_dtype(dt) or "datetime" in str(dt):
             continue
         cols.append(c)
     return cols
@@ -187,7 +188,11 @@ def main() -> None:
     daily_cols_prefixed = [f"d2_{c}" for c in daily_cols]
 
     log.info("loading 15m candles...")
-    krw_15m = [m for m in list_markets(args.upbit_15m) if m.startswith("KRW-")]
+    krw_15m = [
+        m
+        for m in signal_eligible_markets(list_markets(args.upbit_15m))
+        if m.startswith("KRW-")
+    ]
     candles_15m = {m: load_candles(args.upbit_15m, m) for m in krw_15m}
     candles_15m = {k: v for k, v in candles_15m.items() if v is not None and len(v) > 100}
 

@@ -42,6 +42,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from scripts.univariate_precursor_lift_v1 import build_market_features, add_cross_sectional
 
 M15_DB = "data/upbit_15m.db"
@@ -91,7 +92,7 @@ def load_paths(pairs: pd.DataFrame) -> dict:
 def build_atr_lookup() -> dict:
     """(market, date) → f_atr_pct_14 (D-1 ATR%) + f_atr_xs_decile (그날 횡단 ATR rank).
     build_market_features 의 shift(1) raw → leak 아님."""
-    markets = list_markets(D1_DB)
+    markets = signal_eligible_markets(list_markets(D1_DB))
     frames = []
     for m in markets:
         df = load_candles(D1_DB, m)

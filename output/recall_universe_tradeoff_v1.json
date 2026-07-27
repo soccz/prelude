@@ -1,0 +1,65 @@
+{
+  "pump20_total": 2856,
+  "days": 1223,
+  "static_pool_recall": {
+    "top50": 0.484,
+    "top100": 0.747,
+    "top150": 0.893,
+    "top200": 0.968
+  },
+  "static_cand_per_day": {
+    "top50": 49,
+    "top100": 98,
+    "top150": 125,
+    "top200": 138
+  },
+  "dynamic_top100_OR_qvsurge": {
+    "3.0x": {
+      "pool_recall": 0.751,
+      "recall_gain_pp": 0.4,
+      "outside_recovered": "12/723",
+      "recover_pct": 0.017,
+      "extra_cand_day": 0
+    },
+    "2.0x": {
+      "pool_recall": 0.762,
+      "recall_gain_pp": 1.5,
+      "outside_recovered": "44/723",
+      "recover_pct": 0.061,
+      "extra_cand_day": 1
+    },
+    "1.5x": {
+      "pool_recall": 0.78,
+      "recall_gain_pp": 3.3,
+      "outside_recovered": "95/723",
+      "recover_pct": 0.131,
+      "extra_cand_day": 3
+    },
+    "1.2x": {
+      "pool_recall": 0.801,
+      "recall_gain_pp": 5.5,
+      "outside_recovered": "156/723",
+      "recover_pct": 0.216,
+      "extra_cand_day": 7
+    }
+  },
+  "topk_recall_invariant_to_universe": "prec@K & recall@K identical across top100/150/200 (top-scored coins always inside top100)",
+  "topk_calibration_pump20": {
+    "top1pct": {
+      "hit": 0.1017,
+      "lift": 6.13
+    },
+    "top2pct": {
+      "hit": 0.0757,
+      "lift": 4.56
+    },
+    "top5pct": {
+      "hit": 0.0557,
+      "lift": 3.36
+    },
+    "top10pct": {
+      "hit": 0.0323,
+      "lift": 1.95
+    }
+  }
+}

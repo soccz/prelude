@@ -1,0 +1,51 @@
+{
+  "files": {
+    "auc": {
+      "bytes": 1045,
+      "path": "/mnt/20t/prelude/output/first_passage_head_challenger_v1_auc.csv",
+      "sha256": "b11cff781d71f83a32b18a4a82b2ec0440fcd51c0827817dce417d11165c4125"
+    },
+    "coverage": {
+      "bytes": 95770,
+      "path": "/mnt/20t/prelude/output/first_passage_head_challenger_v1_coverage.json",
+      "sha256": "2d82958e7feb535d3ff17571ea4eda6cabeba9e9c71fa3a5b1021b7045199a64"
+    },
+    "folds": {
+      "bytes": 2905,
+      "path": "/mnt/20t/prelude/output/first_passage_head_challenger_v1_folds.csv",
+      "sha256": "522e81fc3ce1b665a9cff0fa87679bc4dd39574ba4af0dbeb38486f0e037b9a0"
+    },
+    "paired": {
+      "bytes": 5147,
+      "path": "/mnt/20t/prelude/output/first_passage_head_challenger_v1_paired.csv",
+      "sha256": "8712be49d5a98eeb19ceda6e1bc5092302019e4c624aaf5d4820c0084d3746b5"
+    },
+    "path_panel_cache": {
+      "bytes": 14277748,
+      "path": "/mnt/20t/prelude/output/first_passage_head_challenger_v1_path_panel.csv.gz",
+      "sha256": "745d804c36d0fe2bd2f5166676d4c4af69bb99babf21211ffadfc543b813efde"
+    },
+    "path_panel_cache_meta": {
+      "bytes": 7956,
+      "path": "/mnt/20t/prelude/output/first_passage_head_challenger_v1_path_panel_meta.json",
+      "sha256": "3d1bc8661adb86c4bad0bb4a6cd1b1eface39dad92dbad5f231d52d5148bf37d"
+    },
+    "picks": {
+      "bytes": 533317,
+      "path": "/mnt/20t/prelude/output/first_passage_head_challenger_v1_picks.csv.gz",
+      "sha256": "9d5a71b0c105462266b804b71574cfc7198c327b2d8b59fb9ca6266cf7939703"
+    },
+    "predictions": {
+      "bytes": 4122775,
+      "path": "/mnt/20t/prelude/output/first_passage_head_challenger_v1_predictions.csv.gz",
+      "sha256": "12901f9629830f5ce422e886de434be7e05eb80e5a8d602b7b9166f949168a77"
+    },
+    "summary": {
+      "bytes": 3106,
+      "path": "/mnt/20t/prelude/output/first_passage_head_challenger_v1_summary.csv",
+      "sha256": "e09993b9e6391a90f262633fa02bb5dad982fddab08eb3e1ed1c663529cf7446"
+    }
+  },
+  "gzip_mtime": 0,
+  "schema": "first_passage_head_challenger_v1_manifest"
+}

@@ -1,0 +1,1399 @@
+{
+  "asof": "2026-07-27",
+  "config": {
+    "deep_loss_pct": -5.0,
+    "note": "Record-only policy competition. It evaluates CLOSED forward rows. pump20_recall is a full-day D1 discovery proxy, not post-send tradeability. Its denominator uses all KRW daily candles for each validated source-observed completed date, including zero-pick policy days. post_send_pump20_precision_pct is reported separately when receipt-aligned 15m labels exist; post-send all-universe recall is not claimed without a matching denominator.",
+    "pump20_threshold": 0.2,
+    "round_trip_cost_conservative_pct": 0.5,
+    "round_trip_cost_pct": 0.15
+  },
+  "exit_lab": [
+    {
+      "deep_loss_freq_pct": 0.0,
+      "model_id": "recommend_r1_open",
+      "n": 165,
+      "net_mean_conservative_pct": -1.006,
+      "net_mean_pct": -0.656,
+      "net_sum_pct": -108.23,
+      "sl_rate_pct": 58.79,
+      "tp_rate_pct": 24.85,
+      "variant": "tp5_sl3"
+    },
+    {
+      "deep_loss_freq_pct": 0.0,
+      "model_id": "recommend_r1_open",
+      "n": 6,
+      "net_mean_conservative_pct": -2.0376,
+      "net_mean_pct": -1.6876,
+      "net_sum_pct": -10.13,
+      "tp_rate_pct": 0.0,
+      "variant": "tp10_nosl"
+    },
+    {
+      "deep_loss_freq_pct": 0.0,
+      "model_id": "recommend_r1_open",
+      "n": 6,
+      "net_mean_conservative_pct": 0.5076,
+      "net_mean_pct": 0.8576,
+      "net_sum_pct": 5.15,
+      "tp_rate_pct": 50.0,
+      "variant": "tp5_nosl"
+    },
+    {
+      "deep_loss_freq_pct": 0.0,
+      "model_id": "recommend_r1_open",
+      "n": 6,
+      "net_mean_conservative_pct": -2.0376,
+      "net_mean_pct": -1.6876,
+      "net_sum_pct": -10.13,
+      "variant": "eod"
+    },
+    {
+      "deep_loss_freq_pct": 0.0,
+      "model_id": "recommend_r1_open",
+      "n": 6,
+      "net_mean_conservative_pct": 0.0625,
+      "net_mean_pct": 0.4125,
+      "net_sum_pct": 2.47,
+      "tp_rate_pct": 33.33,
+      "variant": "tp5_sl2"
+    },
+    {
+      "deep_loss_freq_pct": 16.67,
+      "model_id": "recommend_r1_open",
+      "n": 6,
+      "net_mean_conservative_pct": -2.1714,
+      "net_mean_pct": -1.8214,
+      "net_sum_pct": -10.93,
+      "tp_rate_pct": 0.0,
+      "variant": "tp10_sl5"
+    },
+    {
+      "deep_loss_freq_pct": 0.0,
+      "model_id": "recommend_r1_open",
+      "n": 6,
+      "net_mean_conservative_pct": -2.085,
+      "net_mean_pct": -1.735,
+      "net_sum_pct": -10.41,
+      "tp_rate_pct": 0.0,
+      "variant": "tp8_sl3"
+    },
+    {
+      "deep_loss_freq_pct": 0.0,
+      "model_id": "recommend_r2_open",
+      "n": 165,
+      "net_mean_conservative_pct": -0.8871,
+      "net_mean_pct": -0.5371,
+      "net_sum_pct": -88.63,
+      "sl_rate_pct": 40.61,
+      "tp_rate_pct": 18.18,
+      "variant": "tp5_sl3"
+    },
+    {
+      "deep_loss_freq_pct": 0.0,
+      "model_id": "recommend_r2_open",
+      "n": 6,
+      "net_mean_conservative_pct": -1.2491,
+      "net_mean_pct": -0.8991,
+      "net_sum_pct": -5.39,
+      "tp_rate_pct": 0.0,
+      "variant": "tp10_nosl"
+    },
+    {
+      "deep_loss_freq_pct": 0.0,
+      "model_id": "recommend_r2_open",
+      "n": 6,
+      "net_mean_conservative_pct": -0.5907,
+      "net_mean_pct": -0.2407,
+      "net_sum_pct": -1.44,
+      "tp_rate_pct": 16.67,
+      "variant": "tp5_nosl"
+    },
+    {
+      "deep_loss_freq_pct": 0.0,
+      "model_id": "recommend_r2_open",
+      "n": 6,
+      "net_mean_conservative_pct": -1.2491,
+      "net_mean_pct": -0.8991,
+      "net_sum_pct": -5.39,
+      "variant": "eod"
+    },
+    {
+      "deep_loss_freq_pct": 0.0,
+      "model_id": "recommend_r2_open",
+      "n": 6,
+      "net_mean_conservative_pct": -0.1411,
+      "net_mean_pct": 0.2088,
+      "net_sum_pct": 1.25,
+      "tp_rate_pct": 16.67,
+      "variant": "tp5_sl2"
+    },
+    {
+      "deep_loss_freq_pct": 16.67,
+      "model_id": "recommend_r2_open",
+      "n": 6,
+      "net_mean_conservative_pct": -1.2872,
+      "net_mean_pct": -0.9372,
+      "net_sum_pct": -5.62,
+      "tp_rate_pct": 0.0,
+      "variant": "tp10_sl5"
+    },
+    {
+      "deep_loss_freq_pct": 0.0,
+      "model_id": "recommend_r2_open",
+      "n": 6,
+      "net_mean_conservative_pct": -0.9539,
+      "net_mean_pct": -0.6039,
+      "net_sum_pct": -3.62,
+      "tp_rate_pct": 0.0,
+      "variant": "tp8_sl3"
+    },
+    {
+      "deep_loss_freq_pct": 0.0,
+      "model_id": "recommend_r1_sustain_open",
+      "n": 162,
+      "net_mean_conservative_pct": -1.0027,
+      "net_mean_pct": -0.6527,
+      "net_sum_pct": -105.74,
+      "sl_rate_pct": 47.53,
+      "tp_rate_pct": 16.67,
+      "variant": "tp5_sl3"
+    },
+    {
+      "deep_loss_freq_pct": 16.67,
+      "model_id": "recommend_r1_sustain_open",
+      "n": 6,
+      "net_mean_conservative_pct": -1.4437,
+      "net_mean_pct": -1.0937,
+      "net_sum_pct": -6.56,
+      "tp_rate_pct": 0.0,
+      "variant": "tp10_nosl"
+    },
+    {
+      "deep_loss_freq_pct": 16.67,
+      "model_id": "recommend_r1_sustain_open",
+      "n": 6,
+      "net_mean_conservative_pct": -0.028,
+      "net_mean_pct": 0.322,
+      "net_sum_pct": 1.93,
+      "tp_rate_pct": 33.33,
+      "variant": "tp5_nosl"
+    },
+    {
+      "deep_loss_freq_pct": 16.67,
+      "model_id": "recommend_r1_sustain_open",
+      "n": 6,
+      "net_mean_conservative_pct": -1.4437,
+      "net_mean_pct": -1.0937,
+      "net_sum_pct": -6.56,
+      "variant": "eod"
+    },
+    {
+      "deep_loss_freq_pct": 0.0,
+      "model_id": "recommend_r1_sustain_open",
+      "n": 6,
+      "net_mean_conservative_pct": -0.1667,
+      "net_mean_pct": 0.1833,
+      "net_sum_pct": 1.1,
+      "tp_rate_pct": 33.33,
+      "variant": "tp5_sl2"
+    },
+    {
+      "deep_loss_freq_pct": 16.67,
+      "model_id": "recommend_r1_sustain_open",
+      "n": 6,
+      "net_mean_conservative_pct": -1.3998,
+      "net_mean_pct": -1.0498,
+      "net_sum_pct": -6.3,
+      "tp_rate_pct": 0.0,
+      "variant": "tp10_sl5"
+    },
+    {
+      "deep_loss_freq_pct": 0.0,
+      "model_id": "recommend_r1_sustain_open",
+      "n": 6,
+      "net_mean_conservative_pct": -1.0665,
+      "net_mean_pct": -0.7165,
+      "net_sum_pct": -4.3,
+      "tp_rate_pct": 0.0,
+      "variant": "tp8_sl3"
+    },
+    {
+      "deep_loss_freq_pct": 32.32,
+      "model_id": "distribution_engine",
+      "n": 164,
+      "net_mean_conservative_pct": -1.3429,
+      "net_mean_pct": -0.9929,
+      "net_sum_pct": -162.84,
+      "variant": "tp5_sl3"
+    }
+  ],
+  "generated_at_utc": "2026-07-27T01:07:18+00:00",
+  "input_manifest": {
+    "asof": "2026-07-27",
+    "contract": {
+      "config": {
+        "deep_loss_pct": -5.0,
+        "note": "Record-only policy competition. It evaluates CLOSED forward rows. pump20_recall is a full-day D1 discovery proxy, not post-send tradeability. Its denominator uses all KRW daily candles for each validated source-observed completed date, including zero-pick policy days. post_send_pump20_precision_pct is reported separately when receipt-aligned 15m labels exist; post-send all-universe recall is not claimed without a matching denominator.",
+        "pump20_threshold": 0.2,
+        "round_trip_cost_conservative_pct": 0.5,
+        "round_trip_cost_pct": 0.15
+      },
+      "exit_variants": {
+        "eod": {
+          "label": "순수 EOD hold (기준선)",
+          "sl": null,
+          "tp": null
+        },
+        "tp10_nosl": {
+          "label": "TP+10% / SL없음 / EOD (bear_quiet 연구 최적)",
+          "sl": null,
+          "tp": 0.1
+        },
+        "tp10_sl5": {
+          "label": "TP+10% / SL-5% (사용자 -5% 수용 anchor + 늦은 펌프 여유)",
+          "sl": 0.05,
+          "tp": 0.1
+        },
+        "tp5_nosl": {
+          "label": "TP+5% / SL없음 / EOD",
+          "sl": null,
+          "tp": 0.05
+        },
+        "tp5_sl2": {
+          "label": "TP+5% / SL-2% (출혈 더 빨리 절단)",
+          "sl": 0.02,
+          "tp": 0.05
+        },
+        "tp8_sl3": {
+          "label": "TP+8% / SL-3% (같은 SL, 승자 더 끌기)",
+          "sl": 0.03,
+          "tp": 0.08
+        }
+      },
+      "models": [
+        {
+          "challenger_only": false,
+          "hypothesis": "D-1 변동성/유동성/모멘텀 cross-section 상위 + de-corr 하락 head 로 P(≥10%)/P(≤-5%) 비율(rr)이 높은 코인은 당일 하방이 낮고 상방이 유지된다.",
+          "id": "recommend_r1_open",
+          "is_backtest_fallback": true,
+          "ledger_path": "output/shadow_ledger_recommend.csv",
+          "metric": {
+            "closed_value": "closed",
+            "cost_already_deducted": true,
+            "date_col": "date",
+            "downside_pct_col": "path_min_pct",
+            "hit_col": "post_send_pump20_hit",
+            "path_complete_col": "path_complete",
+            "realized_pct_col": "realized_pct",
+            "status_col": "status"
+          },
+          "name": "R1 risk-reward (downside-first), post-open 09:05",
+          "notes": "현 메인. forward closed 누적 전이라 fallback 챔피언으로 등록. open slot 은 entry_open(09:00) 확정 후 진입.",
+          "predict_ref": "signals.recommend:score_candidates",
+          "slots": [
+            "open"
+          ]
+        },
+        {
+          "challenger_only": true,
+          "hypothesis": "하방을 선형 패널티(p_up10 - λ*p_dn5)로 더 강하게 누르면 stop-out/deep-dump 픽이 상단에서 배제돼 R1(비율) 대비 하방위험이 낮아진다 (사용자: 하락최소화 > 상승). OOS 15m net 경로에서 %SL·deep-loss 반감.",
+          "id": "recommend_r2_open",
+          "is_backtest_fallback": false,
+          "ledger_path": "output/shadow_ledger_recommend_r2.csv",
+          "metric": {
+            "closed_value": "closed",
+            "cost_already_deducted": true,
+            "date_col": "date",
+            "downside_pct_col": "path_min_pct",
+            "hit_col": "post_send_pump20_hit",
+            "path_complete_col": "path_complete",
+            "realized_pct_col": "realized_pct",
+            "status_col": "status"
+          },
+          "name": "R2 risk-reward downside-penalized (challenger), post-open 09:05",
+          "notes": "R1 과 동일 de-corr head 의 결정론적 재정렬 — 새 leak 0. R2_LAMBDA=1.0 (recommend.py 상수, placeholder). champion_selector 가 30거래일 후 R1 vs R2 를 동일 스키마 ledger 로 비교. daily_run 배선/활성화는 ops 단계(evaluator ADOPT 후). 기록: scripts/recommend_today.py --ranking R2.",
+          "predict_ref": "signals.recommend:score_candidates",
+          "slots": [
+            "open"
+          ]
+        },
+        {
+          "challenger_only": true,
+          "hypothesis": "D-1 시점 dump head 로 '지속 펌프 vs 펌프-후-덤프'를 갈라 R1 top-3 중 dump-prone 픽을 강등·교체하면, deep-loss·%SL 등 하방위험이 낮아진다 (사용자: 하락최소화 > 상승). OOS 15m net 경로에서 deep-loss 반감.",
+          "id": "recommend_r1_sustain_open",
+          "is_backtest_fallback": false,
+          "ledger_path": "output/shadow_ledger_recommend_sustain.csv",
+          "metric": {
+            "closed_value": "closed",
+            "cost_already_deducted": true,
+            "date_col": "date",
+            "downside_pct_col": "path_min_pct",
+            "hit_col": "post_send_pump20_hit",
+            "path_complete_col": "path_complete",
+            "realized_pct_col": "realized_pct",
+            "status_col": "status"
+          },
+          "name": "A1 sustainability-filter (challenger), post-open 09:05",
+          "notes": "R1 과 동일 de-corr head 확률 위에 dump head(dump_B, cutoff q0.6) 하나 추가 — 같은 panel/train cutoff, 새 leak 0. A1_DUMP_*/A1_CUTOFF_Q (recommend.py 상수, placeholder). champion_selector 가 30거래일 후 R1 vs A1 을 동일 스키마 ledger 로 비교. 기록: scripts/recommend_today.py --ranking A1 (record-only). trade-off 관측: 하방 개선의 대가로 prec20 도 깎임 → forward 로 재현 확인.",
+          "predict_ref": "signals.recommend:score_candidates",
+          "slots": [
+            "open"
+          ]
+        },
+        {
+          "challenger_only": true,
+          "hypothesis": "D-1 roc_7d 횡단 rank 상위권(>0.85)과 ATR/과열 제한 rule 이 day-D 장중 +20%/+15% 급등 후보를 기존 R1/R2보다 넓게 포착한다. 룰은 pump_rule_discovery_v1 의 leak-free feature_date=D-1 mining 결과.",
+          "id": "pump_hunter",
+          "is_backtest_fallback": false,
+          "ledger_path": "output/shadow_ledger_pump_hunter.csv",
+          "metric": {
+            "closed_value": "closed",
+            "cost_already_deducted": true,
+            "date_col": "date",
+            "downside_pct_col": "path_min_pct",
+            "hit_col": "post_send_pump20_hit",
+            "path_complete_col": "path_complete",
+            "realized_pct_col": "realized_pct",
+            "status_col": "status"
+          },
+          "name": "PUMP hunter rule detector (challenger), post-open 09:05",
+          "notes": "별도 shadow ledger 에 max 20 watchlist 를 기록. Telegram/ACTIVE 발송 없음. policy_competition 이 CLOSED forward rows 에서 pump20_recall/net/downside 를 기존 5개 모델과 자동 비교한다. 충분한 표본 + evaluator 판정 + 사용자 컨펌 전까지 승격 금지.",
+          "predict_ref": "signals.pump_detector_v1:score_pump_candidates",
+          "slots": [
+            "open"
+          ]
+        },
+        {
+          "challenger_only": true,
+          "hypothesis": "Upbit roc_7d_rank>0.85 AND Binance D-1 거래량 surge>1.5 가 pump20 hit 를 baseline 5.6%→8.1% (base 1.4%) 로 올린다 — scripts/binance_leadlag_v1.py 검증 + evaluator 감사 + 15m 재계산.",
+          "id": "pump_hunter_v2",
+          "is_backtest_fallback": false,
+          "ledger_path": "output/shadow_ledger_pump_hunter_v2.csv",
+          "metric": {
+            "closed_value": "closed",
+            "cost_already_deducted": true,
+            "date_col": "date",
+            "downside_pct_col": "path_min_pct",
+            "hit_col": "post_send_pump20_hit",
+            "path_complete_col": "path_complete",
+            "realized_pct_col": "realized_pct",
+            "status_col": "status"
+          },
+          "name": "PUMP hunter v2 (Upbit roc7 + Binance volsurge), post-open 09:05",
+          "notes": "매일 max 5 watchlist + 🎯 텔레그램 radar (사용자 컨펌 2026-06-11). 자동매매 룰 net 음수 — 메시지에 정직 고지, exit 은 사용자 판단. binance_d1.db daily refresh 필요 (daily_run_distribution [8/9]). champion 승격은 challenger_only 차단 유지.",
+          "predict_ref": "signals.pump_detector_v2:score_pump_v2_candidates",
+          "slots": [
+            "open"
+          ]
+        },
+        {
+          "challenger_only": true,
+          "hypothesis": "post-open R1 과 동일 가설. 단 08:50 예고는 진입가 미확정(None)이라 09:00 갭/슬리피지 노출이 추가된다 — forward 로 그 비용을 측정한다.",
+          "id": "recommend_r1_preopen",
+          "is_backtest_fallback": true,
+          "ledger_path": "output/shadow_ledger_recommend_preopen.csv",
+          "metric": {
+            "closed_value": "closed",
+            "cost_already_deducted": true,
+            "date_col": "date",
+            "downside_pct_col": "path_min_pct",
+            "hit_col": "post_send_pump20_hit",
+            "path_complete_col": "path_complete",
+            "realized_pct_col": "realized_pct",
+            "status_col": "status"
+          },
+          "name": "R1 risk-reward (downside-first), pre-open 08:50 예고",
+          "notes": "daily_run_preopen 이 output/shadow_ledger_recommend_preopen.csv 에 기록하고 daily_close_preopen 이 전용 청산한다(open slot 과 분리 평가). 데이터 적으면 셀렉터가 게이트(n>=30) 미달로 챔피언 승격 안 함.",
+          "predict_ref": "signals.recommend:score_candidates",
+          "slots": [
+            "preopen"
+          ]
+        },
+        {
+          "challenger_only": true,
+          "hypothesis": "T×C×DD×H 라벨 공간 7-head 확률 + setup library 교집합이 분포적으로 상승/안정 구간을 분리한다. ATR(변동성)이 universal first-split.",
+          "id": "distribution_engine",
+          "is_backtest_fallback": false,
+          "ledger_path": "output/paper_ledger.csv",
+          "metric": {
+            "closed_value": "closed",
+            "cost_already_deducted": false,
+            "date_col": "date",
+            "downside_pct_col": "next_min_return_pct",
+            "hit_col": "hit_h6",
+            "path_complete_col": "path_complete",
+            "realized_pct_col": "next_close_return_pct",
+            "status_col": "status"
+          },
+          "name": "distribution 7-head + setup library, post-open",
+          "notes": "paper_ledger 실현은 next_close_return_pct(gross %) → 셀렉터가 비용 차감. open slot 만. observed -45% vs replay +71.7% 갭 있어 policy_gate 관찰 중. challenger_only=True 로 발송 차단(R1 단일 발송 보장).",
+          "predict_ref": "signals.distribution_engine:DistributionEngine.score_panel",
+          "slots": [
+            "open"
+          ]
+        }
+      ],
+      "policies": [
+        {
+          "description": "Use every recorded pick from that source ledger.",
+          "objective": "baseline",
+          "policy_id": "top_all"
+        },
+        {
+          "description": "Send only rank #1.",
+          "objective": "precision_pnl",
+          "policy_id": "top1_only"
+        },
+        {
+          "description": "Send only ranks #1-2.",
+          "objective": "precision_pnl",
+          "policy_id": "top2_only"
+        },
+        {
+          "description": "Send top-3 only when dump_risk_flag is false.",
+          "objective": "downside_control",
+          "policy_id": "no_dump_top3"
+        },
+        {
+          "description": "Send only picks with rr_ratio >= 0.75.",
+          "objective": "downside_control",
+          "policy_id": "rr_ge_0_75"
+        },
+        {
+          "description": "Pump watchlist: require train-only P(+20%) estimate >= 3% (not strict calibrated probability).",
+          "objective": "pump_recall",
+          "policy_id": "pump_prob_ge_3pct"
+        }
+      ],
+      "runtime": {
+        "numpy": "2.4.4",
+        "pandas": "3.0.2",
+        "python": "3.12.9",
+        "sqlite": "3.37.2"
+      },
+      "snapshot_identities": {
+        "recommend_r1_open": [
+          "open",
+          "R1"
+        ],
+        "recommend_r1_preopen": [
+          "preopen",
+          "R1"
+        ],
+        "recommend_r1_sustain_open": [
+          "open",
+          "A1"
+        ],
+        "recommend_r2_open": [
+          "open",
+          "R2"
+        ]
+      }
+    },
+    "decision_roots": {
+      "pump_v1_decisions": {
+        "exists": true,
+        "files": [
+          {
+            "path": "2026-07-27.json",
+            "sha256": "ca5fe92627685ff4dfd9ab72cc26fb8da8028139a84d6a9ecc94107c15f1390c",
+            "size": 14051
+          }
+        ],
+        "path": "output/pump_v1_decisions",
+        "tree_sha256": "9ac632e5a714172648f46c32c91d02b832d9a65fa3160917e3a2d65c8ce703d8"
+      },
+      "pump_v2_decisions": {
+        "exists": true,
+        "files": [
+          {
+            "path": "2026-07-27.json",
+            "sha256": "013236c29692e2219d6c51c811763dbbe65cd0cdf27f39e9c404b306080cfbcd",
+            "size": 3087
+          }
+        ],
+        "path": "output/pump_v2_decisions",
+        "tree_sha256": "a116f55bd63dc9012cbdacc64e1d6c970fb13301387b27719abab8a095efba4c"
+      },
+      "pump_v2_receipts": {
+        "exists": true,
+        "files": [
+          {
+            "path": "2026-07-26.json",
+            "sha256": "e464df3f24a127a45badcac2e7fd54479aff3d61d248f56e8eb2ecdd030571a3",
+            "size": 886
+          },
+          {
+            "path": "2026-07-27.json",
+            "sha256": "4b4018f1e21ed5d7557971d6bb2941389601cac085daf18cae0591302c944550",
+            "size": 3633
+          }
+        ],
+        "path": "output/pump_v2_receipts",
+        "tree_sha256": "c6f47b375e629cfe4b4968f071191193db4859df25e60bd599e80d091ec59a96"
+      },
+      "recommend_snapshots": {
+        "exists": true,
+        "files": [
+          {
+            "path": "2026-07-26/open_a1.json",
+            "sha256": "16f48b3503d89320a31eeb9d34ed6d55e74aab8736679509c7c12504cb07237c",
+            "size": 141309
+          },
+          {
+            "path": "2026-07-26/open_r1.json",
+            "sha256": "17c2d4449974dc54e715b683c7960e91c251c659f387b52901f222950e2fbb54",
+            "size": 141243
+          },
+          {
+            "path": "2026-07-26/open_r2.json",
+            "sha256": "879cb00205be0ed7e0c0436f4e435208023a25858438bc541be7f4d3ffdeb601",
+            "size": 141264
+          }
+        ],
+        "path": "output/recommend_snapshots",
+        "tree_sha256": "475c18a4be6266c06e17c2e58fc5b281ca06bd1633baabf0af0e04b819c862b7"
+      }
+    },
+    "files": {
+      "daily_candle_db": {
+        "journal": {
+          "exists": false,
+          "path": "data/upbit_d1.db-journal"
+        },
+        "main": {
+          "exists": true,
+          "path": "data/upbit_d1.db",
+          "sha256": "ec0d3597bf254dff4f837e9e6ffbf3cc1f67ad32c30d4f021320e5dbc6bd555e",
+          "size": 33423360
+        },
+        "wal": {
+          "exists": false,
+          "path": "data/upbit_d1.db-wal"
+        }
+      },
+      "model_ledgers": {
+        "distribution_engine": {
+          "exists": true,
+          "path": "output/paper_ledger.csv",
+          "sha256": "5004b65876a0515199154dc085220b6ebc30637616ccb9a025931723bded8b0a",
+          "size": 82854
+        },
+        "pump_hunter": {
+          "exists": true,
+          "path": "output/shadow_ledger_pump_hunter.csv",
+          "sha256": "c4b241b81aba70a35547b86938da4107eb9461c233026e449a486d2cbbb25219",
+          "size": 339368
+        },
+        "pump_hunter_v2": {
+          "exists": true,
+          "path": "output/shadow_ledger_pump_hunter_v2.csv",
+          "sha256": "3e45cc152780addf0caf8e40114142ada208a9bbb0779e676e5933a18bcc8846",
+          "size": 81970
+        },
+        "recommend_r1_open": {
+          "exists": true,
+          "path": "output/shadow_ledger_recommend.csv",
+          "sha256": "a6f9c9726437e257ff616197b3dbcc439163bfdea6137bce3d31ebae5e5d06a2",
+          "size": 39655
+        },
+        "recommend_r1_preopen": {
+          "exists": false,
+          "path": "output/shadow_ledger_recommend_preopen.csv"
+        },
+        "recommend_r1_sustain_open": {
+          "exists": true,
+          "path": "output/shadow_ledger_recommend_sustain.csv",
+          "sha256": "71d5958e06d8394cc8b7f7d8e89f135a9a5f024e535075c642c0254c59938b77",
+          "size": 39093
+        },
+        "recommend_r2_open": {
+          "exists": true,
+          "path": "output/shadow_ledger_recommend_r2.csv",
+          "sha256": "28ff75eb3d9eb0a1c8b0ce1301008162109e9a5ac09cfc39d2c2b7277aa87110",
+          "size": 39815
+        }
+      },
+      "radar_terminal": {
+        "exists": false,
+        "path": "output/radar_terminal_verdict.json"
+      }
+    },
+    "generator_sources": {
+      "data/market_universe.py": {
+        "exists": true,
+        "path": "data/market_universe.py",
+        "sha256": "15b5e2c1c19650d5e3c13bfa0e40eb5025552f4d56e33ac7ef10bb967b16f067",
+        "size": 2094
+      },
+      "ledger/config.py": {
+        "exists": true,
+        "path": "ledger/config.py",
+        "sha256": "71ab3229c1cd3c0aa8573079f2584e73b26923270856e8edfd8c1ba31c321b3b",
+        "size": 3689
+      },
+      "ledger/exit_lab.py": {
+        "exists": true,
+        "path": "ledger/exit_lab.py",
+        "sha256": "7d157f3239293965f7c4c83a16a18654ecfe9e67f562719b72885ed89d551fa1",
+        "size": 11301
+      },
+      "ops/artifact_provenance.py": {
+        "exists": true,
+        "path": "ops/artifact_provenance.py",
+        "sha256": "ef33127caf4320c35d46231458ab47887289863a8b5820d5b6a1cb8786a037bc",
+        "size": 19857
+      },
+      "ops/close_input_gate.py": {
+        "exists": true,
+        "path": "ops/close_input_gate.py",
+        "sha256": "0419f9cacfb14278edc4b9a5477b8f5739a3aee1ef3e64a3bc4ff5a08cb8ea73",
+        "size": 33998
+      },
+      "ops/policy_competition.py": {
+        "exists": true,
+        "path": "ops/policy_competition.py",
+        "sha256": "5facda967c7b30ea8b4fd0f9471c11f7ca911fcc810214b831ff4d28c8b4ea9c",
+        "size": 71611
+      },
+      "ops/radar_verdict.py": {
+        "exists": true,
+        "path": "ops/radar_verdict.py",
+        "sha256": "0df2c3429c2fd3dedefbea3715d845326058afb24069d162e61a74e95ae4cde0",
+        "size": 37233
+      },
+      "ops/v2_provenance.py": {
+        "exists": true,
+        "path": "ops/v2_provenance.py",
+        "sha256": "6153c4c76eb5ef1da3a6db15620ce0a8a47d941ecc3980dcb41bd74d366f8a78",
+        "size": 20380
+      },
+      "scripts/pump_detector_today.py": {
+        "exists": true,
+        "path": "scripts/pump_detector_today.py",
+        "sha256": "d01200f00f3d9daed108bbca39904681375f0de72594fc6f255569c7956d13f9",
+        "size": 31657
+      },
+      "scripts/pump_detector_v2_today.py": {
+        "exists": true,
+        "path": "scripts/pump_detector_v2_today.py",
+        "sha256": "5102f358b12819b8a3ea430c55e1157831945b7017505e754b50d516c092dab3",
+        "size": 50838
+      },
+      "signals/model_registry.py": {
+        "exists": true,
+        "path": "signals/model_registry.py",
+        "sha256": "96db1a4b45f7394e199176317ca949ccd0e744ab53eb3fee4ada7156ca38e1d0",
+        "size": 20108
+      },
+      "signals/pump_detector_v1.py": {
+        "exists": true,
+        "path": "signals/pump_detector_v1.py",
+        "sha256": "73a4c6ed81ebeb9db07842c9befea148411dd5115e56200e26ba3ab8137239f1",
+        "size": 10313
+      },
+      "signals/pump_detector_v2.py": {
+        "exists": true,
+        "path": "signals/pump_detector_v2.py",
+        "sha256": "c6a4d04c4e883d3c38096a51aec3d2a817e1cad60b20c721dafb1be2f5a08dc2",
+        "size": 10737
+      },
+      "signals/recommend_snapshot.py": {
+        "exists": true,
+        "path": "signals/recommend_snapshot.py",
+        "sha256": "14f25e3d02be6392d78561606b81834e999cfd45dd87930199c343f4da54f0a6",
+        "size": 40682
+      }
+    },
+    "manifest_sha256": "461c497fecbe1657a99a6897754c055fb8b5f4ccc16a8100d8b51c8d1241f18f",
+    "schema": "policy_competition_inputs.v2"
+  },
+  "payload_sha256": "91af286c7b6b8d8baa0a44cad4d2a46198a46a7b5586a2de760554960814db16",
+  "radar_terminal": {
+    "days_to_judgment": 36,
+    "effective": false,
+    "judgment_day": "2026-09-01",
+    "status": "pending",
+    "verdict": null
+  },
+  "rows": [
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": 32.3171,
+      "description": "Use every recorded pick from that source ledger.",
+      "n_closed": 164,
+      "n_days": 32,
+      "n_selected_days": 32,
+      "net_mean_pct": -0.9929,
+      "net_sum_pct": -162.8375,
+      "objective": "baseline",
+      "participant_id": "distribution_engine:top_all",
+      "policy_id": "top_all",
+      "post_send_label_n": 0,
+      "post_send_pump20_precision_pct": null,
+      "pump20_actual": 126,
+      "pump20_captured": 18,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": 10.9756,
+      "pump20_recall_pct": 14.2857,
+      "pump_day_capture_rate_pct": 40.625,
+      "pump_days": 32,
+      "pump_days_any_captured": 13,
+      "recall_date_basis": "ledger_rows",
+      "sl_rate_pct": 0.0,
+      "source_id": "distribution_engine",
+      "tp_rate_pct": 0.0
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": 0.0,
+      "description": "Use every recorded pick from that source ledger.",
+      "n_closed": 165,
+      "n_days": 56,
+      "n_selected_days": 55,
+      "net_mean_pct": -0.656,
+      "net_sum_pct": -108.2337,
+      "objective": "baseline",
+      "participant_id": "recommend_r1_open:top_all",
+      "policy_id": "top_all",
+      "post_send_label_n": 3,
+      "post_send_pump20_precision_pct": 0.0,
+      "pump20_actual": 296,
+      "pump20_captured": 6,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": 3.6364,
+      "pump20_recall_pct": 2.027,
+      "pump_day_capture_rate_pct": 10.9091,
+      "pump_days": 55,
+      "pump_days_any_captured": 6,
+      "recall_date_basis": "ledger_rows+validated_score_snapshots",
+      "sl_rate_pct": 58.7879,
+      "source_id": "recommend_r1_open",
+      "tp_rate_pct": 24.8485
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": 0.0,
+      "description": "Use every recorded pick from that source ledger.",
+      "n_closed": 165,
+      "n_days": 56,
+      "n_selected_days": 55,
+      "net_mean_pct": -0.5371,
+      "net_sum_pct": -88.6294,
+      "objective": "baseline",
+      "participant_id": "recommend_r2_open:top_all",
+      "policy_id": "top_all",
+      "post_send_label_n": 3,
+      "post_send_pump20_precision_pct": 0.0,
+      "pump20_actual": 294,
+      "pump20_captured": 3,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": 1.8182,
+      "pump20_recall_pct": 1.0204,
+      "pump_day_capture_rate_pct": 5.4545,
+      "pump_days": 55,
+      "pump_days_any_captured": 3,
+      "recall_date_basis": "ledger_rows+validated_score_snapshots",
+      "sl_rate_pct": 40.6061,
+      "source_id": "recommend_r2_open",
+      "tp_rate_pct": 18.1818
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": 0.0,
+      "description": "Use every recorded pick from that source ledger.",
+      "n_closed": 162,
+      "n_days": 55,
+      "n_selected_days": 54,
+      "net_mean_pct": -0.6527,
+      "net_sum_pct": -105.7408,
+      "objective": "baseline",
+      "participant_id": "recommend_r1_sustain_open:top_all",
+      "policy_id": "top_all",
+      "post_send_label_n": 3,
+      "post_send_pump20_precision_pct": 0.0,
+      "pump20_actual": 289,
+      "pump20_captured": 0,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": 0.0,
+      "pump20_recall_pct": 0.0,
+      "pump_day_capture_rate_pct": 0.0,
+      "pump_days": 54,
+      "pump_days_any_captured": 0,
+      "recall_date_basis": "ledger_rows+validated_score_snapshots",
+      "sl_rate_pct": 47.5309,
+      "source_id": "recommend_r1_sustain_open",
+      "tp_rate_pct": 16.6667
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": 0.0,
+      "description": "Send only coins selected by at least two of R1/R2/A1.",
+      "n_closed": 111,
+      "n_days": 55,
+      "n_selected_days": 48,
+      "net_mean_pct": -0.4184,
+      "net_sum_pct": -46.4422,
+      "objective": "consensus_precision",
+      "participant_id": "consensus_2of3",
+      "policy_id": "consensus_2of3",
+      "post_send_label_n": 0,
+      "post_send_pump20_precision_pct": null,
+      "pump20_actual": 289,
+      "pump20_captured": 3,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": 2.7027,
+      "pump20_recall_pct": 1.0381,
+      "pump_day_capture_rate_pct": 5.5556,
+      "pump_days": 54,
+      "pump_days_any_captured": 3,
+      "recall_date_basis": "2of3_validated_source_observed_dates",
+      "sl_rate_pct": 51.3514,
+      "source_id": "R1/R2/A1",
+      "tp_rate_pct": 25.2252
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": 0.0,
+      "description": "Send only picks with rr_ratio >= 0.75.",
+      "n_closed": 135,
+      "n_days": 56,
+      "n_selected_days": 51,
+      "net_mean_pct": -0.5194,
+      "net_sum_pct": -70.1124,
+      "objective": "downside_control",
+      "participant_id": "recommend_r1_open:rr_ge_0_75",
+      "policy_id": "rr_ge_0_75",
+      "post_send_label_n": 1,
+      "post_send_pump20_precision_pct": 0.0,
+      "pump20_actual": 296,
+      "pump20_captured": 5,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": 3.7037,
+      "pump20_recall_pct": 1.6892,
+      "pump_day_capture_rate_pct": 9.0909,
+      "pump_days": 55,
+      "pump_days_any_captured": 5,
+      "recall_date_basis": "ledger_rows+validated_score_snapshots",
+      "sl_rate_pct": 56.2963,
+      "source_id": "recommend_r1_open",
+      "tp_rate_pct": 26.6667
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": 0.0,
+      "description": "Send only picks with rr_ratio >= 0.75.",
+      "n_closed": 88,
+      "n_days": 56,
+      "n_selected_days": 43,
+      "net_mean_pct": -0.377,
+      "net_sum_pct": -33.1743,
+      "objective": "downside_control",
+      "participant_id": "recommend_r2_open:rr_ge_0_75",
+      "policy_id": "rr_ge_0_75",
+      "post_send_label_n": 0,
+      "post_send_pump20_precision_pct": null,
+      "pump20_actual": 294,
+      "pump20_captured": 3,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": 3.4091,
+      "pump20_recall_pct": 1.0204,
+      "pump_day_capture_rate_pct": 5.4545,
+      "pump_days": 55,
+      "pump_days_any_captured": 3,
+      "recall_date_basis": "ledger_rows+validated_score_snapshots",
+      "sl_rate_pct": 50.0,
+      "source_id": "recommend_r2_open",
+      "tp_rate_pct": 26.1364
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": 0.0,
+      "description": "Send top-3 only when dump_risk_flag is false.",
+      "n_closed": 98,
+      "n_days": 56,
+      "n_selected_days": 48,
+      "net_mean_pct": -0.3732,
+      "net_sum_pct": -36.5769,
+      "objective": "downside_control",
+      "participant_id": "recommend_r1_open:no_dump_top3",
+      "policy_id": "no_dump_top3",
+      "post_send_label_n": 0,
+      "post_send_pump20_precision_pct": null,
+      "pump20_actual": 296,
+      "pump20_captured": 3,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": 3.0612,
+      "pump20_recall_pct": 1.0135,
+      "pump_day_capture_rate_pct": 5.4545,
+      "pump_days": 55,
+      "pump_days_any_captured": 3,
+      "recall_date_basis": "ledger_rows+validated_score_snapshots",
+      "sl_rate_pct": 53.0612,
+      "source_id": "recommend_r1_open",
+      "tp_rate_pct": 26.5306
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": 0.0,
+      "description": "Send top-3 only when dump_risk_flag is false.",
+      "n_closed": 107,
+      "n_days": 56,
+      "n_selected_days": 51,
+      "net_mean_pct": -0.5894,
+      "net_sum_pct": -63.0682,
+      "objective": "downside_control",
+      "participant_id": "recommend_r2_open:no_dump_top3",
+      "policy_id": "no_dump_top3",
+      "post_send_label_n": 2,
+      "post_send_pump20_precision_pct": 0.0,
+      "pump20_actual": 294,
+      "pump20_captured": 1,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": 0.9346,
+      "pump20_recall_pct": 0.3401,
+      "pump_day_capture_rate_pct": 1.8182,
+      "pump_days": 55,
+      "pump_days_any_captured": 1,
+      "recall_date_basis": "ledger_rows+validated_score_snapshots",
+      "sl_rate_pct": 40.1869,
+      "source_id": "recommend_r2_open",
+      "tp_rate_pct": 18.6916
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": 0.0,
+      "description": "Send only picks with rr_ratio >= 0.75.",
+      "n_closed": 34,
+      "n_days": 55,
+      "n_selected_days": 21,
+      "net_mean_pct": -0.1864,
+      "net_sum_pct": -6.3373,
+      "objective": "downside_control",
+      "participant_id": "recommend_r1_sustain_open:rr_ge_0_75",
+      "policy_id": "rr_ge_0_75",
+      "post_send_label_n": 0,
+      "post_send_pump20_precision_pct": null,
+      "pump20_actual": 289,
+      "pump20_captured": 0,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": 0.0,
+      "pump20_recall_pct": 0.0,
+      "pump_day_capture_rate_pct": 0.0,
+      "pump_days": 54,
+      "pump_days_any_captured": 0,
+      "recall_date_basis": "ledger_rows+validated_score_snapshots",
+      "sl_rate_pct": 41.1765,
+      "source_id": "recommend_r1_sustain_open",
+      "tp_rate_pct": 20.5882
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": 0.0,
+      "description": "Send top-3 only when dump_risk_flag is false.",
+      "n_closed": 146,
+      "n_days": 55,
+      "n_selected_days": 54,
+      "net_mean_pct": -0.724,
+      "net_sum_pct": -105.7032,
+      "objective": "downside_control",
+      "participant_id": "recommend_r1_sustain_open:no_dump_top3",
+      "policy_id": "no_dump_top3",
+      "post_send_label_n": 1,
+      "post_send_pump20_precision_pct": 0.0,
+      "pump20_actual": 289,
+      "pump20_captured": 0,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": 0.0,
+      "pump20_recall_pct": 0.0,
+      "pump_day_capture_rate_pct": 0.0,
+      "pump_days": 54,
+      "pump_days_any_captured": 0,
+      "recall_date_basis": "ledger_rows+validated_score_snapshots",
+      "sl_rate_pct": 49.3151,
+      "source_id": "recommend_r1_sustain_open",
+      "tp_rate_pct": 17.1233
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": null,
+      "description": "Send top-3 only when dump_risk_flag is false.",
+      "n_closed": 0,
+      "n_days": 32,
+      "n_selected_days": 0,
+      "net_mean_pct": null,
+      "net_sum_pct": null,
+      "objective": "downside_control",
+      "participant_id": "distribution_engine:no_dump_top3",
+      "policy_id": "no_dump_top3",
+      "post_send_label_n": 0,
+      "post_send_pump20_precision_pct": null,
+      "pump20_actual": 126,
+      "pump20_captured": 0,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": null,
+      "pump20_recall_pct": 0.0,
+      "pump_day_capture_rate_pct": 0.0,
+      "pump_days": 32,
+      "pump_days_any_captured": 0,
+      "recall_date_basis": "ledger_rows",
+      "sl_rate_pct": null,
+      "source_id": "distribution_engine",
+      "tp_rate_pct": null
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": null,
+      "description": "Send only picks with rr_ratio >= 0.75.",
+      "n_closed": 0,
+      "n_days": 32,
+      "n_selected_days": 0,
+      "net_mean_pct": null,
+      "net_sum_pct": null,
+      "objective": "downside_control",
+      "participant_id": "distribution_engine:rr_ge_0_75",
+      "policy_id": "rr_ge_0_75",
+      "post_send_label_n": 0,
+      "post_send_pump20_precision_pct": null,
+      "pump20_actual": 126,
+      "pump20_captured": 0,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": null,
+      "pump20_recall_pct": 0.0,
+      "pump_day_capture_rate_pct": 0.0,
+      "pump_days": 32,
+      "pump_days_any_captured": 0,
+      "recall_date_basis": "ledger_rows",
+      "sl_rate_pct": null,
+      "source_id": "distribution_engine",
+      "tp_rate_pct": null
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": 40.678,
+      "description": "Send only ranks #1-2.",
+      "n_closed": 59,
+      "n_days": 32,
+      "n_selected_days": 32,
+      "net_mean_pct": -1.9536,
+      "net_sum_pct": -115.2609,
+      "objective": "precision_pnl",
+      "participant_id": "distribution_engine:top2_only",
+      "policy_id": "top2_only",
+      "post_send_label_n": 0,
+      "post_send_pump20_precision_pct": null,
+      "pump20_actual": 126,
+      "pump20_captured": 9,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": 15.2542,
+      "pump20_recall_pct": 7.1429,
+      "pump_day_capture_rate_pct": 28.125,
+      "pump_days": 32,
+      "pump_days_any_captured": 9,
+      "recall_date_basis": "ledger_rows",
+      "sl_rate_pct": 0.0,
+      "source_id": "distribution_engine",
+      "tp_rate_pct": 0.0
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": 46.875,
+      "description": "Send only rank #1.",
+      "n_closed": 32,
+      "n_days": 32,
+      "n_selected_days": 32,
+      "net_mean_pct": -2.6458,
+      "net_sum_pct": -84.6663,
+      "objective": "precision_pnl",
+      "participant_id": "distribution_engine:top1_only",
+      "policy_id": "top1_only",
+      "post_send_label_n": 0,
+      "post_send_pump20_precision_pct": null,
+      "pump20_actual": 126,
+      "pump20_captured": 6,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": 18.75,
+      "pump20_recall_pct": 4.7619,
+      "pump_day_capture_rate_pct": 18.75,
+      "pump_days": 32,
+      "pump_days_any_captured": 6,
+      "recall_date_basis": "ledger_rows",
+      "sl_rate_pct": 0.0,
+      "source_id": "distribution_engine",
+      "tp_rate_pct": 0.0
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": 0.0,
+      "description": "Send only ranks #1-2.",
+      "n_closed": 110,
+      "n_days": 56,
+      "n_selected_days": 55,
+      "net_mean_pct": -0.79,
+      "net_sum_pct": -86.8998,
+      "objective": "precision_pnl",
+      "participant_id": "recommend_r1_open:top2_only",
+      "policy_id": "top2_only",
+      "post_send_label_n": 2,
+      "post_send_pump20_precision_pct": 0.0,
+      "pump20_actual": 296,
+      "pump20_captured": 5,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": 4.5455,
+      "pump20_recall_pct": 1.6892,
+      "pump_day_capture_rate_pct": 9.0909,
+      "pump_days": 55,
+      "pump_days_any_captured": 5,
+      "recall_date_basis": "ledger_rows+validated_score_snapshots",
+      "sl_rate_pct": 59.0909,
+      "source_id": "recommend_r1_open",
+      "tp_rate_pct": 23.6364
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": 0.0,
+      "description": "Send only ranks #1-2.",
+      "n_closed": 110,
+      "n_days": 56,
+      "n_selected_days": 55,
+      "net_mean_pct": -0.6356,
+      "net_sum_pct": -69.912,
+      "objective": "precision_pnl",
+      "participant_id": "recommend_r2_open:top2_only",
+      "policy_id": "top2_only",
+      "post_send_label_n": 2,
+      "post_send_pump20_precision_pct": 0.0,
+      "pump20_actual": 294,
+      "pump20_captured": 2,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": 1.8182,
+      "pump20_recall_pct": 0.6803,
+      "pump_day_capture_rate_pct": 3.6364,
+      "pump_days": 55,
+      "pump_days_any_captured": 2,
+      "recall_date_basis": "ledger_rows+validated_score_snapshots",
+      "sl_rate_pct": 43.6364,
+      "source_id": "recommend_r2_open",
+      "tp_rate_pct": 17.2727
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": 0.0,
+      "description": "Send only rank #1.",
+      "n_closed": 55,
+      "n_days": 56,
+      "n_selected_days": 55,
+      "net_mean_pct": -0.2707,
+      "net_sum_pct": -14.8861,
+      "objective": "precision_pnl",
+      "participant_id": "recommend_r2_open:top1_only",
+      "policy_id": "top1_only",
+      "post_send_label_n": 1,
+      "post_send_pump20_precision_pct": 0.0,
+      "pump20_actual": 294,
+      "pump20_captured": 0,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": 0.0,
+      "pump20_recall_pct": 0.0,
+      "pump_day_capture_rate_pct": 0.0,
+      "pump_days": 55,
+      "pump_days_any_captured": 0,
+      "recall_date_basis": "ledger_rows+validated_score_snapshots",
+      "sl_rate_pct": 43.6364,
+      "source_id": "recommend_r2_open",
+      "tp_rate_pct": 23.6364
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": 0.0,
+      "description": "Send only rank #1.",
+      "n_closed": 55,
+      "n_days": 56,
+      "n_selected_days": 55,
+      "net_mean_pct": -0.3401,
+      "net_sum_pct": -18.7047,
+      "objective": "precision_pnl",
+      "participant_id": "recommend_r1_open:top1_only",
+      "policy_id": "top1_only",
+      "post_send_label_n": 1,
+      "post_send_pump20_precision_pct": 0.0,
+      "pump20_actual": 296,
+      "pump20_captured": 0,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": 0.0,
+      "pump20_recall_pct": 0.0,
+      "pump_day_capture_rate_pct": 0.0,
+      "pump_days": 55,
+      "pump_days_any_captured": 0,
+      "recall_date_basis": "ledger_rows+validated_score_snapshots",
+      "sl_rate_pct": 49.0909,
+      "source_id": "recommend_r1_open",
+      "tp_rate_pct": 27.2727
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": 0.0,
+      "description": "Send only rank #1.",
+      "n_closed": 54,
+      "n_days": 55,
+      "n_selected_days": 54,
+      "net_mean_pct": -0.4018,
+      "net_sum_pct": -21.6948,
+      "objective": "precision_pnl",
+      "participant_id": "recommend_r1_sustain_open:top1_only",
+      "policy_id": "top1_only",
+      "post_send_label_n": 1,
+      "post_send_pump20_precision_pct": 0.0,
+      "pump20_actual": 289,
+      "pump20_captured": 0,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": 0.0,
+      "pump20_recall_pct": 0.0,
+      "pump_day_capture_rate_pct": 0.0,
+      "pump_days": 54,
+      "pump_days_any_captured": 0,
+      "recall_date_basis": "ledger_rows+validated_score_snapshots",
+      "sl_rate_pct": 42.5926,
+      "source_id": "recommend_r1_sustain_open",
+      "tp_rate_pct": 20.3704
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": 0.0,
+      "description": "Send only ranks #1-2.",
+      "n_closed": 108,
+      "n_days": 55,
+      "n_selected_days": 54,
+      "net_mean_pct": -0.5672,
+      "net_sum_pct": -61.2533,
+      "objective": "precision_pnl",
+      "participant_id": "recommend_r1_sustain_open:top2_only",
+      "policy_id": "top2_only",
+      "post_send_label_n": 2,
+      "post_send_pump20_precision_pct": 0.0,
+      "pump20_actual": 289,
+      "pump20_captured": 0,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": 0.0,
+      "pump20_recall_pct": 0.0,
+      "pump_day_capture_rate_pct": 0.0,
+      "pump_days": 54,
+      "pump_days_any_captured": 0,
+      "recall_date_basis": "ledger_rows+validated_score_snapshots",
+      "sl_rate_pct": 48.1481,
+      "source_id": "recommend_r1_sustain_open",
+      "tp_rate_pct": 20.3704
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": 0.0,
+      "description": "Pump watchlist: require train-only P(+20%) estimate >= 3% (not strict calibrated probability).",
+      "n_closed": 51,
+      "n_days": 56,
+      "n_selected_days": 33,
+      "net_mean_pct": -0.9868,
+      "net_sum_pct": -50.3265,
+      "objective": "pump_recall",
+      "participant_id": "recommend_r1_open:pump_prob_ge_3pct",
+      "policy_id": "pump_prob_ge_3pct",
+      "post_send_label_n": 2,
+      "post_send_pump20_precision_pct": 0.0,
+      "pump20_actual": 296,
+      "pump20_captured": 2,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": 3.9216,
+      "pump20_recall_pct": 0.6757,
+      "pump_day_capture_rate_pct": 3.6364,
+      "pump_days": 55,
+      "pump_days_any_captured": 2,
+      "recall_date_basis": "ledger_rows+validated_score_snapshots",
+      "sl_rate_pct": 70.5882,
+      "source_id": "recommend_r1_open",
+      "tp_rate_pct": 25.4902
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": 0.0,
+      "description": "Pump watchlist: require train-only P(+20%) estimate >= 3% (not strict calibrated probability).",
+      "n_closed": 20,
+      "n_days": 56,
+      "n_selected_days": 19,
+      "net_mean_pct": 0.2474,
+      "net_sum_pct": 4.9485,
+      "objective": "pump_recall",
+      "participant_id": "recommend_r2_open:pump_prob_ge_3pct",
+      "policy_id": "pump_prob_ge_3pct",
+      "post_send_label_n": 0,
+      "post_send_pump20_precision_pct": null,
+      "pump20_actual": 294,
+      "pump20_captured": 1,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": 5.0,
+      "pump20_recall_pct": 0.3401,
+      "pump_day_capture_rate_pct": 1.8182,
+      "pump_days": 55,
+      "pump_days_any_captured": 1,
+      "recall_date_basis": "ledger_rows+validated_score_snapshots",
+      "sl_rate_pct": 55.0,
+      "source_id": "recommend_r2_open",
+      "tp_rate_pct": 40.0
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": 0.0,
+      "description": "Pump watchlist: require train-only P(+20%) estimate >= 3% (not strict calibrated probability).",
+      "n_closed": 1,
+      "n_days": 55,
+      "n_selected_days": 1,
+      "net_mean_pct": 0.2487,
+      "net_sum_pct": 0.2487,
+      "objective": "pump_recall",
+      "participant_id": "recommend_r1_sustain_open:pump_prob_ge_3pct",
+      "policy_id": "pump_prob_ge_3pct",
+      "post_send_label_n": 1,
+      "post_send_pump20_precision_pct": 0.0,
+      "pump20_actual": 289,
+      "pump20_captured": 0,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": 0.0,
+      "pump20_recall_pct": 0.0,
+      "pump_day_capture_rate_pct": 0.0,
+      "pump_days": 54,
+      "pump_days_any_captured": 0,
+      "recall_date_basis": "ledger_rows+validated_score_snapshots",
+      "sl_rate_pct": 0.0,
+      "source_id": "recommend_r1_sustain_open",
+      "tp_rate_pct": 0.0
+    },
+    {
+      "asof": "2026-07-27",
+      "deep_loss_freq_pct": null,
+      "description": "Pump watchlist: require train-only P(+20%) estimate >= 3% (not strict calibrated probability).",
+      "n_closed": 0,
+      "n_days": 32,
+      "n_selected_days": 0,
+      "net_mean_pct": null,
+      "net_sum_pct": null,
+      "objective": "pump_recall",
+      "participant_id": "distribution_engine:pump_prob_ge_3pct",
+      "policy_id": "pump_prob_ge_3pct",
+      "post_send_label_n": 0,
+      "post_send_pump20_precision_pct": null,
+      "pump20_actual": 126,
+      "pump20_captured": 0,
+      "pump20_label_basis": "full_day_D1_high_over_open_proxy; not post-send tradeability",
+      "pump20_precision_pct": null,
+      "pump20_recall_pct": 0.0,
+      "pump_day_capture_rate_pct": 0.0,
+      "pump_days": 32,
+      "pump_days_any_captured": 0,
+      "recall_date_basis": "ledger_rows",
+      "sl_rate_pct": null,
+      "source_id": "distribution_engine",
+      "tp_rate_pct": null
+    }
+  ],
+  "run_id": "policy-fda90bb3c545ff081c54e590f36f7a71",
+  "schema": "policy_competition.v2"
+}

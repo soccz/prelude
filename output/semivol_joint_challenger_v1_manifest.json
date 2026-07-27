@@ -1,0 +1,41 @@
+{
+  "files": {
+    "auc": {
+      "bytes": 938,
+      "path": "output/semivol_joint_challenger_v1_auc.csv",
+      "sha256": "346ca6d4fffa1da18414aa3bf224c3f777b8334c9d813633b3be99638eb0bda1"
+    },
+    "coverage": {
+      "bytes": 105054,
+      "path": "output/semivol_joint_challenger_v1_coverage.json",
+      "sha256": "0ff07df2c9d73b0f956ec45a744785be642304608b4c4e1922e4ed9511584257"
+    },
+    "folds": {
+      "bytes": 4210,
+      "path": "output/semivol_joint_challenger_v1_folds.csv",
+      "sha256": "187c04fbe00819d69d347879b35a41c16c7002a84cc9bae29c27809ed74856f3"
+    },
+    "paired": {
+      "bytes": 6507,
+      "path": "output/semivol_joint_challenger_v1_paired.csv",
+      "sha256": "0d784284f4599a8b3287d8eeb55b6f8b0094fd6ac89d2259f01355a717f61b1b"
+    },
+    "picks": {
+      "bytes": 675643,
+      "path": "output/semivol_joint_challenger_v1_picks.csv.gz",
+      "sha256": "8b6d0f047b7bd5d213a703816e4146a4c265814ffe90676438035cc3256f4ef0"
+    },
+    "predictions": {
+      "bytes": 5942560,
+      "path": "output/semivol_joint_challenger_v1_predictions.csv.gz",
+      "sha256": "e22311014e45c0a1e6f20b417bee6f339301fdfc430a10c6f599f5d067923827"
+    },
+    "summary": {
+      "bytes": 3525,
+      "path": "output/semivol_joint_challenger_v1_summary.csv",
+      "sha256": "924012665d1a08ef4619d61da564c40883291b48a1d17f9d0b99a7f275307388"
+    }
+  },
+  "gzip_mtime": 0,
+  "schema": "semivol_joint_challenger_v1_manifest"
+}

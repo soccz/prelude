@@ -1,0 +1,643 @@
+{
+  "schema": "safeup_head_challenger_v1",
+  "created_at": "2026-07-27T00:20:34.535452+09:00",
+  "research_only": true,
+  "production_modified": false,
+  "auto_order_code": false,
+  "inputs": {
+    "d1_db": "/mnt/20t/prelude/data/upbit_d1.db",
+    "d1_db_sha256": "6ef27b75286d54248f4efdb522de70ef5caceb557c33096cd7ec9f9c307730ce",
+    "m15_db": "/mnt/20t/prelude/data/upbit_15m.db",
+    "m15_db_sha256": "12a7efca9e4df893f58232fe53695c26d2ea1e90855ee37846171ad78df3764c",
+    "script_sha256": "c228200c184ad0b39bb51a79cc68c9c0ad3c310be4db57dff42542b44edead3a",
+    "code_lineage": {
+      "schema": "repo_local_python_code_lineage_v1",
+      "entrypoint": "scripts/safeup_head_challenger_v1.py",
+      "files": {
+        "data/__init__.py": {
+          "path": "data/__init__.py",
+          "exists": true,
+          "size": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "data/database.py": {
+          "path": "data/database.py",
+          "exists": true,
+          "size": 14780,
+          "sha256": "40e5d7e9c1e1ecfd5e91769216dd297fc41018cd3a3d355144071ee8cbdcdddf"
+        },
+        "data/market_universe.py": {
+          "path": "data/market_universe.py",
+          "exists": true,
+          "size": 2094,
+          "sha256": "15b5e2c1c19650d5e3c13bfa0e40eb5025552f4d56e33ac7ef10bb967b16f067"
+        },
+        "ledger/__init__.py": {
+          "path": "ledger/__init__.py",
+          "exists": true,
+          "size": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "ledger/path_quality.py": {
+          "path": "ledger/path_quality.py",
+          "exists": true,
+          "size": 17503,
+          "sha256": "0c6bb31e33e721c94d4124b6a0742d3f5f02be380093925fe4dcb252f99e49bb"
+        },
+        "ledger/portfolio_metrics.py": {
+          "path": "ledger/portfolio_metrics.py",
+          "exists": true,
+          "size": 7455,
+          "sha256": "2bfeb38efabecd7d091a17a33af149b08b188ba75f68d5af0f4adc9266133ef7"
+        },
+        "ops/__init__.py": {
+          "path": "ops/__init__.py",
+          "exists": true,
+          "size": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "ops/artifact_provenance.py": {
+          "path": "ops/artifact_provenance.py",
+          "exists": true,
+          "size": 19857,
+          "sha256": "ef33127caf4320c35d46231458ab47887289863a8b5820d5b6a1cb8786a037bc"
+        },
+        "ops/code_lineage.py": {
+          "path": "ops/code_lineage.py",
+          "exists": true,
+          "size": 5794,
+          "sha256": "d56c18566b41a94648dd55e65d9aabe83d8814c4b3faa1d570cc70fcc2ddebc6"
+        },
+        "scripts/downside_head_riskreward_v1.py": {
+          "path": "scripts/downside_head_riskreward_v1.py",
+          "exists": true,
+          "size": 26161,
+          "sha256": "e7b40b3d4a0d5d6bd12d9b3d81a14a649253870aee28405149e2ff3e806e88e3"
+        },
+        "scripts/downside_veto_challenger_v1.py": {
+          "path": "scripts/downside_veto_challenger_v1.py",
+          "exists": true,
+          "size": 51838,
+          "sha256": "f87768d7f7060f7d88f5a536f45100027cf3529e2a4a31fbd6e6cbee21bf60b4"
+        },
+        "scripts/recall_universe_recommender_v1.py": {
+          "path": "scripts/recall_universe_recommender_v1.py",
+          "exists": true,
+          "size": 22841,
+          "sha256": "df51bb10060d59bebbd981ca4aaad27eb7680d352470da3626f3b63b834bf8bd"
+        },
+        "scripts/recommendation_scorer_v1.py": {
+          "path": "scripts/recommendation_scorer_v1.py",
+          "exists": true,
+          "size": 26458,
+          "sha256": "3b0aeef50f4a0f9dbb8a088bb9b6ba45033a4e473e9e2ffa2f1ebad75706f8cf"
+        },
+        "scripts/recommender_downside_exit_v1.py": {
+          "path": "scripts/recommender_downside_exit_v1.py",
+          "exists": true,
+          "size": 17541,
+          "sha256": "3f3598d8b833d47ca7529b937c69f2b91133221c4b0ccc2418ffd9d3f2082b35"
+        },
+        "scripts/regime_split_precursor_v1.py": {
+          "path": "scripts/regime_split_precursor_v1.py",
+          "exists": true,
+          "size": 22129,
+          "sha256": "1f84e8707306bc2ac118a5761681f76fcff0ffe33a36602463b72f65ea8b73e4"
+        },
+        "scripts/safeup_head_challenger_v1.py": {
+          "path": "scripts/safeup_head_challenger_v1.py",
+          "exists": true,
+          "size": 105623,
+          "sha256": "c228200c184ad0b39bb51a79cc68c9c0ad3c310be4db57dff42542b44edead3a"
+        },
+        "scripts/univariate_precursor_lift_v1.py": {
+          "path": "scripts/univariate_precursor_lift_v1.py",
+          "exists": true,
+          "size": 19136,
+          "sha256": "6f1e885a4410b9361fb2cafa6ae9da20a4588d5b8b00b55a1d80667343b5db0b"
+        },
+        "signals/__init__.py": {
+          "path": "signals/__init__.py",
+          "exists": true,
+          "size": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "signals/features.py": {
+          "path": "signals/features.py",
+          "exists": true,
+          "size": 13525,
+          "sha256": "3c24c9fbe9e5b34c27fc51fa18c31a8694b20cc59b7af0ce5d2244a37b97a560"
+        },
+        "signals/labels.py": {
+          "path": "signals/labels.py",
+          "exists": true,
+          "size": 14179,
+          "sha256": "5a65bb781eeb525420c2f90ba908b6471aa93db5f6c2369dac0245abdbfe4619"
+        }
+      },
+      "lineage_sha256": "365ec53c8f8cdabc0bb8e8419c56b266f1f8ea61779c9cd6ecaa6b75cbf5e157"
+    },
+    "sources_before_and_after_identical": true,
+    "source_signatures": {
+      "/mnt/20t/prelude/data/upbit_d1.db": {
+        "path": "/mnt/20t/prelude/data/upbit_d1.db",
+        "bytes": 33353728,
+        "mtime_ns": 1785025945916314043,
+        "sha256": "6ef27b75286d54248f4efdb522de70ef5caceb557c33096cd7ec9f9c307730ce",
+        "wal": null
+      },
+      "/mnt/20t/prelude/data/upbit_15m.db": {
+        "path": "/mnt/20t/prelude/data/upbit_15m.db",
+        "bytes": 1552896000,
+        "mtime_ns": 1785028041817320393,
+        "sha256": "12a7efca9e4df893f58232fe53695c26d2ea1e90855ee37846171ad78df3764c",
+        "wal": null
+      }
+    }
+  },
+  "target_contract": {
+    "primary": "safe_up10 = high_D/open_D-1 >= 0.10 AND low_D/open_D-1 > -0.05",
+    "control": "up10 = high_D/open_D-1 >= 0.10",
+    "downside": "dn5 = low_D/open_D-1 <= -0.05"
+  },
+  "trial_contract": {
+    "model_targets": [
+      "safe_up10",
+      "up10",
+      "dn5"
+    ],
+    "model_fit_count_per_split": 3,
+    "hyperparameter_sweep": false,
+    "policies": [
+      "safeup_head",
+      "up10_control",
+      "R1_repaired",
+      "R1_frozen_pattern",
+      "monkey_seed42",
+      "safeup_pareto_rank"
+    ],
+    "primary_policy_fixed_before_holdout": "safeup_head",
+    "ex_ante_policy_count": 5,
+    "posthoc_policy_count": 1,
+    "posthoc_policy": "safeup_pareto_rank",
+    "posthoc_reason": "requested after inspection of the original locked holdout; promotion-ineligible regardless of historical result",
+    "posthoc_max_verdict": "forward_only_shadow_candidate"
+  },
+  "hygiene": {
+    "feature_boundary": "<= D-1",
+    "minimum_prior_history_bars": 70,
+    "universe": "point-in-time D-1 quote-volume Top 100",
+    "outer": "expanding 5-fold discovery WF, 5-date embargo",
+    "calibration": "expanding 3-fold true inner OOF isotonic using outer-train only",
+    "round_trip_cost_once": 0.0015,
+    "survivorship": "all D1 DB markets, including inactive retained markets"
+  },
+  "locked_holdout": {
+    "n_dates": 180,
+    "start": "2026-01-27",
+    "end": "2026-07-25",
+    "dates_sha256": "df66d89207adee507697eca8992beca0cacd324f9f23bec2a1f6ca16a18bbfcd",
+    "unlocked_after_discovery_complete": true,
+    "selection_from_holdout_ex_ante_policies": false,
+    "posthoc_design_informed_by_holdout": true,
+    "posthoc_exception": "safeup_pareto_rank was added after this holdout was seen and cannot use it as confirmatory evidence"
+  },
+  "panel": {
+    "rows": 108100,
+    "markets": 255,
+    "dates": 1081,
+    "date_start": "2023-08-10",
+    "date_end": "2026-07-25",
+    "completed_label_cutoff": "2026-07-25",
+    "min_history_prior_bars": 70,
+    "max_candidates_per_date": 100,
+    "median_candidates_per_date": 100.0,
+    "dates_with_exact_100": 1081,
+    "feature_count": 24,
+    "features": [
+      "f_qv_surge_30d",
+      "f_qv_surge_7d",
+      "f_qv_ma7_vs_ma30",
+      "f_vol_surge_7d",
+      "f_bounce_off_7d_low",
+      "f_ret_1d",
+      "f_ret_3d",
+      "f_ret_7d",
+      "f_ret_14d",
+      "f_roc_3d",
+      "f_roc_7d",
+      "f_atr_pct_14",
+      "f_rv_7d",
+      "f_rv_21d",
+      "f_log_qv",
+      "f_pos_in_20d_range",
+      "f_drawdown_7d",
+      "f_rsi_14",
+      "f_up_streak",
+      "f_ret3d_xs_decile",
+      "f_ret7d_xs_decile",
+      "f_atr_xs_decile",
+      "f_qvsurge_xs_decile",
+      "f_qv_rank_pct"
+    ],
+    "base_safe_up10": 0.061406105457909345,
+    "base_up10": 0.07364477335800185,
+    "base_dn5": 0.2526086956521739
+  },
+  "evaluation_universe_audit": {
+    "all_scope_dates_exactly_100": true,
+    "scope_dates": 761,
+    "min_candidates": 100,
+    "max_candidates": 100,
+    "same_candidate_frame_for_every_policy": true,
+    "top_k_per_policy_date": 3
+  },
+  "folds": {
+    "discovery": [
+      {
+        "scope": "discovery_oof",
+        "fold": 0,
+        "target": "safe_up10",
+        "train_start": "2023-08-10",
+        "train_end": "2024-06-19",
+        "test_start": "2024-06-25",
+        "test_end": "2024-10-18",
+        "train_rows": 31500,
+        "test_rows": 11600,
+        "train_dates": 315,
+        "test_dates": 116,
+        "train_positives": 1529,
+        "inner_oof_rows": 16900,
+        "inner_oof_positives": 811,
+        "isotonic_fitted": true,
+        "embargo_dates": 5
+      },
+      {
+        "scope": "discovery_oof",
+        "fold": 0,
+        "target": "up10",
+        "train_start": "2023-08-10",
+        "train_end": "2024-06-19",
+        "test_start": "2024-06-25",
+        "test_end": "2024-10-18",
+        "train_rows": 31500,
+        "test_rows": 11600,
+        "train_dates": 315,
+        "test_dates": 116,
+        "train_positives": 1864,
+        "inner_oof_rows": 16900,
+        "inner_oof_positives": 1021,
+        "isotonic_fitted": true,
+        "embargo_dates": 5
+      },
+      {
+        "scope": "discovery_oof",
+        "fold": 0,
+        "target": "dn5",
+        "train_start": "2023-08-10",
+        "train_end": "2024-06-19",
+        "test_start": "2024-06-25",
+        "test_end": "2024-10-18",
+        "train_rows": 31500,
+        "test_rows": 11600,
+        "train_dates": 315,
+        "test_dates": 116,
+        "train_positives": 6897,
+        "inner_oof_rows": 16900,
+        "inner_oof_positives": 4605,
+        "isotonic_fitted": true,
+        "embargo_dates": 5
+      },
+      {
+        "scope": "discovery_oof",
+        "fold": 1,
+        "target": "safe_up10",
+        "train_start": "2023-08-10",
+        "train_end": "2024-10-13",
+        "test_start": "2024-10-19",
+        "test_end": "2025-02-11",
+        "train_rows": 43100,
+        "test_rows": 11600,
+        "train_dates": 431,
+        "test_dates": 116,
+        "train_positives": 2047,
+        "inner_oof_rows": 23300,
+        "inner_oof_positives": 1115,
+        "isotonic_fitted": true,
+        "embargo_dates": 5
+      },
+      {
+        "scope": "discovery_oof",
+        "fold": 1,
+        "target": "up10",
+        "train_start": "2023-08-10",
+        "train_end": "2024-10-13",
+        "test_start": "2024-10-19",
+        "test_end": "2025-02-11",
+        "train_rows": 43100,
+        "test_rows": 11600,
+        "train_dates": 431,
+        "test_dates": 116,
+        "train_positives": 2401,
+        "inner_oof_rows": 23300,
+        "inner_oof_positives": 1288,
+        "isotonic_fitted": true,
+        "embargo_dates": 5
+      },
+      {
+        "scope": "discovery_oof",
+        "fold": 1,
+        "target": "dn5",
+        "train_start": "2023-08-10",
+        "train_end": "2024-10-13",
+        "test_start": "2024-10-19",
+        "test_end": "2025-02-11",
+        "train_rows": 43100,
+        "test_rows": 11600,
+        "train_dates": 431,
+        "test_dates": 116,
+        "train_positives": 9011,
+        "inner_oof_rows": 23300,
+        "inner_oof_positives": 5503,
+        "isotonic_fitted": true,
+        "embargo_dates": 5
+      },
+      {
+        "scope": "discovery_oof",
+        "fold": 2,
+        "target": "safe_up10",
+        "train_start": "2023-08-10",
+        "train_end": "2025-02-06",
+        "test_start": "2025-02-12",
+        "test_end": "2025-06-07",
+        "train_rows": 54700,
+        "test_rows": 11600,
+        "train_dates": 547,
+        "test_dates": 116,
+        "train_positives": 2959,
+        "inner_oof_rows": 29600,
+        "inner_oof_positives": 1619,
+        "isotonic_fitted": true,
+        "embargo_dates": 5
+      },
+      {
+        "scope": "discovery_oof",
+        "fold": 2,
+        "target": "up10",
+        "train_start": "2023-08-10",
+        "train_end": "2025-02-06",
+        "test_start": "2025-02-12",
+        "test_end": "2025-06-07",
+        "train_rows": 54700,
+        "test_rows": 11600,
+        "train_dates": 547,
+        "test_dates": 116,
+        "train_positives": 3570,
+        "inner_oof_rows": 29600,
+        "inner_oof_positives": 1918,
+        "isotonic_fitted": true,
+        "embargo_dates": 5
+      },
+      {
+        "scope": "discovery_oof",
+        "fold": 2,
+        "target": "dn5",
+        "train_start": "2023-08-10",
+        "train_end": "2025-02-06",
+        "test_start": "2025-02-12",
+        "test_end": "2025-06-07",
+        "train_rows": 54700,
+        "test_rows": 11600,
+        "train_dates": 547,
+        "test_dates": 116,
+        "train_positives": 13117,
+        "inner_oof_rows": 29600,
+        "inner_oof_positives": 7538,
+        "isotonic_fitted": true,
+        "embargo_dates": 5
+      },
+      {
+        "scope": "discovery_oof",
+        "fold": 3,
+        "target": "safe_up10",
+        "train_start": "2023-08-10",
+        "train_end": "2025-06-02",
+        "test_start": "2025-06-08",
+        "test_end": "2025-10-01",
+        "train_rows": 66300,
+        "test_rows": 11600,
+        "train_dates": 663,
+        "test_dates": 116,
+        "train_positives": 3790,
+        "inner_oof_rows": 36000,
+        "inner_oof_positives": 2282,
+        "isotonic_fitted": true,
+        "embargo_dates": 5
+      },
+      {
+        "scope": "discovery_oof",
+        "fold": 3,
+        "target": "up10",
+        "train_start": "2023-08-10",
+        "train_end": "2025-06-02",
+        "test_start": "2025-06-08",
+        "test_end": "2025-10-01",
+        "train_rows": 66300,
+        "test_rows": 11600,
+        "train_dates": 663,
+        "test_dates": 116,
+        "train_positives": 4540,
+        "inner_oof_rows": 36000,
+        "inner_oof_positives": 2703,
+        "isotonic_fitted": true,
+        "embargo_dates": 5
+      },
+      {
+        "scope": "discovery_oof",
+        "fold": 3,
+        "target": "dn5",
+        "train_start": "2023-08-10",
+        "train_end": "2025-06-02",
+        "test_start": "2025-06-08",
+        "test_end": "2025-10-01",
+        "train_rows": 66300,
+        "test_rows": 11600,
+        "train_dates": 663,
+        "test_dates": 116,
+        "train_positives": 16529,
+        "inner_oof_rows": 36000,
+        "inner_oof_positives": 10046,
+        "isotonic_fitted": true,
+        "embargo_dates": 5
+      },
+      {
+        "scope": "discovery_oof",
+        "fold": 4,
+        "target": "safe_up10",
+        "train_start": "2023-08-10",
+        "train_end": "2025-09-26",
+        "test_start": "2025-10-02",
+        "test_end": "2026-01-26",
+        "train_rows": 77900,
+        "test_rows": 11700,
+        "train_dates": 779,
+        "test_dates": 117,
+        "train_positives": 4366,
+        "inner_oof_rows": 42400,
+        "inner_oof_positives": 2682,
+        "isotonic_fitted": true,
+        "embargo_dates": 5
+      },
+      {
+        "scope": "discovery_oof",
+        "fold": 4,
+        "target": "up10",
+        "train_start": "2023-08-10",
+        "train_end": "2025-09-26",
+        "test_start": "2025-10-02",
+        "test_end": "2026-01-26",
+        "train_rows": 77900,
+        "test_rows": 11700,
+        "train_dates": 779,
+        "test_dates": 117,
+        "train_positives": 5162,
+        "inner_oof_rows": 42400,
+        "inner_oof_positives": 3136,
+        "isotonic_fitted": true,
+        "embargo_dates": 5
+      },
+      {
+        "scope": "discovery_oof",
+        "fold": 4,
+        "target": "dn5",
+        "train_start": "2023-08-10",
+        "train_end": "2025-09-26",
+        "test_start": "2025-10-02",
+        "test_end": "2026-01-26",
+        "train_rows": 77900,
+        "test_rows": 11700,
+        "train_dates": 779,
+        "test_dates": 117,
+        "train_positives": 19015,
+        "inner_oof_rows": 42400,
+        "inner_oof_positives": 11438,
+        "isotonic_fitted": true,
+        "embargo_dates": 5
+      }
+    ],
+    "locked_holdout": [
+      {
+        "scope": "locked_holdout",
+        "fold": -1,
+        "target": "safe_up10",
+        "train_start": "2023-08-10",
+        "train_end": "2026-01-21",
+        "test_start": "2026-01-27",
+        "test_end": "2026-07-25",
+        "train_rows": 89600,
+        "test_rows": 18000,
+        "train_dates": 896,
+        "test_dates": 180,
+        "train_positives": 5231,
+        "inner_oof_rows": 48800,
+        "inner_oof_positives": 3297,
+        "isotonic_fitted": true,
+        "embargo_dates": 5,
+        "embargoed_dates": [
+          "2026-01-22",
+          "2026-01-23",
+          "2026-01-24",
+          "2026-01-25",
+          "2026-01-26"
+        ]
+      },
+      {
+        "scope": "locked_holdout",
+        "fold": -1,
+        "target": "up10",
+        "train_start": "2023-08-10",
+        "train_end": "2026-01-21",
+        "test_start": "2026-01-27",
+        "test_end": "2026-07-25",
+        "train_rows": 89600,
+        "test_rows": 18000,
+        "train_dates": 896,
+        "test_dates": 180,
+        "train_positives": 6177,
+        "inner_oof_rows": 48800,
+        "inner_oof_positives": 3893,
+        "isotonic_fitted": true,
+        "embargo_dates": 5,
+        "embargoed_dates": [
+          "2026-01-22",
+          "2026-01-23",
+          "2026-01-24",
+          "2026-01-25",
+          "2026-01-26"
+        ]
+      },
+      {
+        "scope": "locked_holdout",
+        "fold": -1,
+        "target": "dn5",
+        "train_start": "2023-08-10",
+        "train_end": "2026-01-21",
+        "test_start": "2026-01-27",
+        "test_end": "2026-07-25",
+        "train_rows": 89600,
+        "test_rows": 18000,
+        "train_dates": 896,
+        "test_dates": 180,
+        "train_positives": 22423,
+        "inner_oof_rows": 48800,
+        "inner_oof_positives": 13778,
+        "isotonic_fitted": true,
+        "embargo_dates": 5,
+        "embargoed_dates": [
+          "2026-01-22",
+          "2026-01-23",
+          "2026-01-24",
+          "2026-01-25",
+          "2026-01-26"
+        ]
+      }
+    ]
+  },
+  "path": {
+    "wanted_unique_pairs": 9640,
+    "complete_unique_pairs": 5643,
+    "complete_pair_rate": 0.5853734439834025,
+    "canonical_assess_15m_window_crosscheck_n": 20,
+    "canonical_complete_path_crosscheck_n": 10,
+    "common_complete_dates": {
+      "discovery_oof": 250,
+      "locked_holdout": 170
+    },
+    "rule": "[D 09:15,D+1 09:15), KRW-BTC exact 96 bars and closed next boundary; target-only gaps flat-filled; same-bar SL first",
+    "enabled": true
+  },
+  "fp_schedule_baseline": {
+    "generated": true,
+    "prefix": "output/safeup_head_challenger_v1_fp_schedule",
+    "split_schedule_sha256": "5c16867dfba7eb252b94565c25ead327b0b987af9ab9150377a2afd7ae1e7477",
+    "historical_holdout_contaminated": true
+  },
+  "artifacts": {
+    "predictions": "output/safeup_head_challenger_v1_predictions.csv.gz",
+    "picks": "output/safeup_head_challenger_v1_picks.csv.gz",
+    "summary": "output/safeup_head_challenger_v1_summary.csv",
+    "folds": "output/safeup_head_challenger_v1_folds.csv",
+    "heads": "output/safeup_head_challenger_v1_heads.csv",
+    "paired": "output/safeup_head_challenger_v1_paired.csv"
+  },
+  "prediction_scope_contract": {
+    "discovery_oof_dates": 581,
+    "discovery_oof_start": "2024-06-25",
+    "discovery_oof_end": "2026-01-26",
+    "locked_holdout_dates": 180,
+    "locked_holdout_start": "2026-01-27",
+    "locked_holdout_end": "2026-07-25",
+    "prediction_dates_contiguous": true,
+    "internal_gap_dates": 0
+  }
+}

@@ -55,6 +55,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from data.market_universe import is_excluded_signal_market  # noqa: E402
 # R1/R2와 동일한 leak-free head 파이프 (recommend.py가 import하는 바로 그 빌더).
 from scripts.downside_head_riskreward_v1 import (  # noqa: E402
     build_panel,
@@ -66,7 +67,10 @@ from scripts.downside_head_riskreward_v1 import (  # noqa: E402
     DN_THRESH,
 )
 # 라이브 ledger와 동일한 15m SL/TP/EOD 경로청산.
-from scripts.recommender_downside_exit_v1 import simulate_path  # noqa: E402
+from scripts.recommender_downside_exit_v1 import (  # noqa: E402
+    load_paths as load_execution_paths,
+    simulate_path,
+)
 
 D1_DB = str(_ROOT / "data" / "upbit_d1.db")
 M15_DB = str(_ROOT / "data" / "upbit_15m.db")
@@ -90,6 +94,21 @@ REGIMES = ["bull_quiet", "bull_volatile", "bear_quiet", "bear_volatile"]
 # A2a 후보 정렬키: R1 ratio + downside-penalized λ grid (regime별로 train에서 선택).
 LAMBDA_GRID = [1.0, 2.0, 3.0]
 
+
+def _reject_contaminated_cache(panel: pd.DataFrame) -> None:
+    excluded = sorted(
+        {
+            str(market)
+            for market in panel["market"].dropna().unique()
+            if is_excluded_signal_market(str(market))
+        }
+    )
+    if excluded:
+        raise RuntimeError(
+            "cached regime panel contains excluded signal markets "
+            f"{excluded}; rerun with --rebuild-panel"
+        )
+
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s",
                     handlers=[logging.StreamHandler(sys.stdout)])
@@ -100,20 +119,7 @@ log = logging.getLogger("ch_regime_split")
 # 1. Full OOS candidate panel build (R2와 동일 substrate) — 캐시
 # ============================================================================
 def load_paths(pairs: pd.DataFrame) -> dict:
-    conn = sqlite3.connect(M15_DB)
-    paths = {}
-    for _, r in pairs.iterrows():
-        m, dt = r["market"], pd.Timestamp(r["date"])
-        start = dt.strftime("%Y-%m-%d 09:00:00")
-        end = (dt + pd.Timedelta(days=1)).strftime("%Y-%m-%d 09:00:00")
-        rows = conn.execute(
-            "SELECT open,high,low,close FROM candles WHERE market=? AND "
-            "timestamp>=? AND timestamp<? ORDER BY timestamp", (m, start, end)
-        ).fetchall()
-        if rows:
-            paths[(m, dt.date())] = rows
-    conn.close()
-    return paths
+    return load_execution_paths(pairs, db_path=M15_DB)
 
 
 def realize_net(bars: list):
@@ -191,6 +197,7 @@ def get_panel(args) -> pd.DataFrame:
     if PANEL_CACHE.exists() and not args.rebuild_panel:
         log.info("loading cached panel %s", PANEL_CACHE)
         p = pd.read_parquet(PANEL_CACHE)
+        _reject_contaminated_cache(p)
         p["date"] = pd.to_datetime(p["date"]).dt.date
         return p
     log.info("building full OOS panel (XGB heads + 15m net) — 느림 ...")
@@ -213,7 +220,7 @@ def net_metrics(picks: pd.DataFrame) -> dict:
     eq = (1 + daily).cumprod(); peak = eq.cummax()
     mdd = float(((eq - peak) / peak).min())
     cum = float(eq.iloc[-1] - 1.0)
-    mu = float(net.mean()); sd = float(daily.std())
+    trade_mu = float(net.mean()); daily_mu = float(daily.mean()); sd = float(daily.std())
     dstd = float(daily[daily < 0].std()) if (daily < 0).any() else np.nan
     k5 = max(1, int(np.ceil(0.05 * n)))
     cvar95 = float(np.sort(net)[:k5].mean())
@@ -223,14 +230,14 @@ def net_metrics(picks: pd.DataFrame) -> dict:
         n=int(n), n_days=int(d["date"].nunique()),
         pct_sl=float((oc == "sl").mean()),                              # ★ 1순위
         deep_loss_freq_noSL=float((eod <= DEEP_LOSS).mean()) if len(eod) else np.nan,
-        net_mean=mu,                                                     # ★ 2순위
+        net_mean=trade_mu,                                               # ★ 2순위
         hit=float((net > 0).mean()),                                     # ★ 3순위
         precision_pump20=float(d["pump20_hit"].dropna().mean())
         if d["pump20_hit"].notna().any() else np.nan,
         deep_loss_freq=float((net <= DEEP_LOSS).mean()),
         cvar95=cvar95, worst=float(net.min()), mdd=mdd, cum=cum,
-        sharpe=float(mu / sd * np.sqrt(365)) if sd and sd > 0 else np.nan,
-        sortino=float(mu / dstd * np.sqrt(365)) if dstd and dstd > 0 else np.nan,
+        sharpe=float(daily_mu / sd * np.sqrt(365)) if sd and sd > 0 else np.nan,
+        sortino=float(daily_mu / dstd * np.sqrt(365)) if dstd and dstd > 0 else np.nan,
         pct_tp=float((oc == "tp").mean()), pct_eod=float((oc == "eod").mean()),
     )
 

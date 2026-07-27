@@ -31,9 +31,9 @@ from sklearn.utils.class_weight import compute_sample_weight
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from signals.features import assemble_training_panel
 from signals.models.xgb_phase1 import EXCLUDE_COLS
-
 
 LEAK_COLS = {"net_under_tp", "max_return", "label", "label_tail",
              "next_open", "next_high", "next_low", "next_close",
@@ -111,7 +111,7 @@ def main():
     print(f"=== Build detector v1 (target ≥{int(args.target_pct*100)}%) ===\n")
 
     log.info("loading + panel + label...")
-    krw = list_markets(args.upbit_db)
+    krw = signal_eligible_markets(list_markets(args.upbit_db))
     candles = {m: load_candles(args.upbit_db, m) for m in krw}
     if Path(args.binance_db).exists():
         for m in list_markets(args.binance_db):

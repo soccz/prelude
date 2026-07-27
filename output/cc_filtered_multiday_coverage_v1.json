@@ -1,0 +1,58 @@
+{
+  "oos_rows": 80000,
+  "oos_dates": 800,
+  "oos_window": [
+    "2024-04-22",
+    "2026-07-25"
+  ],
+  "universe": "static_top100",
+  "n_folds": 6,
+  "embargo": 5,
+  "dump_label": "dump_B",
+  "filter_q_grid": [
+    0.6,
+    0.7,
+    0.8
+  ],
+  "hold_grid": [
+    1,
+    2,
+    3,
+    5
+  ],
+  "tp_grid": [
+    0.08,
+    0.12
+  ],
+  "sl_grid": [
+    0.05
+  ],
+  "trail_grid": [
+    0.08
+  ],
+  "n_combos_total": 112,
+  "cost_round_trip": 0.0015,
+  "deep_loss_thresh": -0.05,
+  "entry_set_coverage": {
+    "R1_unfiltered": {
+      "n_picks": 2400,
+      "n_days": 800,
+      "frac_substituted": 0.0
+    },
+    "C3_filt_q0.6": {
+      "n_picks": 2400,
+      "n_days": 800,
+      "frac_substituted": 0.68625
+    },
+    "C3_filt_q0.7": {
+      "n_picks": 2400,
+      "n_days": 800,
+      "frac_substituted": 0.5716666666666667
+    },
+    "C3_filt_q0.8": {
+      "n_picks": 2400,
+      "n_days": 800,
+      "frac_substituted": 0.46791666666666665
+    }
+  }
+}

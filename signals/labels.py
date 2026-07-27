@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -363,7 +362,8 @@ if __name__ == "__main__":
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from data.database import load_candles, list_markets
+    from data.database import list_markets, load_candles
+    from data.market_universe import signal_eligible_markets
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", default="data/upbit_d1.db")
@@ -378,7 +378,7 @@ if __name__ == "__main__":
         df = load_candles(args.db, args.coin)
     else:
         # 전체 코인 panel
-        markets = list_markets(args.db)
+        markets = signal_eligible_markets(list_markets(args.db))
         print(f"loading {len(markets)} markets...")
         dfs = []
         for m in markets:

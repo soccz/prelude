@@ -15,9 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable
 
-import numpy as np
 import pandas as pd
 
 # 직접 실행용
@@ -74,7 +73,6 @@ class PurgedWalkForward:
                 continue
 
             val_start_dt = val_dates[0]
-            val_end_dt = val_dates[-1]
             embargo_dt = val_start_dt - pd.Timedelta(days=self.embargo_days)
 
             if self.expand_train:
@@ -235,6 +233,7 @@ if __name__ == "__main__":
     import argparse
 
     from data.database import list_markets, load_candles
+    from data.market_universe import signal_eligible_markets
     from signals.features import assemble_training_panel
 
     parser = argparse.ArgumentParser()
@@ -248,7 +247,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print(f"loading {args.limit} KRW + 일부 BINANCE markets...")
-    krw_markets = list_markets(args.upbit_db)[: args.limit]
+    krw_markets = signal_eligible_markets(list_markets(args.upbit_db))[
+        : args.limit
+    ]
     candles = {m: load_candles(args.upbit_db, m) for m in krw_markets}
     if Path(args.binance_db).exists():
         bn_markets = list_markets(args.binance_db)[: args.limit]
@@ -267,17 +268,17 @@ if __name__ == "__main__":
         panel, n_folds=args.n_folds, embargo_days=args.embargo, holdout_days=args.holdout
     )
 
-    print(f"\n=== CV summary ===")
+    print("\n=== CV summary ===")
     if out.get("cv_summary"):
         for k, v in out["cv_summary"].items():
             print(f"  {k}: {v:.4f}")
 
-    print(f"\n=== CV per-fold ===")
+    print("\n=== CV per-fold ===")
     if len(out["cv_results"]) > 0:
         cols = ["fold", "train_n", "val_n", "mlogloss", "accuracy", "macro_f1", "brier"]
         print(out["cv_results"][cols].to_string(index=False, float_format=lambda x: f"{x:.4f}"))
 
-    print(f"\n=== Final holdout ===")
+    print("\n=== Final holdout ===")
     if out.get("holdout"):
         for k, v in out["holdout"].items():
             if isinstance(v, list):

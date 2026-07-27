@@ -17,7 +17,7 @@ self-contained: 다른 폴더 import 없음. 기존 convention 만 mirror (Explo
   - 유니버스: signals/recommend.py / pump_detector_v1.py — top-100 by D-1 quote_volume.
   - pump label: (high_D/open_D - 1) >= 0.10 / 0.20  (univariate_precursor_lift_v1.py).
   - leak 방어: 모든 raw 지표 .shift(1) (univariate_precursor_lift_v1.py:145).
-  - 제외: KRW-USDT/USDC (collector_d1.py) — DB 에 이미 없음.
+  - 제외: data.market_universe 의 canonical signal-excluded KRW markets.
 
 산출:
   output/day_quality_gate_v1_daily.csv      — 일별 label/feature 시계열
@@ -26,12 +26,25 @@ self-contained: 다른 폴더 import 없음. 기존 convention 만 mirror (Explo
   output/day_quality_gate_v1_summary.json   — 최종 요약 (판정 입력)
 """
 from __future__ import annotations
-import sqlite3, json, sys, math
+import json
+import sqlite3
+import sys
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
-DB = "data/upbit_d1.db"
-OUT = "output/day_quality_gate_v1"
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from data.market_universe import is_excluded_signal_market  # noqa: E402
+from scripts.univariate_precursor_lift_v1 import (  # noqa: E402
+    completed_upbit_d1_mask,
+)
+
+DB = str(ROOT / "data" / "upbit_d1.db")
+OUT = str(ROOT / "output" / "day_quality_gate_v1")
 
 # --- placeholders (CLAUDE.md §2.5 — 데이터가 더 좋은 값 주면 바꿈) ---
 UNIVERSE_TOP_N = 100        # 기존 시스템과 동일 (D-1 qv top-100)
@@ -58,6 +71,15 @@ def load_all_candles() -> pd.DataFrame:
         "SELECT market, timestamp, open, high, low, close, quote_volume FROM candles",
         c, parse_dates=["timestamp"])
     c.close()
+    df = df[
+        ~df["market"]
+        .astype(str)
+        .map(is_excluded_signal_market)
+    ].copy()
+    # The latest 09:00 KST row is an unfinished target, not a realized quiet
+    # day.  This generator is retrospective, so remove it before any label or
+    # lagged market-state aggregation.
+    df = df[completed_upbit_d1_mask(df["timestamp"])].copy()
     df["date"] = df["timestamp"].dt.normalize()
     df = df.sort_values(["market", "date"]).reset_index(drop=True)
     # per-market 파생 (전부 raw — shift 는 daily 집계 후)

@@ -66,6 +66,7 @@ from sklearn.utils.class_weight import compute_sample_weight
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from signals.features import assemble_training_panel, compute_btc_features
 from signals.labels_distribution import HEADS, compute_distribution_labels, MAX_BARS
 from signals.models.xgb_phase1 import EXCLUDE_COLS
@@ -139,7 +140,8 @@ def build_1h_precursor(candles_1h: dict, btc_df: pd.DataFrame) -> pd.DataFrame:
 
             opn = float(r["open"]) if r["open"] > 0 else np.nan
             cls = float(r["close"])
-            hi = float(r["high"]); lo = float(r["low"])
+            hi = float(r["high"])
+            lo = float(r["low"])
             vol = float(r["volume"])
             vol_24h_mean = float(r["vol_24h_mean_prior"])
             high_24h_prior = float(r["high_24h_prior"])
@@ -168,7 +170,10 @@ def build_1h_precursor(candles_1h: dict, btc_df: pd.DataFrame) -> pd.DataFrame:
                 cum_low = float(day_bars_until_08h["low"].min())
                 cum_vol = float(day_bars_until_08h["volume"].sum())
             else:
-                day_open = np.nan; cum_high = np.nan; cum_low = np.nan; cum_vol = np.nan
+                day_open = np.nan
+                cum_high = np.nan
+                cum_low = np.nan
+                cum_vol = np.nan
 
             cum_max_ret_to_08h = (cum_high / day_open - 1) if (pd.notna(day_open) and day_open > 0) else np.nan
             cum_dd_to_08h = (cum_low / day_open - 1) if (pd.notna(day_open) and day_open > 0) else np.nan
@@ -221,7 +226,7 @@ def feature_cols_baseline(df, label_cols):
         if c.startswith("next_"):
             continue
         dt = df[c].dtype
-        if dt == object or "datetime" in str(dt):
+        if pd.api.types.is_object_dtype(dt) or "datetime" in str(dt):
             continue
         cols.append(c)
     return cols
@@ -263,8 +268,10 @@ def build_4h_panel_for_labels(candles_4h, btc_regime_map):
             closes = g2["close"].values.astype(float)
             highs = g2["high"].values.astype(float)[:MAX_BARS]
             lows = g2["low"].values.astype(float)[:MAX_BARS]
-            highs_p = np.full(MAX_BARS, np.nan); lows_p = np.full(MAX_BARS, np.nan)
-            highs_p[:n] = highs[:n]; lows_p[:n] = lows[:n]
+            highs_p = np.full(MAX_BARS, np.nan)
+            lows_p = np.full(MAX_BARS, np.nan)
+            highs_p[:n] = highs[:n]
+            lows_p[:n] = lows[:n]
             rows.append({
                 "market": market, "date_only": date,
                 "open_4h": float(opens[0]), "close_4h": float(closes[-1]),
@@ -297,7 +304,7 @@ def main():
 
     # === 1) daily panel + label ===
     log.info("loading daily panel...")
-    krw = list_markets(args.upbit_d1)
+    krw = signal_eligible_markets(list_markets(args.upbit_d1))
     candles_d1 = {m: load_candles(args.upbit_d1, m) for m in krw}
     if Path(args.binance_d1).exists():
         for m in list_markets(args.binance_d1):
@@ -312,7 +319,11 @@ def main():
 
     # === 2) labels (4h based, leak fix) ===
     log.info("loading 4h candles + computing labels...")
-    krw_4h = [m for m in list_markets(args.upbit_4h) if m.startswith("KRW-")]
+    krw_4h = [
+        m
+        for m in signal_eligible_markets(list_markets(args.upbit_4h))
+        if m.startswith("KRW-")
+    ]
     candles_4h = {m: load_candles(args.upbit_4h, m) for m in krw_4h}
     candles_4h = {k: v for k, v in candles_4h.items() if v is not None and len(v) > 0}
     btc_feat = compute_btc_features(btc_d1.copy())
@@ -326,7 +337,11 @@ def main():
 
     # === 3) 1h precursor ===
     log.info("loading 1h candles + computing precursor (08:00 snapshot)...")
-    krw_1h = [m for m in list_markets(args.upbit_1h) if m.startswith("KRW-")]
+    krw_1h = [
+        m
+        for m in signal_eligible_markets(list_markets(args.upbit_1h))
+        if m.startswith("KRW-")
+    ]
     candles_1h = {m: load_candles(args.upbit_1h, m) for m in krw_1h}
     candles_1h = {k: v for k, v in candles_1h.items() if v is not None and len(v) > 30}
     log.info(f"  1h markets: {len(candles_1h)}")

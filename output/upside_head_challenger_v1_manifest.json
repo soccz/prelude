@@ -1,0 +1,31 @@
+{
+  "schema": "upside_head_challenger_v1_manifest",
+  "gzip_mtime": 0,
+  "files": {
+    "predictions": {
+      "path": "/mnt/20t/prelude/output/upside_head_challenger_v1_predictions.csv.gz",
+      "bytes": 35185778,
+      "sha256": "0edf12c67a8ba3bc78a4cfa2eb3f76ba4b90af782b3013b02d9f6e4010459a08"
+    },
+    "metrics": {
+      "path": "/mnt/20t/prelude/output/upside_head_challenger_v1_metrics.csv",
+      "bytes": 12302,
+      "sha256": "7acd689dc73f18f5f6b55c908e62655589df4c1e46bc57e2c82493fb75fa8dbe"
+    },
+    "calibration": {
+      "path": "/mnt/20t/prelude/output/upside_head_challenger_v1_calibration.csv",
+      "bytes": 12491,
+      "sha256": "5de308e2594637df2327f9f3e50a14acba43bc121eece6b819274c377be03e09"
+    },
+    "paired_bootstrap": {
+      "path": "/mnt/20t/prelude/output/upside_head_challenger_v1_paired_bootstrap.csv",
+      "bytes": 1770,
+      "sha256": "0853ee0933dfac501dafe30b3c442ca6fd0bfefb71665e1e3e1763de6a342179"
+    },
+    "coverage": {
+      "path": "/mnt/20t/prelude/output/upside_head_challenger_v1_coverage.json",
+      "bytes": 48886,
+      "sha256": "a39eb9811e61921e1e7cf3405104093d0cf6a0af01af98e53014da8d57172f0f"
+    }
+  }
+}

@@ -1,4 +1,4 @@
-"""quant-evaluator — A1 degeneracy 본질: 하방 개선이 '진짜 dump 회피'인가
+r"""quant-evaluator — A1 degeneracy 본질: 하방 개선이 '진짜 dump 회피'인가
 '저변동 교체의 부산물(상방도 깎임)'인가.
 
 A1 picks dump(R1 vs A1_sustain) 을 (date,market) 키로 정렬해:
@@ -8,9 +8,9 @@ A1 picks dump(R1 vs A1_sustain) 을 (date,market) 키로 정렬해:
 DROPPED vs ADDED 의 net·하방(eod_net·down_low_ret)·상방(up_high_ret) 분해 →
 교체가 '하방 나쁜 픽을 빼고 비슷한 상방의 픽을 넣었나' vs '상·하방 다 작은 저변동으로 갈았나'.
 """
-import pandas as pd
-import numpy as np
 from pathlib import Path
+
+import pandas as pd
 
 OUT = Path(__file__).resolve().parent.parent / "output"
 d = pd.read_csv(OUT / "ch_sustainability_picks_v1.csv")
@@ -49,7 +49,8 @@ summ(dropped, "DROPPED")   # R1 가 갖고있던, A1 이 버린 픽
 summ(added, "ADDED")       # A1 이 새로 넣은 픽
 
 print("\n=== 핵심 판별 ===")
-dr = dropped.dropna(subset=["net"]); ad = added.dropna(subset=["net"])
+dr = dropped.dropna(subset=["net"])
+ad = added.dropna(subset=["net"])
 print(f"DROPPED(버린) up_high {dr.up_high_ret.mean():+.4f}  vs  ADDED(넣은) up_high {ad.up_high_ret.mean():+.4f}  "
       f"(Δ상방 {ad.up_high_ret.mean()-dr.up_high_ret.mean():+.4f})")
 print(f"DROPPED down_low {dr.down_low_ret.mean():+.4f}  vs  ADDED down_low {ad.down_low_ret.mean():+.4f}  "

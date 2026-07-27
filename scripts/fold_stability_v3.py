@@ -32,11 +32,11 @@ from sklearn.utils.class_weight import compute_sample_weight
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from ledger.config import ROUND_TRIP_COST_PCT
 from signals.features import assemble_training_panel
 from signals.models.xgb_phase1 import EXCLUDE_COLS
 from signals.validate import PurgedWalkForward
-
 
 CANDIDATES = [
     # A: OOF threshold (메인)
@@ -199,7 +199,7 @@ def main():
     print(f"global score + regime gate (regime 내부 quantile X)\n")
 
     log.info("loading + panel + label...")
-    krw = list_markets(args.upbit_db)
+    krw = signal_eligible_markets(list_markets(args.upbit_db))
     candles = {m: load_candles(args.upbit_db, m) for m in krw}
     if Path(args.binance_db).exists():
         for m in list_markets(args.binance_db):
