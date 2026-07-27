@@ -1,12 +1,18 @@
 [Unit]
 Description=prelude daily heartbeat (silent fail 방지)
-After=network.target prelude-close.service prelude-preopen-close.service
+Wants=network-online.target
+After=network-online.target prelude-close.service prelude-preopen-close.service prelude-publish-dashboard.service
+RequiresMountsFor=/home/soccz/22tb/prelude
+OnFailure=prelude-failure-alert@%n.service
 
 [Service]
 Type=oneshot
 User=soccz
+UMask=0077
+NoNewPrivileges=true
 WorkingDirectory=/home/soccz/22tb/prelude
-ExecStart=/bin/bash /home/soccz/22tb/prelude/scripts/heartbeat.sh
-TimeoutStartSec=120
-StandardOutput=append:/home/soccz/22tb/prelude/output/cron_heartbeat.log
-StandardError=append:/home/soccz/22tb/prelude/output/cron_heartbeat.log
+Environment=TZ=Asia/Seoul
+ExecStart=/home/soccz/22tb/prelude/deploy/run_pipeline_stage.sh heartbeat /bin/bash /home/soccz/22tb/prelude/scripts/heartbeat.sh
+TimeoutStartSec=3600
+StandardOutput=journal
+StandardError=journal

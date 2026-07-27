@@ -2,8 +2,8 @@
 Description=prelude heartbeat daily 10:30 KST timer
 
 [Timer]
-# 10:30 KST = 01:30 UTC. publish (10:10) 끝나고 20분 후 — 모든 cron 확인.
-OnCalendar=*-*-* 01:30:00 UTC
+# publish (10:10) 뒤 20분 후 — pipeline lock으로 겹침도 방지.
+OnCalendar=*-*-* 10:30:00 Asia/Seoul
 Persistent=true
 RandomizedDelaySec=60
 

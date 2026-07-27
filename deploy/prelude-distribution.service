@@ -1,12 +1,18 @@
 [Unit]
 Description=prelude distribution daily 09:05 KST (ACTIVE-only telegram)
-After=network.target
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor=/home/soccz/22tb/prelude
+OnFailure=prelude-failure-alert@%n.service
 
 [Service]
 Type=oneshot
 User=soccz
+UMask=0077
+NoNewPrivileges=true
 WorkingDirectory=/home/soccz/22tb/prelude
+Environment=TZ=Asia/Seoul
 ExecStart=/bin/bash /home/soccz/22tb/prelude/scripts/daily_run_distribution.sh
-TimeoutStartSec=600
-StandardOutput=append:/home/soccz/22tb/prelude/output/cron_dist.log
-StandardError=append:/home/soccz/22tb/prelude/output/cron_dist.log
+TimeoutStartSec=1200
+StandardOutput=journal
+StandardError=journal

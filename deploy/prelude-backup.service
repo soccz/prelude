@@ -1,12 +1,18 @@
 [Unit]
 Description=prelude daily DB backup (sqlite atomic .backup + integrity)
-After=network.target
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor=/home/soccz/22tb/prelude
+OnFailure=prelude-failure-alert@%n.service
 
 [Service]
 Type=oneshot
 User=soccz
+UMask=0077
+NoNewPrivileges=true
 WorkingDirectory=/home/soccz/22tb/prelude
+Environment=TZ=Asia/Seoul
 ExecStart=/bin/bash /home/soccz/22tb/prelude/scripts/backup_db.sh
-TimeoutStartSec=600
-StandardOutput=append:/home/soccz/22tb/prelude/output/cron_backup.log
-StandardError=append:/home/soccz/22tb/prelude/output/cron_backup.log
+TimeoutStartSec=3600
+StandardOutput=journal
+StandardError=journal

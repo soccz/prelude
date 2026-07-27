@@ -1,12 +1,19 @@
 [Unit]
 Description=prelude pre-open paper ledger close-out daily 10:05 KST
-After=network.target
+Wants=network-online.target
+After=network-online.target prelude-close.service
+RequiresMountsFor=/home/soccz/22tb/prelude
+OnFailure=prelude-failure-alert@%n.service
 
 [Service]
 Type=oneshot
 User=soccz
+UMask=0077
+NoNewPrivileges=true
 WorkingDirectory=/home/soccz/22tb/prelude
-ExecStart=/bin/bash /home/soccz/22tb/prelude/scripts/daily_close_preopen.sh
-TimeoutStartSec=300
-StandardOutput=append:/home/soccz/22tb/prelude/output/cron_preopen_close.log
-StandardError=append:/home/soccz/22tb/prelude/output/cron_preopen_close.log
+Environment=TZ=Asia/Seoul
+ExecStart=/home/soccz/22tb/prelude/deploy/run_pipeline_stage.sh preopen-close /bin/bash /home/soccz/22tb/prelude/scripts/daily_close_preopen.sh
+# Full-universe 96-bar labeling can legitimately exceed the old five minutes.
+TimeoutStartSec=3600
+StandardOutput=journal
+StandardError=journal

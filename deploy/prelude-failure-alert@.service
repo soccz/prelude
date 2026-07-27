@@ -1,0 +1,15 @@
+[Unit]
+Description=prelude failure alert for %i
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor=/home/soccz/22tb/prelude
+
+[Service]
+Type=oneshot
+User=soccz
+UMask=0077
+NoNewPrivileges=true
+WorkingDirectory=/home/soccz/22tb/prelude
+Environment=TZ=Asia/Seoul
+ExecStart=/home/soccz/22tb/prelude/venv/bin/python /home/soccz/22tb/prelude/scripts/systemd_failure_alert.py --unit %i
+TimeoutStartSec=120

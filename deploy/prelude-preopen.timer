@@ -2,14 +2,15 @@
 Description=prelude pre-open trigger daily 08:50 KST timer
 
 [Timer]
-# 08:50 KST = 23:50 UTC (previous day)
+# The timezone is part of the calendar expression; host timezone is irrelevant.
 # 08:55 fire 시 collector (255 coin × ~1s) + panel build 가 5분 넘어
 # decision window (08:45-08:59) 닫힘 → telegram skip 사고 (2026-05-13 관측).
 # 5분 일찍 fire 로 panel 까지 08:59 안에 완료, predict 가 window 안에 들어옴.
-OnCalendar=*-*-* 23:50:00 UTC
+OnCalendar=*-*-* 08:50:00 Asia/Seoul
 # Pre-open is timing-critical; do not catch up missed runs
 Persistent=false
 RandomizedDelaySec=30
+AccuracySec=5s
 
 [Install]
 WantedBy=timers.target

@@ -5,15 +5,24 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+PROJ_ROOT="$(pwd)"
 if [ -d "venv" ]; then source venv/bin/activate; fi
-if [ -f ".env" ]; then set -a; source .env; set +a; fi
+if [ -e "$PROJ_ROOT/.env" ] || [ -L "$PROJ_ROOT/.env" ]; then
+    # shellcheck disable=SC1091
+    source "$PROJ_ROOT/deploy/load_runtime_env.sh"
+    RUNTIME_PYTHON="$(command -v python)" || {
+        echo "Python runtime unavailable" >&2
+        exit 2
+    }
+    load_prelude_runtime_env "$PROJ_ROOT/.env" "$RUNTIME_PYTHON"
+fi
 
 LOG="output/cron_measure_$(date +%Y%m%d).log"
 mkdir -p output
 
 echo "=== prelude measure $(date) ===" >> "$LOG"
 
-python -c "
+if python -c "
 from pathlib import Path
 import json
 import pandas as pd
@@ -51,10 +60,17 @@ if ledger_path.exists():
         from notifier.telegram import send_telegram
         from notifier.format import format_drift_alert
         msg = format_drift_alert(state)
-        send_telegram(msg)
+        if not send_telegram(msg):
+            raise RuntimeError('drift alert delivery failed')
 else:
     print('  no ledger yet')
-" >> "$LOG" 2>&1 || echo "  measure failed" >> "$LOG"
+" >> "$LOG" 2>&1; then
+    :
+else
+    RC=$?
+    echo "  measure failed (exit=$RC)" >> "$LOG"
+    exit "$RC"
+fi
 
 echo "done $(date)" >> "$LOG"
 echo "" >> "$LOG"

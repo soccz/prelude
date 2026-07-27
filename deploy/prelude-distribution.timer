@@ -2,12 +2,13 @@
 Description=prelude distribution beta daily 09:05 KST timer
 
 [Timer]
-# 09:05 KST = 00:05 UTC
-OnCalendar=*-*-* 00:05:00 UTC
+# The timezone is explicit so host timezone changes cannot move the decision.
+OnCalendar=*-*-* 09:05:00 Asia/Seoul
 # Trading alerts are only valid near the scheduled decision time.
 # Do not catch up a missed 09:05 run later in the day as a paper entry.
 Persistent=false
 RandomizedDelaySec=60
+AccuracySec=5s
 
 [Install]
 WantedBy=timers.target

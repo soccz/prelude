@@ -12,6 +12,7 @@
 # 운영: prelude-heartbeat.timer (매일 10:30 KST — close cron 다음).
 
 set -uo pipefail
+export TZ=Asia/Seoul
 
 cd "$(dirname "$0")/.."
 PROJ_ROOT="$(pwd)"
@@ -20,13 +21,27 @@ LOG="$PROJ_ROOT/output/cron_heartbeat.log"
 if [ -d "$PROJ_ROOT/venv" ]; then
     source "$PROJ_ROOT/venv/bin/activate"
 fi
-if [ -f "$PROJ_ROOT/.env" ]; then
-    set -a
-    source "$PROJ_ROOT/.env"
-    set +a
+if [ -e "$PROJ_ROOT/.env" ] || [ -L "$PROJ_ROOT/.env" ]; then
+    # shellcheck disable=SC1091
+    source "$PROJ_ROOT/deploy/load_runtime_env.sh"
+    RUNTIME_PYTHON="$(command -v python)" || {
+        echo "Python runtime unavailable" >&2
+        exit 2
+    }
+    if ! load_prelude_runtime_env "$PROJ_ROOT/.env" "$RUNTIME_PYTHON"; then
+        exit 2
+    fi
 fi
 
 mkdir -p "$(dirname "$LOG")"
+if [ -L "$(dirname "$LOG")" ] || [ ! -d "$(dirname "$LOG")" ]; then
+    echo "heartbeat log directory must be a real directory" >&2
+    exit 2
+fi
+if [ -L "$LOG" ] || { [ -e "$LOG" ] && [ ! -f "$LOG" ]; }; then
+    echo "heartbeat log must be a regular non-symlink file: $LOG" >&2
+    exit 2
+fi
 echo "=== prelude heartbeat $(date +%Y-%m-%d\ %H:%M:%S) ===" >> "$LOG"
 
 ALERTS=()
@@ -50,14 +65,14 @@ for ledger in "$PROJ_ROOT/output/paper_ledger.csv" "$PROJ_ROOT/output/paper_ledg
     if [ "$name" = "paper_ledger_preopen.csv" ]; then
         shadow="$PROJ_ROOT/output/shadow_ledger_preopen.csv"
         if [ -f "$shadow" ]; then
-            shadow_n=$(grep -c "^$YESTERDAY," "$shadow" 2>/dev/null || echo 0)
+            shadow_n=$(grep -c "^$YESTERDAY," "$shadow" 2>/dev/null || true)
             echo "  $name: DEMOTED — shadow row $shadow_n 개" >> "$LOG"
         else
             echo "  $name: DEMOTED — shadow ledger 미생성" >> "$LOG"
         fi
         continue
     fi
-    n=$(grep -c "^$YESTERDAY," "$ledger" 2>/dev/null || echo 0)
+    n=$(grep -c "^$YESTERDAY," "$ledger" 2>/dev/null || true)
     echo "  $name: 어제 ($YESTERDAY) row $n 개" >> "$LOG"
     # bear silence 라 0 정상. 7일 연속 0 이면 alert.
     if [ "$n" = "0" ]; then
@@ -74,22 +89,44 @@ done
 for DB in "$PROJ_ROOT/data/upbit_d1.db" "$PROJ_ROOT/data/policy_competition.db"; do
     [ -f "$DB" ] || continue
     db_name=$(basename "$DB")
-    result=$(sqlite3 "$DB" "PRAGMA integrity_check(1);" 2>>"$LOG")
-    if [ "$result" != "ok" ]; then
-        WARN "$db_name integrity FAIL: $result"
+    result=""
+    if result=$(sqlite3 "$DB" "PRAGMA integrity_check(1);" 2>>"$LOG"); then
+        if [ "$result" != "ok" ]; then
+            WARN "$db_name integrity FAIL: ${result:-empty output}"
+        else
+            echo "  $db_name integrity ok" >> "$LOG"
+        fi
     else
-        echo "  $db_name integrity ok" >> "$LOG"
+        probe_rc=$?
+        WARN "$db_name integrity probe FAIL (exit=$probe_rc): ${result:-empty output}"
     fi
 done
 
-# 2b) policy competition JSON — dashboard/publish 가 strict JSON.parse 가능해야 함.
+# 2b) policy competition triplet — JSON/CSV/SQLite/input provenance 가 모두 같아야 함.
 POLICY_JSON="$PROJ_ROOT/output/policy_competition_summary.json"
 if [ -f "$POLICY_JSON" ]; then
-    json_result=$(python -c "import json,sys; json.load(open(sys.argv[1])); print('ok')" "$POLICY_JSON" 2>>"$LOG")
+    json_result=""
+    if json_result=$(python - 2>>"$LOG" <<'PYEOF'
+import pandas as pd
+
+from ops.policy_competition import load_policy_artifact
+
+load_policy_artifact(
+    asof=pd.Timestamp.now(tz="Asia/Seoul"),
+    require_exact_asof=True,
+    require_current=True,
+)
+print("ok")
+PYEOF
+); then
     if [ "$json_result" != "ok" ]; then
-        WARN "policy_competition_summary.json parse FAIL"
+        WARN "policy_competition provenance FAIL: ${json_result:-empty output}"
     else
-        echo "  policy_competition_summary.json parse ok" >> "$LOG"
+        echo "  policy_competition JSON/CSV/SQLite provenance ok" >> "$LOG"
+    fi
+    else
+        probe_rc=$?
+        WARN "policy_competition provenance probe FAIL (exit=$probe_rc): ${json_result:-empty output}"
     fi
 else
     WARN "policy_competition_summary.json 없음"
@@ -97,7 +134,8 @@ fi
 
 # 2c) ledger CSV 스키마 검증 — 행수만 보면 깨진 컬럼/timestamp 를 못 잡는다.
 #     pandas parse + 필수 컬럼 존재 확인. 깨졌으면 forward 검증 전체가 오염되므로 alert.
-csv_result=$(python - <<'PYEOF' 2>>"$LOG"
+csv_result=""
+if csv_result=$(python - <<'PYEOF' 2>>"$LOG"
 import pandas as pd
 from pathlib import Path
 
@@ -105,6 +143,7 @@ REQUIRED = {
     "output/paper_ledger.csv": ["date", "coin", "status"],
     "output/paper_ledger_preopen.csv": ["date", "coin", "status"],
     "output/shadow_ledger_recommend.csv": ["date", "coin", "status", "realized_pct"],
+    "output/shadow_ledger_recommend_preopen.csv": ["date", "coin", "status", "realized_pct"],
     "output/shadow_ledger_recommend_r2.csv": ["date", "coin", "status", "realized_pct"],
     "output/shadow_ledger_recommend_sustain.csv": ["date", "coin", "status", "realized_pct"],
     "output/shadow_ledger_pump_hunter.csv": ["date", "coin", "status", "realized_pct"],
@@ -124,30 +163,175 @@ for path, cols in REQUIRED.items():
         bad.append(f"{p.name}: parse fail ({type(e).__name__})")
 print("; ".join(bad) if bad else "ok")
 PYEOF
-)
-if [ "$csv_result" != "ok" ]; then
-    WARN "ledger CSV 스키마: $csv_result"
-else
-    echo "  ledger CSV 스키마 ok" >> "$LOG"
-fi
-
-# 3) disk 사용량 — /home/soccz/22tb (= /mnt/20t symlink, CLAUDE.md 규칙 준수)
-USAGE=$(df /home/soccz/22tb 2>/dev/null | awk 'NR==2 {print $5}' | tr -d '%')
-echo "  /home/soccz/22tb disk 사용 ${USAGE}%" >> "$LOG"
-if [ -n "$USAGE" ] && [ "$USAGE" -ge 90 ]; then
-    WARN "/home/soccz/22tb disk ${USAGE}% (≥90%)"
-fi
-
-# 4) publish.log — ★ 최신 publish 세션의 결과만 검사 (마지막 "=== prelude publish ===" 이후).
-#    예전엔 tail -20 grep [fail] 라, 직전 run 이 성공해도 그 위 옛 [fail] 이 tail 에 남아있으면
-#    매일 재알림했다(2026-06-05 false-alert). 이제 마지막 세션 블록에만 [fail] 있으면 경고.
-PUB_LOG="$PROJ_ROOT/output/cron_publish.log"
-if [ -f "$PUB_LOG" ]; then
-    LAST_SESSION=$(awk '/=== prelude publish dashboard/{buf=""} {buf=buf $0 "\n"} END{printf "%s", buf}' "$PUB_LOG")
-    if echo "$LAST_SESSION" | grep -q "\[fail\]"; then
-        last_fail=$(echo "$LAST_SESSION" | grep "\[fail\]" | tail -1)
-        WARN "publish 최근 fail: $last_fail"
+); then
+    if [ "$csv_result" != "ok" ]; then
+        WARN "ledger CSV 스키마: ${csv_result:-empty output}"
+    else
+        echo "  ledger CSV 스키마 ok" >> "$LOG"
     fi
+else
+    probe_rc=$?
+    WARN "ledger CSV 스키마 probe FAIL (exit=$probe_rc): ${csv_result:-empty output}"
+fi
+
+# 2d) 단일 snapshot → delivery receipt → 전유니버스 label/evaluation 연쇄.
+#     snapshot이 생긴 날에만 요구하므로 도입 첫날·정상 무신호 과거에는 오탐하지 않는다.
+snapshot_result=""
+if snapshot_result=$(python - <<'PYEOF' 2>>"$LOG"
+from datetime import datetime, timedelta
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+from notifier.delivery_receipt import read_delivery_receipt
+from ops.artifact_provenance import strict_json_object
+from scripts.evaluate_recommend_score_labels import _report_digest
+from scripts.pump_detector_v2_today import _validate_decision_document
+from signals.recommend_score_labels import load_label_artifact
+from signals.recommend_snapshot import load_snapshot
+
+root = Path("output")
+now = datetime.now(ZoneInfo("Asia/Seoul"))
+today = now.date().isoformat()
+yesterday = (now.date() - timedelta(days=1)).isoformat()
+bad = []
+
+today_dir = root / "recommend_snapshots" / today
+for name in ("preopen_r1.json", "open_r1.json"):
+    path = today_dir / name
+    if not path.exists():
+        bad.append(f"{name}: today's snapshot missing")
+        continue
+    try:
+        snapshot = load_snapshot(path)
+        receipt = read_delivery_receipt(snapshot)
+        if receipt is None:
+            bad.append(f"{name}: receipt missing")
+        elif not receipt["delivery_ok"]:
+            bad.append(f"{name}: delivery failed")
+    except Exception as exc:
+        bad.append(f"{name}: snapshot/receipt invalid ({type(exc).__name__})")
+
+v2_decision_path = root / "pump_v2_decisions" / f"{today}.json"
+if not v2_decision_path.exists():
+    bad.append("pump_v2: today's decision manifest missing")
+else:
+    try:
+        v2_payload = strict_json_object(v2_decision_path)
+        v2_decision = v2_payload.get("decision")
+        if not isinstance(v2_decision, dict):
+            raise ValueError("decision payload missing")
+        _validate_decision_document(
+            v2_payload,
+            v2_decision,
+            v2_decision_path,
+        )
+    except Exception as exc:
+        bad.append(f"pump_v2: decision manifest invalid ({type(exc).__name__})")
+
+yesterday_dir = root / "recommend_snapshots" / yesterday
+yesterday_snapshots = sorted(
+    path for path in yesterday_dir.glob("*.json")
+    if ".limit" not in path.name
+)
+for snapshot_path in yesterday_snapshots:
+    label_path = (
+        root / "recommend_score_labels" / yesterday / snapshot_path.name
+    )
+    if not label_path.exists():
+        bad.append(f"{snapshot_path.name}: label missing")
+        continue
+    try:
+        artifact = load_label_artifact(label_path)
+        if artifact.get("artifact_status") != "complete":
+            bad.append(
+                f"{snapshot_path.name}: label {artifact.get('artifact_status')}"
+            )
+    except Exception as exc:
+        bad.append(f"{snapshot_path.name}: label invalid ({type(exc).__name__})")
+
+if yesterday_snapshots:
+    evaluation_path = root / "recommend_score_label_evaluation.json"
+    try:
+        report = strict_json_object(evaluation_path)
+        if report.get("report_payload_sha256") != _report_digest(report):
+            bad.append("score evaluation checksum mismatch")
+        generated = datetime.fromisoformat(report["generated_at"]).astimezone(
+            ZoneInfo("Asia/Seoul")
+        )
+        if generated.date() != now.date():
+            bad.append("score evaluation not refreshed today")
+        used = {
+            (str(item.get("asof")), str(item.get("slot")))
+            for item in (report.get("artifacts", {}).get("used") or [])
+        }
+        for snapshot_path in yesterday_snapshots:
+            slot = snapshot_path.name.split("_", 1)[0]
+            if (yesterday, slot) not in used:
+                bad.append(
+                    f"{snapshot_path.name}: score evaluation did not use artifact"
+                )
+    except Exception as exc:
+        bad.append(f"score evaluation invalid ({type(exc).__name__})")
+
+print("; ".join(bad) if bad else "ok")
+PYEOF
+); then
+    if [ "$snapshot_result" != "ok" ]; then
+        WARN "recommend snapshot chain: ${snapshot_result:-empty output}"
+    else
+        echo "  recommend snapshot chain ok" >> "$LOG"
+    fi
+else
+    probe_rc=$?
+    WARN "recommend snapshot chain probe FAIL (exit=$probe_rc): ${snapshot_result:-empty output}"
+fi
+
+# 3) disk 사용량 — 검사 자체의 실패/비정상 출력도 silent skip하지 않는다.
+if USAGE=$(df /home/soccz/22tb 2>>"$LOG" | awk 'NR==2 {print $5}' | tr -d '%'); then
+    if [[ "$USAGE" =~ ^[0-9]+$ ]]; then
+        echo "  /home/soccz/22tb disk 사용 ${USAGE}%" >> "$LOG"
+        if [ "$USAGE" -ge 90 ]; then
+            WARN "/home/soccz/22tb disk ${USAGE}% (≥90%)"
+        fi
+    else
+        WARN "disk usage 검사 비정상 출력: ${USAGE:-empty}"
+    fi
+else
+    WARN "disk usage 검사 실행 실패"
+fi
+
+# 4) publish.log — 예정 시각 뒤에는 오늘 최신 세션의 명시적 성공 marker를 요구한다.
+#    파일 없음/어제 성공/오늘 시작만 하고 중단/오늘 fail 모두 fail-closed. 예정 시각
+#    전 수동 heartbeat만 예외로 두어 아직 실행되지 않은 publish를 오탐하지 않는다.
+PUBLISH_SCHEDULE_HHMM=1010
+PUB_LOG="$PROJ_ROOT/output/cron_publish.log"
+NOW_HHMM=$(date +%H%M)
+TODAY_ISO=$(date +%F)
+if [[ "$NOW_HHMM" =~ ^[0-9]{4}$ ]] && \
+   [ "$NOW_HHMM" -ge "$PUBLISH_SCHEDULE_HHMM" ]; then
+    if [ ! -f "$PUB_LOG" ]; then
+        WARN "publish 예정 시각 이후 로그 없음: $PUB_LOG"
+    else
+        LAST_SESSION=$(awk \
+            '/=== prelude publish dashboard/{buf=""} {buf=buf $0 "\n"} END{printf "%s", buf}' \
+            "$PUB_LOG")
+        if ! echo "$LAST_SESSION" | grep -Fq \
+            "=== prelude publish dashboard $TODAY_ISO "; then
+            WARN "publish 오늘 세션 없음 또는 최신 세션 날짜 불일치"
+        elif echo "$LAST_SESSION" | grep -q "\[fail\]"; then
+            last_fail=$(echo "$LAST_SESSION" | grep "\[fail\]" | tail -1)
+            WARN "publish 최근 fail: $last_fail"
+        elif ! echo "$LAST_SESSION" | grep -Eq \
+            '^\[done\] [0-9]{2}:[0-9]{2}:[0-9]{2} committed \+ pushed$'; then
+            WARN "publish 오늘 최신 세션 성공 완료 marker 없음"
+        else
+            echo "  publish 오늘 최신 세션 완료 ok" >> "$LOG"
+        fi
+    fi
+elif [[ "$NOW_HHMM" =~ ^[0-9]{4}$ ]]; then
+    echo "  publish 예정 시각 전 — 완료 marker 검사 보류" >> "$LOG"
+else
+    WARN "publish schedule 검사 시각 비정상: ${NOW_HHMM:-empty}"
 fi
 
 # 4.5) v2 시한부 판정 일일 채점 (2026-07-12 신설 — 사전등록 09-01 판정·조기킬 무인 감시).
@@ -157,19 +341,31 @@ V2_RC=$?
 echo "$V2_LINE" >> "$LOG"
 if [ "$V2_RC" -eq 21 ]; then
     WARN "v2 조기 KILL 조건 발동: $V2_LINE"
+elif [ "$V2_RC" -ne 0 ]; then
+    WARN "v2 scoreboard 실행 실패 (exit=$V2_RC): $V2_LINE"
 fi
 
 # 5) 결과 — 이상 시만 텔레그램
+EXIT=0
 if [ ${#ALERTS[@]} -gt 0 ]; then
     MSG="⚠️ prelude heartbeat ($(date +%m-%d\ %H:%M))"$'\n'$'\n'
     for a in "${ALERTS[@]}"; do
         MSG="${MSG}- ${a}"$'\n'
     done
     cd "$PROJ_ROOT"
-    python -c "from notifier.telegram import send_telegram; send_telegram('''$MSG''')" >> "$LOG" 2>&1 || true
-    echo "[alert sent] ${#ALERTS[@]} issue" >> "$LOG"
+    if HEARTBEAT_MESSAGE="$MSG" python -c \
+        "import os,sys; from notifier.telegram import send_telegram; sys.exit(0 if send_telegram(os.environ['HEARTBEAT_MESSAGE']) else 1)" \
+        >> "$LOG" 2>&1; then
+        echo "[alert sent] ${#ALERTS[@]} issue" >> "$LOG"
+    else
+        DELIVERY_RC=$?
+        echo "[critical] heartbeat alert delivery FAIL (exit=$DELIVERY_RC)" >> "$LOG"
+        # 상세 alert를 전달하지 못한 경우에만 systemd OnFailure가 generic
+        # fallback alert를 시도한다. 전달 성공 뒤 exit 1이면 같은 이상을 2회 보낸다.
+        EXIT=1
+    fi
 else
     echo "[ok] all checks pass — silent" >> "$LOG"
 fi
 echo "" >> "$LOG"
-exit 0
+exit "$EXIT"

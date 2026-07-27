@@ -2,10 +2,9 @@
 Description=prelude pre-open close-out daily 10:05 KST timer
 
 [Timer]
-# 10:05 KST = 01:05 UTC.
 # Pre-open close needs the full first hour (09:00-10:00) to measure first1h
 # labels without partial data.
-OnCalendar=*-*-* 01:05:00 UTC
+OnCalendar=*-*-* 10:05:00 Asia/Seoul
 Persistent=true
 RandomizedDelaySec=30
 

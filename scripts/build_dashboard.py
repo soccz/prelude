@@ -6,10 +6,10 @@
   accuracy.json  — rolling 30일 hit rate 시계열
 
 가상 PnL 룰 (텔레그램 가이드와 동일):
-  - 알림 1건 = 1단위 자본 (equal weight)
+  - 같은 날 알림은 동일 비중, 알림 없는 날은 cash 0%
   - +5% 도달 시 익절, 아니면 EOD close (자동 손절 X)
   - 거래비용 ROUND_TRIP_COST_PCT 차감
-  - cum_pnl_pct = sum of per-alert net_return (compounding 안 함, 단순합)
+  - cum_pnl_pct = 일별 동일비중 net return의 복리 누적
 
 운영:
   매일 close cron 끝에 호출. JSON 만 갱신, html/JS 는 그대로 둔다.
@@ -22,12 +22,16 @@ from __future__ import annotations
 
 import argparse
 import base64
+import io
 import json
 import logging
 import os
+import stat
 import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Sequence
 
 import numpy as np
 import pandas as pd
@@ -35,18 +39,146 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from ledger.config import ROUND_TRIP_COST_PCT
+from ledger.portfolio_metrics import (
+    CRYPTO_PERIODS_PER_YEAR,
+    daily_equal_weight,
+    date_cluster_bootstrap,
+    equity_curve,
+    normalize_kst_date,
+    summarize_daily,
+)
+from ops.artifact_provenance import (  # noqa: E402
+    ArtifactSourceChangedError,
+    ArtifactValidationError,
+    atomic_write_bytes,
+    file_identity,
+    sha256_bytes,
+    strict_json_object,
+)
+from ops.champion_selector import (  # noqa: E402
+    ChampionStateError,
+    load_champion_state_artifact,
+)
 from scripts.idea_validation_report import (
+    IdeaArtifactError,
+    build_input_manifest as build_idea_input_manifest,
     build_report as build_idea_validation_report,
+    input_manifest_matches_current,
+    load_idea_validation_artifact,
     load_candidate_ledger as load_idea_candidate_ledger,
+    report_payload_digest,
+    validate_idea_validation_payload,
+)
+from ops.policy_competition import (  # noqa: E402
+    POLICY_DB,
+    PolicyArtifactError,
+    load_policy_artifact,
 )
 from scripts.policy_history import build_policy_evolution
 
 
-DEFAULT_OUT_DIR = "/home/soccz/22tb/soccz.github.io/projects/prelude/dashboard/data"
+# Manual builds stay self-contained. Production publish always supplies its
+# private generated-data directory explicitly.
+DEFAULT_OUT_DIR = "output/dashboard_preview"
 ROLLING_WINDOW_DAYS = 30
 TP_PCT = 0.05  # 사용자 가이드: "5% 오르면 즉시 매도"
-DEFAULT_PIN = "9963"
 PBKDF2_ITERATIONS = 250000
+MIN_DASHBOARD_PASSPHRASE_LENGTH = 12
+DASHBOARD_GENERATION_ENV = "PRELUDE_DASHBOARD_GENERATION_ID"
+
+
+def resolve_dashboard_passphrase(explicit: str | None = None) -> str:
+    """Resolve a non-default dashboard secret or fail closed.
+
+    The dashboard is a static encrypted artifact, so a short published default
+    is equivalent to no meaningful access control.  Production builds must
+    receive a secret explicitly through ``--pin`` or
+    ``PRELUDE_DASHBOARD_PIN``.  Plaintext remains an explicit test-only mode.
+    """
+    value = explicit if explicit is not None else os.environ.get(
+        "PRELUDE_DASHBOARD_PIN"
+    )
+    if value is None or not value:
+        raise ValueError(
+            "dashboard encryption requires --pin or PRELUDE_DASHBOARD_PIN"
+        )
+    if value != value.strip():
+        raise ValueError(
+            "dashboard passphrase must not have leading/trailing whitespace"
+        )
+    if len(value) < MIN_DASHBOARD_PASSPHRASE_LENGTH:
+        raise ValueError(
+            "dashboard passphrase must contain at least "
+            f"{MIN_DASHBOARD_PASSPHRASE_LENGTH} characters"
+        )
+    return value
+
+
+def resolve_dashboard_generation_id(explicit: str | None = None) -> str:
+    """Return one canonical UUIDv4 shared by every asset in a publish."""
+    value = explicit or os.environ.get(DASHBOARD_GENERATION_ENV)
+    if value is None:
+        return str(uuid.uuid4())
+    try:
+        parsed = uuid.UUID(value)
+    except (ValueError, AttributeError) as exc:
+        raise ValueError(
+            f"{DASHBOARD_GENERATION_ENV} must be a canonical UUIDv4"
+        ) from exc
+    if parsed.version != 4 or str(parsed) != value:
+        raise ValueError(
+            f"{DASHBOARD_GENERATION_ENV} must be a canonical UUIDv4"
+        )
+    return value
+
+
+def _bind_idea_dashboard_generation(
+    payload: dict[str, Any],
+    generation_id: str,
+) -> dict[str, Any]:
+    bound = dict(payload)
+    bound["dashboard_generation_id"] = generation_id
+    bound["payload_sha256"] = report_payload_digest(bound)
+    return bound
+
+
+def _rows_through_asof(
+    frame: pd.DataFrame,
+    asof=None,
+    *,
+    date_col: str = "date",
+) -> pd.DataFrame:
+    """Return one canonical KST-date cohort at or before ``asof``.
+
+    Dashboard ledgers store date-only KST values, but tests/backfills may carry
+    timezone-aware instants.  Invalid or future-dated rows are excluded before
+    *any* headline, radar, history, or performance calculation so all metrics
+    share the same cohort.
+    """
+    if frame is None or not isinstance(frame, pd.DataFrame):
+        return pd.DataFrame()
+    out = frame.reset_index(drop=True).copy()
+    if out.empty:
+        return out
+    if date_col not in out.columns:
+        return out.iloc[0:0].copy()
+    cutoff = normalize_kst_date(asof)
+
+    def _parse(value):
+        if value is None or (
+            isinstance(value, float) and np.isnan(value)
+        ) or str(value).strip() == "":
+            return pd.NaT
+        try:
+            return normalize_kst_date(value)
+        except (TypeError, ValueError):
+            return pd.NaT
+
+    dates = out[date_col].map(_parse)
+    out = out.loc[dates.notna() & (dates <= cutoff)].copy()
+    if len(out):
+        out[date_col] = dates.loc[out.index].dt.strftime("%Y-%m-%d")
+    return out.reset_index(drop=True)
 
 
 # ============================================================================
@@ -57,12 +189,37 @@ def _virtual_pnl_per_alert(max_ret_pct: float, close_ret_pct: float) -> float:
 
     Returns: net return as decimal (e.g. 0.034 == +3.4%).
     """
-    if pd.isna(max_ret_pct):
+    try:
+        max_d = float(max_ret_pct) / 100.0
+    except (TypeError, ValueError):
         return np.nan
-    max_d = max_ret_pct / 100.0
-    close_d = (close_ret_pct or 0.0) / 100.0
-    gross = TP_PCT if max_d >= TP_PCT else close_d
-    return gross - ROUND_TRIP_COST_PCT
+    if not np.isfinite(max_d):
+        return np.nan
+    if max_d >= TP_PCT:
+        return TP_PCT - ROUND_TRIP_COST_PCT
+    try:
+        close_d = float(close_ret_pct) / 100.0
+    except (TypeError, ValueError):
+        return np.nan
+    if not np.isfinite(close_d):
+        return np.nan
+    return close_d - ROUND_TRIP_COST_PCT
+
+
+def _net_pnl_series(
+    max_values,
+    close_values,
+    *,
+    tp: float = TP_PCT,
+    cost: float = ROUND_TRIP_COST_PCT,
+) -> pd.Series:
+    """Return index-aligned net PnL without inventing missing path evidence."""
+    max_d = pd.to_numeric(max_values, errors="coerce") / 100.0
+    close_d = pd.to_numeric(close_values, errors="coerce") / 100.0
+    gross = np.where(max_d >= tp, tp, close_d)
+    pnl = pd.Series(gross - cost, index=max_d.index, dtype=float)
+    invalid_path = ~np.isfinite(max_d)
+    return pnl.mask(invalid_path | ~np.isfinite(pnl))
 
 
 def _per_alert_pnl_series(closed: pd.DataFrame, max_col: str, close_col: str) -> pd.Series:
@@ -74,22 +231,27 @@ def _per_alert_pnl_series(closed: pd.DataFrame, max_col: str, close_col: str) ->
     """
     if len(closed) == 0 or max_col not in closed.columns:
         return pd.Series(dtype=float)
-    max_d = pd.to_numeric(closed[max_col], errors="coerce") / 100.0
-    close_d = pd.to_numeric(closed.get(close_col, np.nan), errors="coerce") / 100.0
-    valid = max_d.notna()
-    gross = np.where(max_d >= TP_PCT, TP_PCT, close_d)
-    pnl = pd.Series(gross - ROUND_TRIP_COST_PCT, index=closed.index)
-    return pnl[valid].dropna()
+    return _net_pnl_series(
+        closed[max_col],
+        closed.get(close_col, pd.Series(np.nan, index=closed.index)),
+    ).dropna()
 
 
-def compute_quant_metrics(closed: pd.DataFrame, max_col: str, close_col: str) -> dict:
+def compute_quant_metrics(
+    closed: pd.DataFrame,
+    max_col: str,
+    close_col: str,
+    *,
+    asof=None,
+) -> dict:
     """헤드라인 metric — Sharpe/Sortino/Calmar/Profit Factor/Expectancy.
 
-    daily aggregation 으로 Sharpe (그날 net 의 평균 / std × √252).
-    Calmar = annualized return / |MDD|.
+    일별 equal-weight aggregation 으로 Sharpe (평균 / std × √365).
+    Calmar = compounded annualized return / |MDD|.
     Profit Factor = sum(positive) / |sum(negative)|.
     Expectancy = avg per trade.
     """
+    closed = _rows_through_asof(closed, asof)
     pnl = _per_alert_pnl_series(closed, max_col, close_col)
     if len(pnl) == 0:
         return {"n_trades": 0}
@@ -101,22 +263,21 @@ def compute_quant_metrics(closed: pd.DataFrame, max_col: str, close_col: str) ->
     closed = closed.dropna(subset=["pnl"])
     closed["date_dt"] = pd.to_datetime(closed["date"])
 
-    # daily aggregate (같은 날 알림 N 개면 그날 net = mean)
-    daily = closed.groupby(closed["date_dt"].dt.date)["pnl"].sum().sort_index()
-    n_days = len(daily)
-    avg_daily = float(daily.mean())
-    std_daily = float(daily.std(ddof=1)) if n_days > 1 else float("nan")
-    downside_daily = daily[daily < 0]
-    downside_std = (
-        float(downside_daily.std(ddof=1)) if len(downside_daily) > 1 else float("nan")
+    daily = daily_equal_weight(
+        closed["date_dt"],
+        closed["pnl"],
+        calendar_end=asof,
     )
-
-    sharpe = (avg_daily / std_daily) * np.sqrt(252) if std_daily and std_daily > 0 else float("nan")
-    sortino = (avg_daily / downside_std) * np.sqrt(252) if downside_std and downside_std > 0 else float("nan")
-
-    cum = daily.cumsum()
-    mdd = float((cum - cum.cummax()).min())
-    annualized_return = avg_daily * 252
+    portfolio = summarize_daily(daily)
+    n_days = len(daily)
+    cumulative_return = portfolio["cumulative_return"]
+    if n_days and 1.0 + cumulative_return > 0:
+        annualized_return = (1.0 + cumulative_return) ** (
+            CRYPTO_PERIODS_PER_YEAR / n_days
+        ) - 1.0
+    else:
+        annualized_return = float("nan")
+    mdd = portfolio["max_drawdown"]
     calmar = annualized_return / abs(mdd) if mdd < 0 else float("nan")
 
     wins = pnl[pnl > 0]
@@ -132,11 +293,14 @@ def compute_quant_metrics(closed: pd.DataFrame, max_col: str, close_col: str) ->
     return {
         "n_trades": int(len(pnl)),
         "n_days": int(n_days),
+        "n_signal_days": int(closed["date_dt"].dt.normalize().nunique()),
         "n_wins": int(len(wins)),
         "n_losses": int(len(losses)),
-        "sharpe_ann": _maybe_float(sharpe),
-        "sortino_ann": _maybe_float(sortino),
+        "sharpe_ann": _maybe_float(portfolio["sharpe_ann"]),
+        "sortino_ann": _maybe_float(portfolio["sortino_ann"]),
         "calmar": _maybe_float(calmar),
+        "max_drawdown_pct": _maybe_float(mdd * 100),
+        "cumulative_return_pct": _maybe_float(cumulative_return * 100),
         "profit_factor": _maybe_float(profit_factor),
         "expectancy_pct": _maybe_float(expectancy * 100),
         "avg_win_pct": _maybe_float(avg_win * 100) if len(wins) else None,
@@ -154,64 +318,91 @@ def _maybe_float(v):
 
 def compute_bootstrap_ci(closed: pd.DataFrame, max_col: str, close_col: str,
                          n_iter: int = 1000, seed: int = 42) -> dict:
-    """Trade-level bootstrap 95% CI for cum PnL, mean PnL, Sharpe.
-
-    표본이 28 정도라 CI 는 매우 넓을 것 — 그게 "정직한" 신호.
-    """
+    """Date-cluster bootstrap CI after within-day equal weighting."""
     pnl = _per_alert_pnl_series(closed, max_col, close_col).reset_index(drop=True)
     n = len(pnl)
-    if n < 5:
-        return {"n_trades": int(n), "note": "n<5: bootstrap skipped"}
-    rng = np.random.default_rng(seed)
-    cum_samples = np.empty(n_iter)
-    mean_samples = np.empty(n_iter)
-    for i in range(n_iter):
-        idx = rng.integers(0, n, size=n)
-        sample = pnl.iloc[idx].values
-        cum_samples[i] = sample.sum()
-        mean_samples[i] = sample.mean()
+    dates = pd.to_datetime(closed.loc[_per_alert_pnl_series(
+        closed, max_col, close_col
+    ).index, "date"])
+    daily = daily_equal_weight(
+        dates.reset_index(drop=True),
+        pnl,
+        include_no_trade_days=False,
+    )
+    boot = date_cluster_bootstrap(daily, n_iter=n_iter, seed=seed)
+    if "mean_return_ci95" not in boot:
+        return {
+            "n_trades": int(n),
+            "n_days": int(boot["n_days"]),
+            "note": boot["note"],
+        }
     return {
         "n_trades": int(n),
+        "n_days": int(boot["n_days"]),
         "n_iter": int(n_iter),
+        "method": "date_cluster_equal_weight",
         "cum_pnl_pct_ci95": [
-            _maybe_float(np.quantile(cum_samples, 0.025) * 100),
-            _maybe_float(np.quantile(cum_samples, 0.975) * 100),
+            _maybe_float(v * 100) for v in boot["cumulative_return_ci95"]
         ],
         "mean_pnl_pct_ci95": [
-            _maybe_float(np.quantile(mean_samples, 0.025) * 100),
-            _maybe_float(np.quantile(mean_samples, 0.975) * 100),
+            _maybe_float(v * 100) for v in boot["mean_return_ci95"]
         ],
     }
 
 
-def _daily_pnl_from_closed(closed: pd.DataFrame, max_col: str, close_col: str) -> pd.Series:
+def _daily_pnl_from_closed(
+    closed: pd.DataFrame,
+    max_col: str,
+    close_col: str,
+    *,
+    asof=None,
+) -> pd.Series:
     """closed 행 → 일별 net PnL series (TP rule + cost, vectorized).
-    같은 날 N알림이면 sum.
+    같은 날 N알림이면 equal-weight mean, 무알림일은 cash=0.
     """
+    closed = _rows_through_asof(closed, asof)
     if len(closed) == 0:
         return pd.Series(dtype=float)
     pnl = _per_alert_pnl_series(closed, max_col, close_col)
     if len(pnl) == 0:
         return pd.Series(dtype=float)
     dates = pd.to_datetime(closed.loc[pnl.index, "date"])
-    sub = pd.DataFrame({"pnl": pnl.values, "date_d": dates.dt.date.values})
-    daily = sub.groupby("date_d")["pnl"].sum().sort_index()
-    daily.index = pd.to_datetime(daily.index)
-    return daily
+    return daily_equal_weight(dates, pnl, calendar_end=asof)
 
 
-def compute_distribution_stats(closed: pd.DataFrame, max_col: str, close_col: str) -> dict:
+def _portfolio_cumulative_pct(dates: pd.Series, pnl: pd.Series) -> float | None:
+    """Signal rows → same-day equal-weight, calendar-cash, compounded return."""
+    if pnl.empty:
+        return None
+    daily = daily_equal_weight(dates.loc[pnl.index], pnl)
+    return _maybe_float(summarize_daily(daily)["cumulative_return"] * 100)
+
+
+def compute_distribution_stats(
+    closed: pd.DataFrame,
+    max_col: str,
+    close_col: str,
+    *,
+    asof=None,
+) -> dict:
     """업계 표준 — Vol(ann) / Skew / Kurt / VaR / CVaR / Tail Ratio /
     Recovery Factor / Ulcer Index / Common Sense Ratio / Win-Loss streak."""
     pnl = _per_alert_pnl_series(closed, max_col, close_col)
     if len(pnl) == 0:
         return {}
-    daily = _daily_pnl_from_closed(closed, max_col, close_col)
+    daily = _daily_pnl_from_closed(
+        closed,
+        max_col,
+        close_col,
+        asof=asof,
+    )
 
     out = {}
     if len(daily) > 1:
         std_d = float(daily.std(ddof=1))
-        out["volatility_ann_pct"] = _maybe_float(std_d * np.sqrt(252) * 100)
+        out["volatility_ann_pct"] = _maybe_float(
+            std_d * np.sqrt(CRYPTO_PERIODS_PER_YEAR) * 100
+        )
     out["skewness"] = _maybe_float(float(pnl.skew()) if len(pnl) > 2 else float("nan"))
     out["kurtosis_excess"] = _maybe_float(float(pnl.kurtosis()) if len(pnl) > 3 else float("nan"))
 
@@ -227,16 +418,19 @@ def compute_distribution_stats(closed: pd.DataFrame, max_col: str, close_col: st
         left = abs(float(pnl.quantile(0.05)))
         out["tail_ratio"] = _maybe_float(right / left if left > 0 else float("nan"))
 
-    # Recovery Factor + Ulcer + Common Sense
-    cum = pnl.cumsum()
-    if len(cum) and cum.cummax().abs().max() > 0:
-        mdd = float((cum - cum.cummax()).min())
-        out["recovery_factor"] = _maybe_float(float(cum.iloc[-1]) / abs(mdd) if mdd < 0 else float("nan"))
-    # Ulcer index over per-trade equity curve
-    if len(cum) > 0:
-        dd_pct = (cum - cum.cummax())
-        ulcer = float(np.sqrt(np.mean(dd_pct ** 2)))
-        out["ulcer_index"] = _maybe_float(ulcer * 100)
+    # Recovery Factor + Ulcer over compounded daily equity (initial equity included).
+    equity = equity_curve(daily)
+    if len(equity) > 1:
+        peak = equity.cummax()
+        drawdown = equity / peak - 1.0
+        mdd = float(drawdown.min())
+        cumulative = float(equity.iloc[-1] / equity.iloc[0] - 1.0)
+        out["recovery_factor"] = _maybe_float(
+            cumulative / abs(mdd) if mdd < 0 else float("nan")
+        )
+        out["ulcer_index"] = _maybe_float(
+            float(np.sqrt(np.mean(drawdown ** 2))) * 100
+        )
 
     # Common Sense Ratio = profit factor × tail ratio
     wins = pnl[pnl > 0]
@@ -250,10 +444,12 @@ def compute_distribution_stats(closed: pd.DataFrame, max_col: str, close_col: st
     cur_w = cur_l = 0
     for s in sign_seq:
         if s > 0:
-            cur_w += 1; cur_l = 0
+            cur_w += 1
+            cur_l = 0
             max_win = max(max_win, cur_w)
         elif s < 0:
-            cur_l += 1; cur_w = 0
+            cur_l += 1
+            cur_w = 0
             max_loss = max(max_loss, cur_l)
         else:
             cur_w = cur_l = 0
@@ -339,6 +535,24 @@ def compute_psr_dsr(closed: pd.DataFrame, max_col: str, close_col: str,
     }
 
 
+def _btc_daily_returns(btc_df: pd.DataFrame) -> pd.Series:
+    """Normalize current and legacy benchmark payloads to decimal daily returns."""
+    if "btc_daily_return_pct" in btc_df:
+        return pd.to_numeric(
+            btc_df["btc_daily_return_pct"], errors="coerce"
+        ).div(100.0).dropna()
+    if "btc_close" in btc_df:
+        return pd.to_numeric(
+            btc_df["btc_close"], errors="coerce"
+        ).pct_change().dropna()
+    # Legacy payload: cumulative percentage is wealth, so use pct_change rather
+    # than a percentage-point difference.
+    btc_wealth = 1.0 + pd.to_numeric(
+        btc_df["btc_cum_pct"], errors="coerce"
+    ).div(100.0)
+    return btc_wealth.pct_change().dropna()
+
+
 def compute_benchmark_metrics(closed: pd.DataFrame, max_col: str, close_col: str,
                                 btc_series: list[dict]) -> dict:
     """IR / Beta / Tracking Error vs BTC HODL daily returns.
@@ -354,8 +568,7 @@ def compute_benchmark_metrics(closed: pd.DataFrame, max_col: str, close_col: str
     btc_df = pd.DataFrame(btc_series)
     btc_df["date_dt"] = pd.to_datetime(btc_df["date"])
     btc_df = btc_df.set_index("date_dt").sort_index()
-    btc_pct = btc_df["btc_cum_pct"] / 100.0
-    btc_daily = btc_pct.diff().dropna()
+    btc_daily = _btc_daily_returns(btc_df)
     if len(btc_daily) < 5:
         return {}
 
@@ -364,7 +577,10 @@ def compute_benchmark_metrics(closed: pd.DataFrame, max_col: str, close_col: str
 
     excess = strat_daily - btc_daily
     te = float(excess.std(ddof=1))
-    ir = float(excess.mean() / te * np.sqrt(252)) if te > 0 else float("nan")
+    ir = (
+        float(excess.mean() / te * np.sqrt(CRYPTO_PERIODS_PER_YEAR))
+        if te > 0 else float("nan")
+    )
 
     var_b = float(btc_daily.var(ddof=1))
     cov_sb = float(strat_daily.cov(btc_daily))
@@ -375,98 +591,150 @@ def compute_benchmark_metrics(closed: pd.DataFrame, max_col: str, close_col: str
         "n_days_aligned": int(len(strat_daily)),
         "n_days_alert": int((strat_daily != 0).sum()),
         "information_ratio": _maybe_float(ir),
-        "tracking_error_ann_pct": _maybe_float(te * np.sqrt(252) * 100),
+        "tracking_error_ann_pct": _maybe_float(
+            te * np.sqrt(CRYPTO_PERIODS_PER_YEAR) * 100
+        ),
         "beta_vs_btc": _maybe_float(beta),
         "correlation_btc": _maybe_float(corr),
     }
 
 
 def compute_top_drawdowns(closed: pd.DataFrame, max_col: str, close_col: str,
-                            top_n: int = 5) -> list[dict]:
+                            top_n: int = 5, *, asof=None) -> list[dict]:
     """누적 PnL 시계열의 top-N drawdown (peak/valley/recovery/depth/length)."""
-    daily = _daily_pnl_from_closed(closed, max_col, close_col)
+    daily = _daily_pnl_from_closed(
+        closed,
+        max_col,
+        close_col,
+        asof=asof,
+    )
     if len(daily) == 0:
         return []
-    cum = daily.cumsum()
-    peak = cum.cummax()
-    underwater = cum - peak  # ≤ 0
-    drawdowns = []
+    curve = equity_curve(daily)
+    peak = curve.cummax()
+    drawdowns: list[dict[str, Any]] = []
     in_dd = False
-    peak_date = peak_val = valley_date = valley_val = None
-    for date, c, p in zip(cum.index, cum, peak):
+    peak_date: pd.Timestamp | None = None
+    peak_val: float | None = None
+    valley_date: pd.Timestamp | None = None
+    valley_val: float | None = None
+    for date, c, p in zip(curve.index[1:], curve.iloc[1:], peak.iloc[1:]):
         if c < p and not in_dd:
             in_dd = True
-            peak_date = date - pd.Timedelta(days=1) if date > cum.index[0] else date
+            peak_date = date - pd.Timedelta(days=1)
             peak_val = float(p)
             valley_date = date
             valley_val = float(c)
-        elif in_dd:
+        elif (
+            in_dd
+            and peak_date is not None
+            and peak_val is not None
+            and valley_date is not None
+            and valley_val is not None
+        ):
             if c < valley_val:
                 valley_date = date
                 valley_val = float(c)
             if c >= p:
                 drawdowns.append({
-                    "peak_date": str(peak_date.date()) if peak_date else None,
+                    "peak_date": str(peak_date.date()),
                     "valley_date": str(valley_date.date()),
                     "recovery_date": str(date.date()),
-                    "depth_pct": _maybe_float((valley_val - peak_val) * 100),
-                    "length_days": int((date - peak_date).days) if peak_date else None,
+                    "depth_pct": _maybe_float(
+                        (valley_val / peak_val - 1.0) * 100
+                    ),
+                    "length_days": int((date - peak_date).days),
                 })
                 in_dd = False
                 peak_date = peak_val = valley_date = valley_val = None
-    if in_dd:
+    if (
+        in_dd
+        and peak_date is not None
+        and peak_val is not None
+        and valley_date is not None
+        and valley_val is not None
+    ):
         drawdowns.append({
-            "peak_date": str(peak_date.date()) if peak_date else None,
+            "peak_date": str(peak_date.date()),
             "valley_date": str(valley_date.date()),
             "recovery_date": None,
-            "depth_pct": _maybe_float((valley_val - peak_val) * 100),
-            "length_days": int((cum.index[-1] - peak_date).days) if peak_date else None,
+            "depth_pct": _maybe_float((valley_val / peak_val - 1.0) * 100),
+            "length_days": int((curve.index[-1] - peak_date).days),
         })
     drawdowns.sort(key=lambda x: x["depth_pct"] or 0)
     return drawdowns[:top_n]
 
 
-def compute_underwater_series(closed: pd.DataFrame, max_col: str, close_col: str) -> list[dict]:
+def compute_underwater_series(
+    closed: pd.DataFrame,
+    max_col: str,
+    close_col: str,
+    *,
+    asof=None,
+) -> list[dict]:
     """일별 underwater % (cum / peak - 1)."""
-    daily = _daily_pnl_from_closed(closed, max_col, close_col)
+    daily = _daily_pnl_from_closed(
+        closed,
+        max_col,
+        close_col,
+        asof=asof,
+    )
     if len(daily) == 0:
         return []
-    cum = daily.cumsum()
-    peak = cum.cummax()
+    curve = equity_curve(daily)
+    peak = curve.cummax()
     return [
-        {"date": str(d.date()), "underwater_pct": float(c - p) * 100}
-        for d, c, p in zip(cum.index, cum, peak)
+        {"date": str(d.date()), "underwater_pct": float(c / p - 1.0) * 100}
+        for d, c, p in zip(curve.index[1:], curve.iloc[1:], peak.iloc[1:])
     ]
 
 
 def compute_rolling_sharpe(closed: pd.DataFrame, max_col: str, close_col: str,
-                            window: int = 30) -> list[dict]:
+                            window: int = 30, *, asof=None) -> list[dict]:
     """일별 rolling annualized Sharpe."""
-    daily = _daily_pnl_from_closed(closed, max_col, close_col)
+    daily = _daily_pnl_from_closed(
+        closed,
+        max_col,
+        close_col,
+        asof=asof,
+    )
     if len(daily) < 5:
         return []
     rolling_mean = daily.rolling(window, min_periods=5).mean()
     rolling_std = daily.rolling(window, min_periods=5).std(ddof=1)
-    rs = (rolling_mean / rolling_std) * np.sqrt(252)
+    rs = (rolling_mean / rolling_std) * np.sqrt(CRYPTO_PERIODS_PER_YEAR)
     return [
         {"date": str(d.date()), "rolling_sharpe": _maybe_float(float(v))}
         for d, v in zip(rs.index, rs.values) if pd.notna(v)
     ]
 
 
-def compute_monthly_returns(closed: pd.DataFrame, max_col: str, close_col: str) -> list[dict]:
+def compute_monthly_returns(
+    closed: pd.DataFrame,
+    max_col: str,
+    close_col: str,
+    *,
+    asof=None,
+) -> list[dict]:
     """year-month 누적 return — heatmap 용."""
-    daily = _daily_pnl_from_closed(closed, max_col, close_col)
+    daily = _daily_pnl_from_closed(
+        closed,
+        max_col,
+        close_col,
+        asof=asof,
+    )
     if len(daily) == 0:
         return []
-    monthly = daily.resample("ME").sum() * 100  # %
+    monthly = daily.groupby(daily.index.to_period("M")).apply(
+        lambda x: ((1.0 + x).prod() - 1.0) * 100
+    )
     return [
         {
-            "year": int(d.year),
-            "month": int(d.month),
+            "year": int(period.year),
+            "month": int(period.month),
             "return_pct": _maybe_float(float(v)),
         }
-        for d, v in zip(monthly.index, monthly.values)
+        for period, v in zip(monthly.index, monthly.values)
     ]
 
 
@@ -614,7 +882,7 @@ def compute_decay_curve_pre(closed: pd.DataFrame) -> list[dict]:
 # A3. TP rule sweep — TP 룰 다양화별 누적
 # ============================================================================
 def compute_tp_sweep(closed: pd.DataFrame, max_col: str, close_col: str,
-                      tp_list: list[float] = (0.03, 0.05, 0.07, 0.10),
+                      tp_list: Sequence[float] = (0.03, 0.05, 0.07, 0.10),
                       include_no_tp: bool = True,
                       cost: float | None = None) -> list[dict]:
     if cost is None:
@@ -623,27 +891,33 @@ def compute_tp_sweep(closed: pd.DataFrame, max_col: str, close_col: str,
         return []
     max_d = pd.to_numeric(closed[max_col], errors="coerce") / 100.0
     close_d = pd.to_numeric(closed[close_col], errors="coerce") / 100.0
-    n_valid = int(max_d.notna().sum())
-    if n_valid == 0:
-        return []
+    valid_max = max_d[np.isfinite(max_d)]
     out = []
     for tp in tp_list:
-        gross = np.where(max_d >= tp, tp, close_d)
-        pnl = pd.Series(gross - cost, index=closed.index).dropna()
+        pnl = _net_pnl_series(
+            closed[max_col],
+            closed[close_col],
+            tp=tp,
+            cost=cost,
+        ).dropna()
         out.append({
             "rule": f"{int(tp*100)}% TP",
             "tp_pct": _maybe_float(tp * 100),
             "n_trades": int(len(pnl)),
-            "cum_pnl_pct": _maybe_float(float(pnl.sum() * 100)),
-            "tp_hit_rate_pct": _maybe_float(float((max_d.dropna() >= tp).mean() * 100)),
+            "cum_pnl_pct": _portfolio_cumulative_pct(closed["date"], pnl),
+            "tp_hit_rate_pct": _maybe_float(
+                float((valid_max >= tp).mean() * 100)
+                if len(valid_max)
+                else np.nan
+            ),
         })
     if include_no_tp:
-        pnl = (close_d - cost).dropna()
+        pnl = (close_d - cost).mask(~np.isfinite(close_d)).dropna()
         out.append({
             "rule": "no TP (EOD)",
             "tp_pct": None,
             "n_trades": int(len(pnl)),
-            "cum_pnl_pct": _maybe_float(float(pnl.sum() * 100)),
+            "cum_pnl_pct": _portfolio_cumulative_pct(closed["date"], pnl),
             "tp_hit_rate_pct": None,
         })
     return out
@@ -653,19 +927,20 @@ def compute_tp_sweep(closed: pd.DataFrame, max_col: str, close_col: str,
 # A4. Cost sensitivity sweep
 # ============================================================================
 def compute_cost_sweep(closed: pd.DataFrame, max_col: str, close_col: str,
-                        cost_list: list[float] = (0.0015, 0.003, 0.005, 0.01)) -> list[dict]:
+                        cost_list: Sequence[float] = (0.0015, 0.003, 0.005, 0.01)) -> list[dict]:
     if len(closed) == 0:
         return []
-    max_d = pd.to_numeric(closed[max_col], errors="coerce") / 100.0
-    close_d = pd.to_numeric(closed[close_col], errors="coerce") / 100.0
     out = []
     for cost in cost_list:
-        gross = np.where(max_d >= TP_PCT, TP_PCT, close_d)
-        pnl = pd.Series(gross - cost, index=closed.index).dropna()
+        pnl = _net_pnl_series(
+            closed[max_col],
+            closed[close_col],
+            cost=cost,
+        ).dropna()
         out.append({
             "cost_pct": _maybe_float(cost * 100),
             "n_trades": int(len(pnl)),
-            "cum_pnl_pct": _maybe_float(float(pnl.sum() * 100)),
+            "cum_pnl_pct": _portfolio_cumulative_pct(closed["date"], pnl),
             "avg_pnl_pct": _maybe_float(float(pnl.mean() * 100)),
         })
     return out
@@ -675,44 +950,55 @@ def compute_cost_sweep(closed: pd.DataFrame, max_col: str, close_col: str,
 # A5. PBO simple — K-fold chronological split robustness
 # ============================================================================
 def compute_pbo_simple(closed: pd.DataFrame, max_col: str, close_col: str,
-                        n_splits: int = 5) -> dict:
+                        n_splits: int = 5, *, asof=None) -> dict:
     """Lopez de Prado 의 정식 PBO 는 K-comb in/out ranking 통계 (multi-strategy
     필요). prelude 는 단일 strategy 라 단순 변형: 시간 chronological 5-fold
     각 fold 의 cum PnL 부호 일관성 + 분산.
     """
     pnl = _per_alert_pnl_series(closed, max_col, close_col)
-    n = len(pnl)
-    if n < n_splits * 2:
-        return {"n_trades": int(n), "note": "fold split skipped (n<10)"}
-    # chronological order — closed["date"] 기준
-    sub = closed.copy()
-    sub["pnl"] = sub.apply(
-        lambda r: _virtual_pnl_per_alert(r[max_col], r[close_col]), axis=1
+    daily = daily_equal_weight(
+        closed.loc[pnl.index, "date"],
+        pnl,
+        calendar_end=asof,
     )
-    sub = sub.dropna(subset=["pnl"]).sort_values("date").reset_index(drop=True)
-    fold_size = max(1, len(sub) // n_splits)
+    if len(daily) < n_splits * 2:
+        return {
+            "n_trades": int(len(pnl)),
+            "n_days": int(len(daily)),
+            "note": f"fold split skipped (n_days<{n_splits * 2})",
+        }
+    chunks = [
+        daily.iloc[indexes]
+        for indexes in np.array_split(np.arange(len(daily)), n_splits)
+    ]
     folds = []
-    for i in range(n_splits):
-        start = i * fold_size
-        end = (i + 1) * fold_size if i < n_splits - 1 else len(sub)
-        chunk = sub.iloc[start:end]
+    for i, chunk in enumerate(chunks):
         if len(chunk) == 0:
             continue
+        cumulative = summarize_daily(chunk)["cumulative_return"]
         folds.append({
             "fold": int(i + 1),
             "n": int(len(chunk)),
-            "date_range": [str(chunk["date"].iloc[0]), str(chunk["date"].iloc[-1])],
-            "cum_pnl_pct": _maybe_float(float(chunk["pnl"].sum() * 100)),
-            "win_rate_pct": _maybe_float(float((chunk["pnl"] > 0).mean() * 100)),
+            "n_days": int(len(chunk)),
+            "date_range": [
+                str(pd.Timestamp(chunk.index[0]).date()),
+                str(pd.Timestamp(chunk.index[-1]).date()),
+            ],
+            "cum_pnl_pct": _maybe_float(cumulative * 100),
+            "win_rate_pct": _maybe_float(float((chunk > 0).mean() * 100)),
         })
     pos_folds = sum(1 for f in folds if (f["cum_pnl_pct"] or 0) > 0)
     return {
-        "n_trades": int(len(sub)),
+        "n_trades": int(len(pnl)),
+        "n_days": int(len(daily)),
         "n_folds": len(folds),
         "n_positive_folds": int(pos_folds),
         "consistency_pct": _maybe_float(pos_folds / len(folds) * 100) if folds else None,
         "folds": folds,
-        "note": "chronological K-fold cum PnL — 정식 PBO 는 multi-strategy 필요, 여기는 단순 robustness check",
+        "note": (
+            "chronological day-level K-fold compounded PnL — 정식 PBO 는 "
+            "multi-strategy 필요, 여기는 단순 robustness check"
+        ),
     }
 
 
@@ -729,7 +1015,7 @@ def compute_factor_regression(closed: pd.DataFrame, max_col: str, close_col: str
     btc_df = pd.DataFrame(btc_series)
     btc_df["date_dt"] = pd.to_datetime(btc_df["date"])
     btc_df = btc_df.set_index("date_dt").sort_index()
-    btc_daily = (btc_df["btc_cum_pct"] / 100.0).diff().dropna()
+    btc_daily = _btc_daily_returns(btc_df)
     if len(btc_daily) < 10:
         return {}
     strat_daily = daily.reindex(btc_daily.index, fill_value=0.0)
@@ -755,7 +1041,7 @@ def compute_factor_regression(closed: pd.DataFrame, max_col: str, close_col: str
     return {
         "n_days": int(n),
         "alpha_daily": _maybe_float(alpha),
-        "alpha_ann_pct": _maybe_float(alpha * 252 * 100),
+        "alpha_ann_pct": _maybe_float(alpha * CRYPTO_PERIODS_PER_YEAR * 100),
         "alpha_se": _maybe_float(se_alpha),
         "alpha_t_stat": _maybe_float(t_alpha),
         "alpha_significant": (abs(t_alpha) > 1.96) if not np.isnan(t_alpha) else None,
@@ -774,10 +1060,7 @@ def compute_per_coin(closed: pd.DataFrame, max_col: str, close_col: str,
     rows = []
     for coin, grp in closed.groupby("coin"):
         n = len(grp)
-        max_d = pd.to_numeric(grp[max_col], errors="coerce") / 100.0
-        close_d = pd.to_numeric(grp[close_col], errors="coerce") / 100.0
-        gross = np.where(max_d >= TP_PCT, TP_PCT, close_d)
-        pnl = pd.Series(gross - ROUND_TRIP_COST_PCT, index=grp.index).dropna()
+        pnl = _net_pnl_series(grp[max_col], grp[close_col]).dropna()
         if len(pnl) == 0:
             continue
         avg_max = float(grp[max_col].dropna().mean()) if max_col in grp else float("nan")
@@ -879,14 +1162,14 @@ def compute_coin_universe_matrix(df_dist: pd.DataFrame, df_pre: pd.DataFrame,
                                     top_n: int = 15) -> list[dict]:
     if len(df_dist) == 0 and len(df_pre) == 0:
         return []
-    counts = {}
+    counts: dict[str, dict[str, int]] = {}
     if "coin" in df_dist.columns:
         for c, n in df_dist["coin"].value_counts().items():
             counts.setdefault(str(c), {"dist": 0, "pre": 0})["dist"] = int(n)
     if "coin" in df_pre.columns:
         for c, n in df_pre["coin"].value_counts().items():
             counts.setdefault(str(c), {"dist": 0, "pre": 0})["pre"] = int(n)
-    rows = [
+    rows: list[dict[str, Any]] = [
         {"coin": k.replace("KRW-", ""), "dist": v["dist"], "pre": v["pre"], "total": v["dist"] + v["pre"]}
         for k, v in counts.items()
     ]
@@ -1043,16 +1326,32 @@ def compute_btc_benchmark(upbit_d1_db: str, start_date: str, end_date: str) -> l
     base = float(sub["close"].iloc[0])
     if base <= 0:
         return []
+    previous_close = sub["close"].shift(1)
+    daily_return = sub["close"].div(previous_close).sub(1.0)
     return [
-        {"date": str(row["date"]), "btc_cum_pct": float(row["close"] / base - 1) * 100}
-        for _, row in sub.iterrows()
+        {
+            "date": str(row["date"]),
+            "btc_close": float(row["close"]),
+            "btc_daily_return_pct": (
+                None if pd.isna(daily_return.loc[idx])
+                else float(daily_return.loc[idx]) * 100
+            ),
+            "btc_cum_pct": float(row["close"] / base - 1) * 100,
+        }
+        for idx, row in sub.iterrows()
     ]
 
 
-def compute_distribution_summary(df: pd.DataFrame, btc_series: list[dict] | None = None) -> dict:
+def compute_distribution_summary(
+    df: pd.DataFrame,
+    btc_series: list[dict] | None = None,
+    *,
+    asof=None,
+) -> dict:
     """distribution paper_ledger → KPI dict."""
+    df = _rows_through_asof(df, asof)
     closed = df[df["status"].astype(str) == "closed"].copy()
-    out = {
+    out: dict[str, Any] = {
         "n_alerts_total": int(len(df)),
         "n_closed": int(len(closed)),
         "n_pending": int(len(df) - len(closed)),
@@ -1084,19 +1383,32 @@ def compute_distribution_summary(df: pd.DataFrame, btc_series: list[dict] | None
         axis=1,
     ).dropna()
     if len(pnl) > 0:
-        cum = pnl.cumsum()
+        daily = _daily_pnl_from_closed(
+            closed,
+            "next_max_return_pct",
+            "next_close_return_pct",
+            asof=asof,
+        )
+        portfolio = summarize_daily(daily)
         out["virtual"] = {
-            "rule": "5% TP / EOD close, equal weight, cost 0.15% 차감",
+            "rule": (
+                "5% TP / EOD close, day equal-weight, compounded, "
+                "cost 0.15% 차감"
+            ),
             "n_trades": int(len(pnl)),
-            "cum_pnl_pct": float(cum.iloc[-1] * 100),
-            "max_dd_pct": float((cum - cum.cummax()).min() * 100),
+            "n_calendar_days": portfolio["n_calendar_days"],
+            "cum_pnl_pct": float(portfolio["cumulative_return"] * 100),
+            "max_dd_pct": float(portfolio["max_drawdown"] * 100),
             "avg_pnl_per_trade_pct": float(pnl.mean() * 100),
             "tp_hit_rate_pct": float(
                 (closed["next_max_return_pct"].dropna() / 100.0 >= TP_PCT).mean() * 100
             ),
         }
         out["quant"] = compute_quant_metrics(
-            closed, "next_max_return_pct", "next_close_return_pct"
+            closed,
+            "next_max_return_pct",
+            "next_close_return_pct",
+            asof=asof,
         )
         out["bootstrap"] = compute_bootstrap_ci(
             closed, "next_max_return_pct", "next_close_return_pct"
@@ -1117,7 +1429,10 @@ def compute_distribution_summary(df: pd.DataFrame, btc_series: list[dict] | None
         }
         # 신규 — 업계 표준 + Lopez de Prado
         out["stats"] = compute_distribution_stats(
-            closed, "next_max_return_pct", "next_close_return_pct"
+            closed,
+            "next_max_return_pct",
+            "next_close_return_pct",
+            asof=asof,
         )
         out["confidence"] = compute_psr_dsr(
             closed, "next_max_return_pct", "next_close_return_pct"
@@ -1127,7 +1442,10 @@ def compute_distribution_summary(df: pd.DataFrame, btc_series: list[dict] | None
                 closed, "next_max_return_pct", "next_close_return_pct", btc_series
             )
         out["top_drawdowns"] = compute_top_drawdowns(
-            closed, "next_max_return_pct", "next_close_return_pct"
+            closed,
+            "next_max_return_pct",
+            "next_close_return_pct",
+            asof=asof,
         )
         out["best_worst"] = compute_best_worst_trades(
             closed, "next_max_return_pct", "next_close_return_pct"
@@ -1149,7 +1467,10 @@ def compute_distribution_summary(df: pd.DataFrame, btc_series: list[dict] | None
             closed, "next_max_return_pct", "next_close_return_pct"
         )
         out["pbo"] = compute_pbo_simple(
-            closed, "next_max_return_pct", "next_close_return_pct"
+            closed,
+            "next_max_return_pct",
+            "next_close_return_pct",
+            asof=asof,
         )
         if btc_series:
             out["factor_regression"] = compute_factor_regression(
@@ -1161,10 +1482,16 @@ def compute_distribution_summary(df: pd.DataFrame, btc_series: list[dict] | None
     return out
 
 
-def compute_preopen_summary(df: pd.DataFrame, btc_series: list[dict] | None = None) -> dict:
+def compute_preopen_summary(
+    df: pd.DataFrame,
+    btc_series: list[dict] | None = None,
+    *,
+    asof=None,
+) -> dict:
     """preopen paper_ledger → KPI dict (1h horizon)."""
+    df = _rows_through_asof(df, asof)
     closed = df[df["status"].astype(str) == "closed"].copy()
-    out = {
+    out: dict[str, Any] = {
         "n_alerts_total": int(len(df)),
         "n_closed": int(len(closed)),
         "n_pending": int(len(df) - len(closed)),
@@ -1198,19 +1525,32 @@ def compute_preopen_summary(df: pd.DataFrame, btc_series: list[dict] | None = No
             axis=1,
         ).dropna()
         if len(pnl) > 0:
-            cum = pnl.cumsum()
+            daily = _daily_pnl_from_closed(
+                closed,
+                "first_1h_max_return_pct",
+                "first_1h_close_return_pct",
+                asof=asof,
+            )
+            portfolio = summarize_daily(daily)
             out["virtual"] = {
-                "rule": "1h horizon: 5% TP / 1h close, equal weight, cost 0.15% 차감",
+                "rule": (
+                    "1h horizon: 5% TP / 1h close, day equal-weight, "
+                    "compounded, cost 0.15% 차감"
+                ),
                 "n_trades": int(len(pnl)),
-                "cum_pnl_pct": float(cum.iloc[-1] * 100),
-                "max_dd_pct": float((cum - cum.cummax()).min() * 100),
+                "n_calendar_days": portfolio["n_calendar_days"],
+                "cum_pnl_pct": float(portfolio["cumulative_return"] * 100),
+                "max_dd_pct": float(portfolio["max_drawdown"] * 100),
                 "avg_pnl_per_trade_pct": float(pnl.mean() * 100),
                 "tp_hit_rate_pct": float(
                     (closed["first_1h_max_return_pct"].dropna() / 100.0 >= TP_PCT).mean() * 100
                 ),
             }
             out["quant"] = compute_quant_metrics(
-                closed, "first_1h_max_return_pct", "first_1h_close_return_pct"
+                closed,
+                "first_1h_max_return_pct",
+                "first_1h_close_return_pct",
+                asof=asof,
             )
             out["bootstrap"] = compute_bootstrap_ci(
                 closed, "first_1h_max_return_pct", "first_1h_close_return_pct"
@@ -1234,7 +1574,10 @@ def compute_preopen_summary(df: pd.DataFrame, btc_series: list[dict] | None = No
                 ),
             }
             out["stats"] = compute_distribution_stats(
-                closed, "first_1h_max_return_pct", "first_1h_close_return_pct"
+                closed,
+                "first_1h_max_return_pct",
+                "first_1h_close_return_pct",
+                asof=asof,
             )
             out["confidence"] = compute_psr_dsr(
                 closed, "first_1h_max_return_pct", "first_1h_close_return_pct"
@@ -1244,7 +1587,10 @@ def compute_preopen_summary(df: pd.DataFrame, btc_series: list[dict] | None = No
                     closed, "first_1h_max_return_pct", "first_1h_close_return_pct", btc_series
                 )
             out["top_drawdowns"] = compute_top_drawdowns(
-                closed, "first_1h_max_return_pct", "first_1h_close_return_pct"
+                closed,
+                "first_1h_max_return_pct",
+                "first_1h_close_return_pct",
+                asof=asof,
             )
             out["best_worst"] = compute_best_worst_trades(
                 closed, "first_1h_max_return_pct", "first_1h_close_return_pct"
@@ -1266,7 +1612,10 @@ def compute_preopen_summary(df: pd.DataFrame, btc_series: list[dict] | None = No
                 closed, "first_1h_max_return_pct", "first_1h_close_return_pct"
             )
             out["pbo"] = compute_pbo_simple(
-                closed, "first_1h_max_return_pct", "first_1h_close_return_pct"
+                closed,
+                "first_1h_max_return_pct",
+                "first_1h_close_return_pct",
+                asof=asof,
             )
             if btc_series:
                 out["factor_regression"] = compute_factor_regression(
@@ -1282,18 +1631,24 @@ def compute_preopen_summary(df: pd.DataFrame, btc_series: list[dict] | None = No
 # ============================================================================
 # Recommend radar (SHADOW 스캐너) — 일일 출력 + net 실현 요약
 # ============================================================================
-def compute_recommend_summary(df_rec: pd.DataFrame) -> dict:
+def compute_recommend_summary(
+    df_rec: pd.DataFrame,
+    *,
+    asof=None,
+) -> dict:
     """SHADOW 추천 레이더 ledger(shadow_ledger_recommend.csv) → KPI dict.
 
     - latest_radar: 가장 최근 추천일의 top-3 (오늘 분포 — 대시보드 노출용).
     - closed 행 실현 요약: realized_pct 는 close_recommend_ledger.py 가 이미
       net(왕복 0.15% 차감) 로 기록 → 추가 차감 없이 그대로 사용 (ops-steward §0).
     """
-    out = {"channel": "recommend", "n_alerts_total": int(len(df_rec))}
     if df_rec is None or len(df_rec) == 0:
-        return out
+        return {"channel": "recommend", "n_alerts_total": 0}
 
-    df = df_rec.copy()
+    df = _rows_through_asof(df_rec, asof)
+    out = {"channel": "recommend", "n_alerts_total": int(len(df))}
+    if df.empty:
+        return out
     df["date"] = df["date"].astype(str)
     out["first_alert_date"] = str(pd.to_datetime(df["date"]).min().date())
     out["last_alert_date"] = str(pd.to_datetime(df["date"]).max().date())
@@ -1316,18 +1671,64 @@ def compute_recommend_summary(df_rec: pd.DataFrame) -> dict:
     out["latest_radar"] = radar
     out["latest_radar_date"] = str(last_day)
 
-    # 실현(closed) 요약 — net realized_pct(%) 그대로. cum = 일별 net 합 누적.
+    # 실현(closed) 요약 — realized_pct는 이미 net(%p). 같은 날은 equal-weight,
+    # 무추천일 cash, 복리·초기 equity·√365·날짜-cluster CI를 공통 엔진으로 계산한다.
     closed = df[df["status"].astype(str) == "closed"].copy()
     out["n_closed"] = int(len(closed))
     if len(closed):
-        net = pd.to_numeric(closed["realized_pct"], errors="coerce").dropna()
+        net_all = pd.to_numeric(closed["realized_pct"], errors="coerce")
+        net = net_all.dropna()
         if len(net):
+            dates = pd.to_datetime(closed.loc[net.index, "date"])
+            daily = daily_equal_weight(
+                dates,
+                net / 100.0,
+                calendar_end=asof,
+            )
+            signal_daily = daily_equal_weight(
+                dates,
+                net / 100.0,
+                include_no_trade_days=False,
+            )
+            portfolio = summarize_daily(daily)
+            cluster = date_cluster_bootstrap(signal_daily)
             out["avg_net_realized_pct"] = float(net.mean())
-            out["cum_net_pnl_pct"] = float(net.sum())
+            out["cum_net_pnl_pct"] = float(
+                portfolio["cumulative_return"] * 100
+            )
+            out["legacy_per_trade_sum_net_pct"] = float(net.sum())
             out["win_rate_pct"] = float((net > 0).mean() * 100)
+            out["n_signal_days"] = int(len(signal_daily))
+            out["n_calendar_days"] = portfolio["n_calendar_days"]
+            out["max_drawdown_pct"] = float(
+                portfolio["max_drawdown"] * 100
+            )
+            out["sharpe_ann"] = float(portfolio["sharpe_ann"])
+            out["sortino_ann"] = float(portfolio["sortino_ann"])
+            out["date_cluster_ci"] = {
+                **cluster,
+                "mean_return_ci95_pct": [
+                    float(value * 100)
+                    for value in cluster.get("mean_return_ci95", [])
+                ],
+                "cumulative_return_ci95_pct": [
+                    float(value * 100)
+                    for value in cluster.get("cumulative_return_ci95", [])
+                ],
+            }
         hits = pd.to_numeric(closed.get("pump20_hit"), errors="coerce").dropna()
         if len(hits):
             out["pump20_hit_rate_pct"] = float(hits.mean() * 100)
+            out["pump20_hit_basis"] = "legacy_full_day_D1"
+        if "post_send_pump20_hit" in closed.columns:
+            post_send_hits = pd.to_numeric(
+                closed["post_send_pump20_hit"], errors="coerce"
+            ).dropna()
+            if len(post_send_hits):
+                out["post_send_pump20_hit_rate_pct"] = float(
+                    post_send_hits.mean() * 100
+                )
+                out["post_send_pump20_hit_basis"] = "sent_at_after_15m_path"
         if "exit_reason" in closed.columns:
             out["exit_reason_counts"] = {
                 str(k): int(v) for k, v in
@@ -1484,11 +1885,13 @@ def rolling_accuracy(df: pd.DataFrame, hit_cols: list[str],
 
 
 def cumulative_pnl_series(df: pd.DataFrame,
-                           max_col: str, close_col: str) -> list[dict]:
+                           max_col: str, close_col: str, *,
+                           asof=None) -> list[dict]:
     """일자별 누적 가상 PnL 시계열.
 
-    같은 날 알림 N 개면 그날 net = sum(per-alert net). cum = 일별 net 누적.
+    같은 날 알림 N 개면 equal-weight mean. cum = 복리 일별 net.
     """
+    df = _rows_through_asof(df, asof)
     closed = df[df["status"].astype(str) == "closed"].copy()
     if len(closed) == 0:
         return []
@@ -1499,8 +1902,12 @@ def cumulative_pnl_series(df: pd.DataFrame,
     closed = closed.dropna(subset=["pnl"])
     if len(closed) == 0:
         return []
-    daily = closed.groupby(closed["date"].dt.date)["pnl"].sum().sort_index()
-    cum = daily.cumsum()
+    daily = daily_equal_weight(
+        closed["date"],
+        closed["pnl"],
+        calendar_end=asof,
+    )
+    cum = (1.0 + daily).cumprod() - 1.0
     return [
         {
             "date": str(d),
@@ -1509,6 +1916,74 @@ def cumulative_pnl_series(df: pd.DataFrame,
         }
         for d in cum.index
     ]
+
+
+def _load_optional_artifact(
+    path: str | Path,
+    *,
+    asof=None,
+    kind: str,
+) -> dict | None:
+    """Load an optional dashboard artifact only when its lineage is safe."""
+    artifact_path = Path(path)
+    cutoff = normalize_kst_date(asof)
+    if kind == "policy_competition":
+        try:
+            return load_policy_artifact(
+                artifact_path,
+                csv_path=artifact_path.with_suffix(".csv"),
+                db_path=POLICY_DB,
+                asof=cutoff,
+                require_current=True,
+            )
+        except PolicyArtifactError:
+            return None
+    if kind == "idea_validation":
+        try:
+            return load_idea_validation_artifact(
+                artifact_path,
+                asof=cutoff,
+                require_current=True,
+            )
+        except IdeaArtifactError:
+            return None
+    try:
+        payload = strict_json_object(artifact_path)
+    except ArtifactValidationError:
+        return None
+    if kind == "recommendation_meta":
+        date_range = payload.get("date_range")
+        trained_through = (
+            date_range.get("end") if isinstance(date_range, dict) else None
+        )
+        built_at = payload.get("built_at")
+        if not trained_through or not built_at:
+            return None
+        try:
+            trained_date = normalize_kst_date(trained_through)
+            built_date = normalize_kst_date(built_at)
+        except ValueError:
+            return None
+        return payload if trained_date <= cutoff and built_date <= cutoff else None
+
+    artifact_value = payload.get("asof")
+    if not artifact_value:
+        return None
+    try:
+        artifact_asof = normalize_kst_date(artifact_value)
+    except ValueError:
+        return None
+    if artifact_asof > cutoff:
+        return None
+
+    safe = dict(payload)
+    safe["asof"] = str(artifact_asof.date())
+    return safe
+
+
+def _input_lineage_matches_current(lineage: dict[str, Any]) -> bool:
+    """Compatibility wrapper around the canonical idea-lineage validator."""
+    return input_manifest_matches_current(lineage)
 
 
 # ============================================================================
@@ -1526,8 +2001,10 @@ def main():
     parser.add_argument(
         "--pin",
         default=None,
-        help="명시 암호화 PIN. 미지정 시 PRELUDE_DASHBOARD_PIN env "
-             f"또는 default {DEFAULT_PIN}.",
+        help=(
+            "명시 암호화 passphrase. 미지정 시 PRELUDE_DASHBOARD_PIN env; "
+            f"최소 {MIN_DASHBOARD_PASSPHRASE_LENGTH}자."
+        ),
     )
     parser.add_argument(
         "--no-encrypt",
@@ -1539,22 +2016,27 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     log = logging.getLogger("dashboard")
 
-    asof = pd.Timestamp(args.asof) if args.asof else pd.Timestamp.now()
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     # PIN 우선순위 — 빈 문자열을 절대 평문으로 해석하지 X.
     # 평문 원하면 명시적 --no-encrypt.
     if args.no_encrypt:
         pin = None
     else:
-        pin = args.pin or os.environ.get("PRELUDE_DASHBOARD_PIN") or DEFAULT_PIN
-        if not pin:  # extra guard
-            pin = DEFAULT_PIN
+        try:
+            pin = resolve_dashboard_passphrase(args.pin)
+        except ValueError as exc:
+            parser.error(str(exc))
     log.info(f"encryption: {'PIN ' + ('*' * len(pin)) if pin else 'OFF (plaintext)'}")
+    try:
+        generation_id = resolve_dashboard_generation_id()
+    except ValueError as exc:
+        parser.error(str(exc))
 
-    df_dist = _load_or_empty(args.paper_ledger)
-    df_pre = _load_or_empty(args.paper_ledger_preopen)
+    asof = normalize_kst_date(args.asof)
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    df_dist = _rows_through_asof(_load_or_empty(args.paper_ledger), asof)
+    df_pre = _rows_through_asof(_load_or_empty(args.paper_ledger_preopen), asof)
     # policy_evolution 등 cross-cutting consumer 가 사용할 수 있게 가상 PnL 컬럼 부착.
     # distribution = next_max/next_close, preopen = first_1h_max/first_1h_close.
     for _ledger, _max, _close in [
@@ -1562,12 +2044,18 @@ def main():
         (df_pre, "first_1h_max_return_pct", "first_1h_close_return_pct"),
     ]:
         if len(_ledger) and _max in _ledger.columns and "virtual_pnl_pct" not in _ledger.columns:
-            max_d = pd.to_numeric(_ledger[_max], errors="coerce") / 100.0
-            close_d = pd.to_numeric(_ledger.get(_close, np.nan), errors="coerce") / 100.0
-            gross = np.where(max_d >= TP_PCT, TP_PCT, close_d)
-            _ledger["virtual_pnl_pct"] = (gross - ROUND_TRIP_COST_PCT) * 100.0
+            close_values = _ledger.get(
+                _close,
+                pd.Series(np.nan, index=_ledger.index),
+            )
+            _ledger["virtual_pnl_pct"] = (
+                _net_pnl_series(_ledger[_max], close_values) * 100.0
+            )
     # SHADOW 추천 레이더 스캐너 일일 출력 — graceful (파일 없으면 빈 채널).
-    df_rec = _load_or_empty(args.shadow_ledger_recommend)
+    df_rec = _rows_through_asof(
+        _load_or_empty(args.shadow_ledger_recommend),
+        asof,
+    )
     log.info(f"loaded: distribution {len(df_dist)} rows, preopen {len(df_pre)} rows, "
              f"recommend {len(df_rec)} rows")
 
@@ -1589,28 +2077,69 @@ def main():
     coin_matrix = compute_coin_universe_matrix(df_dist, df_pre)
 
     # 신규 (5/25 정책 layer 추가 후) — idea_validation + meta model card 통합.
-    # 산출물 파일이 없을 수도 (legacy/fresh 환경) → graceful fallback.
-    def _load_optional_json(path: str) -> dict | None:
-        try:
-            with open(path) as f:
-                return json.load(f)
-        except Exception:
-            return None
-
-    idea_validation = _load_optional_json("output/idea_validation_summary.json")
-    meta_model = _load_optional_json("output/recommendation_meta_validation.json")
-    policy_competition = _load_optional_json("output/policy_competition_summary.json")
-    pump_hunter = _build_pump_hunter_payload("output/shadow_ledger_pump_hunter.csv")
-    pump_hunter_v2 = _build_pump_hunter_payload("output/shadow_ledger_pump_hunter_v2.csv")
-    champion_gate = _build_champion_gate_payload("output/champion_state.json")
+    # 산출물 파일이 없거나 as-of/lineage가 맞지 않으면 보수적으로 제외.
+    idea_validation = _load_optional_artifact(
+        "output/idea_validation_summary.json",
+        asof=asof,
+        kind="idea_validation",
+    )
+    if idea_validation:
+        idea_validation = _bind_idea_dashboard_generation(
+            idea_validation,
+            generation_id,
+        )
+    meta_model = _load_optional_artifact(
+        "output/recommendation_meta_validation.json",
+        asof=asof,
+        kind="recommendation_meta",
+    )
+    policy_competition = _load_optional_artifact(
+        "output/policy_competition_summary.json",
+        asof=asof,
+        kind="policy_competition",
+    )
+    pump_hunter = _build_pump_hunter_payload(
+        "output/shadow_ledger_pump_hunter.csv",
+        asof=asof,
+    )
+    pump_hunter_v2 = _build_pump_hunter_payload(
+        "output/shadow_ledger_pump_hunter_v2.csv",
+        asof=asof,
+    )
+    champion_gate = _build_champion_gate_payload(
+        "output/champion_state.json",
+        asof=asof,
+    )
+    for artifact_name, artifact_path, artifact in (
+        ("idea_validation", "output/idea_validation_summary.json", idea_validation),
+        ("recommendation_meta", "output/recommendation_meta_validation.json", meta_model),
+        ("policy_competition", "output/policy_competition_summary.json", policy_competition),
+        ("champion_gate", "output/champion_state.json", champion_gate),
+    ):
+        if artifact is None and Path(artifact_path).exists():
+            log.warning(
+                "%s excluded: invalid, unattributed, or future-dated for KST asof %s",
+                artifact_name,
+                asof.date(),
+            )
 
     summary = {
+        "dashboard_generation_id": generation_id,
         "asof": asof.isoformat(),
+        "asof_timezone": "Asia/Seoul",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "channels": {
-            "distribution": compute_distribution_summary(df_dist, btc_series=btc_bench),
-            "preopen": compute_preopen_summary(df_pre, btc_series=btc_bench),
-            "recommend": compute_recommend_summary(df_rec),
+            "distribution": compute_distribution_summary(
+                df_dist,
+                btc_series=btc_bench,
+                asof=asof,
+            ),
+            "preopen": compute_preopen_summary(
+                df_pre,
+                btc_series=btc_bench,
+                asof=asof,
+            ),
+            "recommend": compute_recommend_summary(df_rec, asof=asof),
         },
         "notes_vs_system": notes_vs,
         "coin_universe": coin_matrix,
@@ -1640,7 +2169,9 @@ def main():
 
     # 2) history.json
     history = {
+        "dashboard_generation_id": generation_id,
         "asof": asof.isoformat(),
+        "asof_timezone": "Asia/Seoul",
         "rows": history_rows(df_dist, df_pre),
     }
     _write_json(out_dir / "history.json", history, passphrase=pin)
@@ -1651,23 +2182,37 @@ def main():
     closed_pre = df_pre[df_pre["status"].astype(str) == "closed"].copy() if "status" in df_pre.columns else df_pre.iloc[0:0]
 
     accuracy = {
+        "dashboard_generation_id": generation_id,
         "asof": asof.isoformat(),
+        "asof_timezone": "Asia/Seoul",
         "window_days": ROLLING_WINDOW_DAYS,
         "distribution": {
             "rolling": rolling_accuracy(
                 df_dist, ["hit_h2", "hit_h6", "hit_h5"]
             ),
             "cum_pnl": cumulative_pnl_series(
-                df_dist, "next_max_return_pct", "next_close_return_pct"
+                df_dist,
+                "next_max_return_pct",
+                "next_close_return_pct",
+                asof=asof,
             ),
             "rolling_sharpe": compute_rolling_sharpe(
-                closed_dist, "next_max_return_pct", "next_close_return_pct"
+                closed_dist,
+                "next_max_return_pct",
+                "next_close_return_pct",
+                asof=asof,
             ),
             "underwater": compute_underwater_series(
-                closed_dist, "next_max_return_pct", "next_close_return_pct"
+                closed_dist,
+                "next_max_return_pct",
+                "next_close_return_pct",
+                asof=asof,
             ),
             "monthly_returns": compute_monthly_returns(
-                closed_dist, "next_max_return_pct", "next_close_return_pct"
+                closed_dist,
+                "next_max_return_pct",
+                "next_close_return_pct",
+                asof=asof,
             ),
         },
         "preopen": {
@@ -1677,16 +2222,28 @@ def main():
                  "hit_first1h_3pct", "hit_first1h_5pct"],
             ),
             "cum_pnl": cumulative_pnl_series(
-                df_pre, "first_1h_max_return_pct", "first_1h_close_return_pct"
+                df_pre,
+                "first_1h_max_return_pct",
+                "first_1h_close_return_pct",
+                asof=asof,
             ),
             "rolling_sharpe": compute_rolling_sharpe(
-                closed_pre, "first_1h_max_return_pct", "first_1h_close_return_pct"
+                closed_pre,
+                "first_1h_max_return_pct",
+                "first_1h_close_return_pct",
+                asof=asof,
             ),
             "underwater": compute_underwater_series(
-                closed_pre, "first_1h_max_return_pct", "first_1h_close_return_pct"
+                closed_pre,
+                "first_1h_max_return_pct",
+                "first_1h_close_return_pct",
+                asof=asof,
             ),
             "monthly_returns": compute_monthly_returns(
-                closed_pre, "first_1h_max_return_pct", "first_1h_close_return_pct"
+                closed_pre,
+                "first_1h_max_return_pct",
+                "first_1h_close_return_pct",
+                asof=asof,
             ),
         },
         "btc_benchmark": btc_bench,
@@ -1695,10 +2252,24 @@ def main():
     log.info(f"saved accuracy.json (btc benchmark: {len(btc_bench)} days)")
 
     # 4) idea_validation.json — ACTIVE/WATCH_ONLY/SILENCE attribution.
+    idea_input_manifest = build_idea_input_manifest(args)
     idea_candidates = load_idea_candidate_ledger(args)
-    _, idea_payload = build_idea_validation_report(idea_candidates)
-    idea_payload["asof"] = asof.isoformat()
-    idea_payload["policy_competition"] = policy_competition
+    _, idea_payload = build_idea_validation_report(
+        idea_candidates,
+        asof=asof,
+        input_manifest=idea_input_manifest,
+    )
+    idea_payload = _bind_idea_dashboard_generation(
+        idea_payload,
+        generation_id,
+    )
+    if build_idea_input_manifest(args) != idea_input_manifest:
+        raise RuntimeError("dashboard idea-validation inputs changed during build")
+    validate_idea_validation_payload(
+        idea_payload,
+        asof=asof,
+        require_current=True,
+    )
     _write_json(out_dir / "idea_validation.json", idea_payload, passphrase=pin)
     log.info(f"saved idea_validation.json ({idea_payload.get('n_candidates', 0)} candidates)")
 
@@ -1707,10 +2278,14 @@ def main():
     print("=== Dashboard summary ===")
     for ch, s in summary["channels"].items():
         v = s.get("virtual", {})
+        cumulative = v.get(
+            "cum_pnl_pct",
+            s.get("cum_net_pnl_pct", float("nan")),
+        )
         print(
             f"  {ch:<13} alerts={s.get('n_alerts_total',0):>4} "
             f"closed={s.get('n_closed',0):>4} "
-            f"cum_pnl={v.get('cum_pnl_pct', float('nan')):+.2f}% "
+            f"cum_pnl={cumulative:+.2f}% "
             f"avg_max={s.get('avg_max_return_pct', float('nan')):+.2f}% "
             f"avg_min={s.get('avg_min_return_pct', float('nan')):+.2f}%"
         )
@@ -1719,34 +2294,46 @@ def main():
 
 def _load_or_empty(path: str | Path) -> pd.DataFrame:
     p = Path(path)
-    if not p.exists():
+    raw = _read_stable_artifact_bytes(p)
+    if raw is None:
         return pd.DataFrame()
-    df = pd.read_csv(p)
+    df = pd.read_csv(io.BytesIO(raw))
     if "status" in df.columns:
         df["status"] = df["status"].fillna("").astype(str)
     return df
 
 
-def _build_pump_hunter_payload(ledger_path: str) -> dict | None:
+def _build_pump_hunter_payload(
+    ledger_path: str,
+    *,
+    asof=None,
+) -> dict | None:
     """PUMP hunter SHADOW dashboard payload — 오늘 watchlist + 일별 capture 시계열.
 
     shadow_ledger_pump_hunter.csv 가 아직 없으면 None (cron 1회 후 생성).
     challenger_only — Telegram/ACTIVE 승격 금지가 코드 레벨에서 보장됨.
     """
     p = Path(ledger_path)
-    if not p.exists():
+    raw = _read_stable_artifact_bytes(p)
+    if raw is None:
         return {
             "status": "pending_first_cron",
             "note": "shadow_ledger_pump_hunter.csv 가 아직 없음 — 내일 09:05 cron 후 첫 row 생성",
         }
     try:
-        df = pd.read_csv(p)
-    except Exception:
+        df = pd.read_csv(io.BytesIO(raw))
+    except (pd.errors.ParserError, UnicodeError, ValueError):
         return None
     if df.empty or "date" not in df.columns:
         return {"status": "empty", "note": "ledger empty", "rows_total": 0}
 
-    df = df.copy()
+    df = _rows_through_asof(df, asof)
+    if df.empty:
+        return {
+            "status": "empty_asof",
+            "note": "no valid ledger rows at or before dashboard asof",
+            "rows_total": 0,
+        }
     df["date"] = df["date"].astype(str)
     latest_date = df["date"].max()
 
@@ -1808,26 +2395,68 @@ def _build_pump_hunter_payload(ledger_path: str) -> dict | None:
     }
 
 
-def _build_champion_gate_payload(state_path: str) -> dict | None:
+def _build_champion_gate_payload(
+    state_path: str,
+    *,
+    asof=None,
+) -> dict | None:
     """champion gate 진행률 — output/champion_state.json 에서 슬롯별 n_days/MIN_CLOSED.
 
     "언제쯤 fallback 을 벗어나 첫 실전 champion 판정이 가능한가" 를 사용자가
     한눈에 보도록. MIN_CLOSED 등 상수는 state 의 config 에 이미 기록돼 있음.
     """
     p = Path(state_path)
-    if not p.exists():
+    cutoff = normalize_kst_date(asof)
+    try:
+        artifact = load_champion_state_artifact(
+            p,
+            expected_asof=cutoff,
+        )
+    except ChampionStateError:
+        return None
+    if artifact is None:
+        return None
+    state = artifact.payload
+    state_asof = normalize_kst_date(state["asof"])
+    cfg = state.get("config", {})
+    if not isinstance(cfg, dict):
         return None
     try:
-        with open(p) as f:
-            state = json.load(f)
-    except Exception:
+        min_closed = int(cfg.get("min_closed", 30))
+    except (TypeError, ValueError):
         return None
-    cfg = state.get("config", {})
-    min_closed = int(cfg.get("min_closed", 30))
+    if min_closed < 0:
+        return None
     slots_out = []
-    for slot, v in (state.get("slots") or {}).items():
+    slots = state.get("slots")
+    if not isinstance(slots, dict):
+        return None
+    for slot, v in slots.items():
+        if not isinstance(v, dict):
+            continue
         m = v.get("metric") or {}
-        n_days = int(m.get("n_days") or 0)
+        if not isinstance(m, dict):
+            continue
+        last_date = m.get("last_date")
+        if last_date:
+            try:
+                if normalize_kst_date(last_date) > cutoff:
+                    continue
+            except ValueError:
+                continue
+        since = v.get("since")
+        if since:
+            try:
+                if normalize_kst_date(since) > cutoff:
+                    continue
+            except ValueError:
+                continue
+        try:
+            n_days = int(m.get("n_days") or 0)
+        except (TypeError, ValueError):
+            continue
+        if n_days < 0:
+            continue
         slots_out.append({
             "slot": slot,
             "champion_id": v.get("champion_id"),
@@ -1839,7 +2468,7 @@ def _build_champion_gate_payload(state_path: str) -> dict | None:
             "days_remaining": max(0, min_closed - n_days),
         })
     return {
-        "asof": state.get("asof"),
+        "asof": str(state_asof.date()),
         "updated_at": state.get("updated_at"),
         "min_closed": min_closed,
         "hyst_k": cfg.get("hyst_k"),
@@ -1861,20 +2490,123 @@ def _sanitize_json(obj):
     return obj
 
 
+def _read_stable_artifact_bytes(path: Path) -> bytes | None:
+    """Read one regular non-symlink artifact from a stable named generation."""
+    try:
+        parent_before = path.parent.lstat()
+    except OSError as exc:
+        raise ArtifactValidationError(
+            f"dashboard input parent cannot be inspected: {path.parent}"
+        ) from exc
+    if not stat.S_ISDIR(parent_before.st_mode):
+        raise ArtifactValidationError(
+            f"dashboard input parent must be a real directory: {path.parent}"
+        )
+    try:
+        before = file_identity(path, root=path.parent)
+    except ArtifactSourceChangedError as exc:
+        raise ArtifactValidationError(
+            f"dashboard input is not a stable regular file: {path}"
+        ) from exc
+    if not before["exists"]:
+        try:
+            after = file_identity(path, root=path.parent)
+            parent_after = path.parent.lstat()
+        except ArtifactSourceChangedError as exc:
+            raise ArtifactValidationError(
+                f"dashboard input appeared unsafely during read: {path}"
+            ) from exc
+        except OSError as exc:
+            raise ArtifactValidationError(
+                f"dashboard input parent changed during read: {path.parent}"
+            ) from exc
+        if (
+            before != after
+            or (
+                parent_before.st_dev,
+                parent_before.st_ino,
+                parent_before.st_mode,
+                parent_before.st_mtime_ns,
+                parent_before.st_ctime_ns,
+            )
+            != (
+                parent_after.st_dev,
+                parent_after.st_ino,
+                parent_after.st_mode,
+                parent_after.st_mtime_ns,
+                parent_after.st_ctime_ns,
+            )
+        ):
+            raise ArtifactValidationError(
+                f"dashboard input appeared during read: {path}"
+            )
+        return None
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise ArtifactValidationError(
+            f"dashboard input cannot be read: {path}"
+        ) from exc
+    try:
+        after = file_identity(path, root=path.parent)
+    except ArtifactSourceChangedError as exc:
+        raise ArtifactValidationError(
+            f"dashboard input changed unsafely during read: {path}"
+        ) from exc
+    try:
+        parent_after = path.parent.lstat()
+    except OSError as exc:
+        raise ArtifactValidationError(
+            f"dashboard input parent changed during read: {path.parent}"
+        ) from exc
+    if (
+        before != after
+        or before.get("size") != len(raw)
+        or before.get("sha256") != sha256_bytes(raw)
+        or (
+            parent_before.st_dev,
+            parent_before.st_ino,
+            parent_before.st_mode,
+            parent_before.st_mtime_ns,
+            parent_before.st_ctime_ns,
+        )
+        != (
+            parent_after.st_dev,
+            parent_after.st_ino,
+            parent_after.st_mode,
+            parent_after.st_mtime_ns,
+            parent_after.st_ctime_ns,
+        )
+    ):
+        raise ArtifactValidationError(
+            f"dashboard input changed during read: {path}"
+        )
+    return raw
+
+
 def _write_json(path: Path, payload: dict, passphrase: str | None = None):
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = _sanitize_json(payload)
     if passphrase:
         payload = _encrypt_payload(payload, passphrase)
-    with open(path, "w") as f:
-        json.dump(payload, f, indent=2, ensure_ascii=False, default=str, allow_nan=False)
+    serialized = (
+        json.dumps(
+            payload,
+            indent=2,
+            ensure_ascii=False,
+            default=str,
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+    atomic_write_bytes(path, serialized)
 
 
 def _encrypt_payload(payload: dict, passphrase: str) -> dict:
     """PBKDF2-HMAC-SHA256 + AES-256-CBC + HMAC-SHA256(salt||iv||ct).
 
-    Viewer 의 decryptPayload (papers index.html 동일) 와 호환. PIN brute-force
-    완전 차단은 불가능 (4-digit + client-side) — 외부 일반인 차단 수준.
+    Viewer 의 decryptPayload (papers index.html 동일) 와 호환. client-side
+    ciphertext라 offline brute-force 자체를 막을 수는 없으므로 12자 이상
+    비공개 passphrase를 강제한다. 이는 서버 측 접근제어를 대체하지 않는다.
     """
     from cryptography.hazmat.primitives import hashes, hmac as crypto_hmac
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -1895,7 +2627,8 @@ def _encrypt_payload(payload: dict, passphrase: str) -> dict:
     pad_len = 16 - (len(plaintext) % 16)
     padded = plaintext + bytes([pad_len]) * pad_len
     cipher = Cipher(algorithms.AES(aes_key), modes.CBC(iv))
-    ct = cipher.encryptor().update(padded) + cipher.encryptor().finalize()
+    encryptor = cipher.encryptor()
+    ct = encryptor.update(padded) + encryptor.finalize()
 
     h = crypto_hmac.HMAC(mac_key, hashes.SHA256())
     h.update(salt + iv + ct)

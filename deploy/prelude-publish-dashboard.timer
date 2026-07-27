@@ -2,9 +2,10 @@
 Description=prelude dashboard publish daily 10:10 KST timer
 
 [Timer]
-# 10:10 KST = 01:10 UTC
 # distribution close (09:30) + preopen close (10:05) 둘 다 끝난 후 5분 여유.
-OnCalendar=*-*-* 01:10:00 UTC
+# The service also serializes with both closes and verifies their current-day
+# success markers before publishing.
+OnCalendar=*-*-* 10:10:00 Asia/Seoul
 Persistent=true
 RandomizedDelaySec=60
 
