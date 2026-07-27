@@ -1,6 +1,7 @@
 # Core
 numpy
 pandas
+pyarrow>=16,<24
 scipy
 scikit-learn
 
@@ -17,17 +18,18 @@ pandas-ta
 
 # Dashboard encryption (PBKDF2 + AES-256-CBC + HMAC-SHA256 — papers viewer 와 동일)
 cryptography
+requests>=2.31,<3
 
 # Crypto exchange
 pyupbit
 ccxt
+websockets>=15,<17
 
 # Telegram
 python-telegram-bot
 
 # Schedule / Ops
 schedule
-python-dotenv
 
 # Backtest helpers
 properscoring  # CRPS
