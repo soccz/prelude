@@ -6,16 +6,29 @@ candidate has enough realized evidence to stay ACTIVE.
 """
 from __future__ import annotations
 
-import json
 import pickle
+import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
+import sklearn
 
 from ledger.config import ROUND_TRIP_COST_PCT
+from ops.artifact_provenance import (
+    ArtifactSourceChangedError,
+    ArtifactValidationError,
+    canonical_json_bytes,
+    file_identity,
+    file_set_identity,
+    manifest_digest_matches,
+    payload_digest,
+    sha256_bytes,
+    strict_json_object_bytes,
+)
 from ops.decision_policy import ACTIVE, WATCH_ONLY, setup_quality
 
 
@@ -24,6 +37,38 @@ STRONG_META_CLOSED = 20
 META_POLICY_ID = "recommendation_quality_meta_v1"
 META_POLICY_VERSION = "2026-05-25.1"
 DEFAULT_META_MODEL_DIR = "signals/models/ckpt/recommendation_quality_v1"
+DEFAULT_META_CANDIDATE_DIR = (
+    "signals/models/ckpt/recommendation_quality_candidates/latest"
+)
+META_ARTIFACT_SCHEMA = "prelude.recommendation_quality_model.v2"
+META_TRAINING_LINEAGE_SCHEMA = 1
+MODEL_ID = "recommendation_quality_meta_label_v1"
+MODEL_VERSION = "2026-05-25.1"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+META_LEDGER_INPUT_KEYS = (
+    "paper_ledger_distribution",
+    "paper_ledger_preopen",
+    "shadow_ledger_distribution",
+    "shadow_ledger_preopen",
+)
+META_TRAINING_GENERATOR_SOURCES = (
+    "scripts/train_recommendation_meta.py",
+    "scripts/idea_validation_report.py",
+    "ops/recommendation_quality.py",
+    "ops/artifact_provenance.py",
+    "ledger/config.py",
+    "ledger/csv_store.py",
+)
+
+# Pickle can execute code while loading.  A live artifact is therefore trusted
+# only after its complete metadata digest has been explicitly pinned in source
+# as part of a user-approved promotion.  Automated training must never edit
+# this allow-list. Promotion also requires artifact_status=DEPLOYED and
+# deployable=true in the content-bound metadata; copying candidate files alone
+# cannot activate a model. A reviewer must verify the bound training inputs,
+# strict row cohort, generator sources, and promotion evidence before pinning.
+APPROVED_META_ARTIFACT_SHA256: dict[tuple[str, str], str] = {}
+_SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
 NUMERIC_META_FEATURES = [
     "expected_edge_pct", "calibrated_hit_pct", "source_rank", "alert_rank",
@@ -107,18 +152,471 @@ def build_meta_feature_frame(df: pd.DataFrame, channel: str | None = None) -> pd
     return out[META_FEATURES]
 
 
-def load_trained_meta_model(model_dir: str | Path = DEFAULT_META_MODEL_DIR) -> dict | None:
-    """Load trained meta-label artifact if present."""
-    p = Path(model_dir)
-    meta_path = p / "meta.json"
-    model_path = p / "model.pkl"
-    if not meta_path.exists() or not model_path.exists():
+def _stable_file_bytes(path: Path) -> bytes:
+    """Read one regular non-symlink file and reject a concurrent replacement."""
+    before = file_identity(path, root=path.parent)
+    if not before.get("exists"):
+        raise ArtifactValidationError(f"artifact file missing or not regular: {path}")
+    try:
+        content = path.read_bytes()
+    except OSError as exc:
+        raise ArtifactValidationError(f"artifact file unreadable: {path}") from exc
+    after = file_identity(path, root=path.parent)
+    digest = sha256_bytes(content)
+    if before != after or digest != before.get("sha256"):
+        raise ArtifactSourceChangedError(
+            f"artifact file changed during read: {path}"
+        )
+    return content
+
+
+def meta_feature_schema_sha256() -> str:
+    contract = {
+        "features": META_FEATURES,
+        "numeric_features": NUMERIC_META_FEATURES,
+        "categorical_features": CATEGORICAL_META_FEATURES,
+    }
+    return sha256_bytes(canonical_json_bytes(contract))
+
+
+def meta_training_row_schema_sha256() -> str:
+    contract = {
+        "key_columns": ["date", "channel", "coin"],
+        "target_columns": ["net_pnl_pct", "target_net_win"],
+        "numeric_features": NUMERIC_META_FEATURES,
+        "categorical_features": CATEGORICAL_META_FEATURES,
+        "missing_numeric": None,
+        "outcome_contract": "tp5_sl3_ordered_first_passage_net",
+        "sort": ["date", "channel", "coin"],
+    }
+    return sha256_bytes(canonical_json_bytes(contract))
+
+
+def meta_runtime_versions() -> dict[str, str]:
+    """Versions whose ABI/serialization contracts affect pickle execution."""
+    return {
+        "python": ".".join(map(str, sys.version_info[:3])),
+        "numpy": np.__version__,
+        "pandas": pd.__version__,
+        "scikit_learn": sklearn.__version__,
+    }
+
+
+def _valid_file_identity(identity: object) -> bool:
+    if not isinstance(identity, dict) or set(identity) != {
+        "path",
+        "exists",
+        "size",
+        "sha256",
+    }:
+        return False
+    return (
+        isinstance(identity["path"], str)
+        and bool(identity["path"])
+        and identity["exists"] is True
+        and isinstance(identity["size"], int)
+        and not isinstance(identity["size"], bool)
+        and identity["size"] >= 0
+        and isinstance(identity["sha256"], str)
+        and _SHA256_RE.fullmatch(identity["sha256"]) is not None
+    )
+
+
+def _validate_identity_bundle(
+    bundle: object,
+    *,
+    required_keys: tuple[str, ...],
+    label: str,
+) -> dict[str, dict[str, Any]]:
+    if not isinstance(bundle, dict) or not manifest_digest_matches(
+        bundle,
+        digest_key="bundle_sha256",
+    ):
+        raise ArtifactValidationError(
+            f"recommendation meta {label} bundle digest mismatch"
+        )
+    files = bundle.get("files")
+    if not isinstance(files, dict) or set(files) != set(required_keys):
+        raise ArtifactValidationError(
+            f"recommendation meta {label} identities are incomplete"
+        )
+    if not all(_valid_file_identity(identity) for identity in files.values()):
+        raise ArtifactValidationError(
+            f"recommendation meta {label} identity is invalid"
+        )
+    return files
+
+
+def _validate_training_lineage(meta: dict[str, Any]) -> None:
+    lineage = meta.get("training_lineage")
+    if (
+        not isinstance(lineage, dict)
+        or lineage.get("schema_version") != META_TRAINING_LINEAGE_SCHEMA
+        or not manifest_digest_matches(lineage)
+    ):
+        raise ArtifactValidationError(
+            "recommendation meta training lineage digest/schema mismatch"
+        )
+    _validate_identity_bundle(
+        lineage.get("ledger_inputs"),
+        required_keys=META_LEDGER_INPUT_KEYS,
+        label="ledger input",
+    )
+    recorded_generators = _validate_identity_bundle(
+        lineage.get("generator_sources"),
+        required_keys=META_TRAINING_GENERATOR_SOURCES,
+        label="generator source",
+    )
+    for relative, identity in recorded_generators.items():
+        if identity["path"] != relative:
+            raise ArtifactValidationError(
+                "recommendation meta generator source path mismatch"
+            )
+    try:
+        current_generators = file_set_identity(
+            {
+                relative: PROJECT_ROOT / relative
+                for relative in META_TRAINING_GENERATOR_SOURCES
+            },
+            root=PROJECT_ROOT,
+        )
+    except (OSError, ArtifactSourceChangedError) as exc:
+        raise ArtifactValidationError(
+            "recommendation meta generator sources are unreadable or unstable"
+        ) from exc
+    if current_generators != recorded_generators:
+        raise ArtifactValidationError(
+            "recommendation meta generator source lineage is stale"
+        )
+
+    rows = lineage.get("training_rows")
+    if not isinstance(rows, dict) or set(rows) != {
+        "row_schema_sha256",
+        "rows_sha256",
+        "n_rows",
+        "n_dates",
+        "date_start",
+        "date_end",
+    }:
+        raise ArtifactValidationError(
+            "recommendation meta training row contract is incomplete"
+        )
+    if rows.get("row_schema_sha256") != meta_training_row_schema_sha256():
+        raise ArtifactValidationError(
+            "recommendation meta training row schema mismatch"
+        )
+    rows_digest = rows.get("rows_sha256")
+    if not isinstance(rows_digest, str) or _SHA256_RE.fullmatch(rows_digest) is None:
+        raise ArtifactValidationError(
+            "recommendation meta training row digest is invalid"
+        )
+    n_rows = rows.get("n_rows")
+    n_dates = rows.get("n_dates")
+    meta_n_samples = meta.get("n_samples")
+    if (
+        not isinstance(n_rows, int)
+        or isinstance(n_rows, bool)
+        or n_rows < 0
+        or not isinstance(n_dates, int)
+        or isinstance(n_dates, bool)
+        or n_dates < 0
+        or n_dates > n_rows
+        or not isinstance(meta_n_samples, int)
+        or isinstance(meta_n_samples, bool)
+        or n_rows != meta_n_samples
+    ):
+        raise ArtifactValidationError(
+            "recommendation meta training row counts are invalid"
+        )
+    date_start = rows.get("date_start")
+    date_end = rows.get("date_end")
+    date_range = meta.get("date_range")
+    if not isinstance(date_range, dict):
+        raise ArtifactValidationError(
+            "recommendation meta date_range is invalid"
+        )
+    if (
+        date_range.get("start") != date_start
+        or date_range.get("end") != date_end
+    ):
+        raise ArtifactValidationError(
+            "recommendation meta training date lineage mismatch"
+        )
+    if n_rows == 0:
+        if (
+            n_dates != 0
+            or date_start is not None
+            or date_end is not None
+            or rows_digest != sha256_bytes(canonical_json_bytes([]))
+        ):
+            raise ArtifactValidationError(
+                "empty recommendation meta training dates are inconsistent"
+            )
+        return
+    if (
+        n_dates < 1
+        or not isinstance(date_start, str)
+        or not isinstance(date_end, str)
+    ):
+        raise ArtifactValidationError(
+            "recommendation meta training date range is invalid"
+        )
+    try:
+        start = pd.Timestamp(date_start)
+        end = pd.Timestamp(date_end)
+    except (TypeError, ValueError) as exc:
+        raise ArtifactValidationError(
+            "recommendation meta training date range is invalid"
+        ) from exc
+    if (
+        pd.isna(start)
+        or pd.isna(end)
+        or start.time() != pd.Timestamp(0).time()
+        or end.time() != pd.Timestamp(0).time()
+        or start > end
+        or date_start != start.strftime("%Y-%m-%d")
+        or date_end != end.strftime("%Y-%m-%d")
+    ):
+        raise ArtifactValidationError(
+            "recommendation meta training date range is invalid"
+        )
+
+
+def _validate_common_meta(meta: dict[str, Any]) -> None:
+    if meta.get("model_id") != MODEL_ID:
+        raise ArtifactValidationError("unexpected recommendation meta model_id")
+    if meta.get("model_version") != MODEL_VERSION:
+        raise ArtifactValidationError("unexpected recommendation meta model_version")
+    if type(meta.get("deployable")) is not bool:
+        raise ArtifactValidationError("recommendation meta deployable must be boolean")
+    if meta.get("target") != "net_win":
+        raise ArtifactValidationError("unexpected recommendation meta target")
+    for key, expected in (
+        ("features", META_FEATURES),
+        ("numeric_features", NUMERIC_META_FEATURES),
+        ("categorical_features", CATEGORICAL_META_FEATURES),
+    ):
+        value = meta.get(key)
+        if value != expected:
+            raise ArtifactValidationError(
+                f"recommendation meta {key} does not match live feature contract"
+            )
+    if meta.get("runtime_versions") != meta_runtime_versions():
+        raise ArtifactValidationError(
+            "recommendation meta runtime version contract mismatch"
+        )
+    _validate_training_lineage(meta)
+
+
+def _validate_meta_state(meta: dict[str, Any]) -> None:
+    status = meta.get("artifact_status")
+    validation_passed = meta.get("validation_gate_passed")
+    promotion_status = meta.get("promotion_status")
+    state_contracts = {
+        "REJECTED": (False, False, "NOT_ELIGIBLE"),
+        "CANDIDATE": (True, False, "AWAITING_USER_APPROVAL"),
+        "DEPLOYED": (True, True, "APPROVED"),
+    }
+    if status not in state_contracts:
+        raise ArtifactValidationError(
+            "unexpected recommendation meta artifact_status"
+        )
+    if type(validation_passed) is not bool:
+        raise ArtifactValidationError(
+            "recommendation meta validation_gate_passed must be boolean"
+        )
+    expected = state_contracts[str(status)]
+    observed = (
+        validation_passed,
+        meta["deployable"],
+        promotion_status,
+    )
+    if observed != expected:
+        raise ArtifactValidationError(
+            "recommendation meta promotion state is internally inconsistent"
+        )
+
+    model_file = meta.get("model_file")
+    model_hash = meta.get("model_sha256")
+    threshold = meta.get("threshold")
+    if model_file is None and model_hash is None:
+        if status != "REJECTED" or threshold is not None:
+            raise ArtifactValidationError(
+                "recommendation meta may omit model only for rejected no-model state"
+            )
+        return
+    if model_file is None or model_hash is None:
+        raise ArtifactValidationError(
+            "recommendation meta model_file/model_sha256 must be present together"
+        )
+    if (
+        isinstance(threshold, bool)
+        or not isinstance(threshold, (int, float))
+        or not np.isfinite(float(threshold))
+        or not 0.0 <= float(threshold) <= 1.0
+    ):
+        raise ArtifactValidationError(
+            "recommendation meta threshold must be finite and within [0, 1]"
+        )
+
+
+def _validated_generation_path(model_dir: Path, meta: dict[str, Any]) -> Path:
+    model_hash = meta.get("model_sha256")
+    model_name = meta.get("model_file")
+    if not isinstance(model_hash, str) or _SHA256_RE.fullmatch(model_hash) is None:
+        raise ArtifactValidationError("recommendation meta model_sha256 is invalid")
+    expected_name = f"model.{model_hash}.pkl"
+    if model_name != expected_name:
+        raise ArtifactValidationError(
+            "recommendation meta model_file is not content-addressed"
+        )
+    model_path = model_dir / expected_name
+    if model_path.parent != model_dir:
+        raise ArtifactValidationError("recommendation meta model path escapes artifact directory")
+    return model_path
+
+
+def _inactive_artifact(meta: dict[str, Any], status: str) -> dict[str, Any]:
+    diagnostic_meta = dict(meta)
+    diagnostic_meta["declared_deployable"] = bool(meta.get("deployable", False))
+    diagnostic_meta["deployable"] = False
+    diagnostic_meta["runtime_artifact_status"] = status
+    return {
+        "meta": diagnostic_meta,
+        "model": None,
+        "artifact_status": status,
+    }
+
+
+def _read_trained_meta_model(
+    model_dir: str | Path,
+    *,
+    execute_approved_pickle: bool,
+) -> dict | None:
+    """Read and validate one meta-label artifact bundle.
+
+    Legacy/unapproved metadata is returned for diagnostics without loading its
+    pickle. Invalid versioned artifacts raise and stop the caller.
+    """
+    model_root = Path(model_dir)
+    meta_path = model_root / "meta.json"
+    try:
+        meta_path.lstat()
+    except FileNotFoundError:
         return None
-    with open(meta_path) as f:
-        meta = json.load(f)
-    with open(model_path, "rb") as f:
-        model = pickle.load(f)
-    return {"meta": meta, "model": model}
+    except OSError as exc:
+        raise ArtifactValidationError(
+            f"recommendation meta cannot be inspected: {meta_path}"
+        ) from exc
+
+    meta_bytes = _stable_file_bytes(meta_path)
+    meta = strict_json_object_bytes(meta_bytes, source=meta_path)
+
+    if meta.get("artifact_schema") != META_ARTIFACT_SCHEMA:
+        # Historical artifacts predate content binding and cannot cross the
+        # pickle trust boundary. Keep their card visible, but never execute it.
+        return _inactive_artifact(meta, "LEGACY_UNBOUND")
+
+    _validate_common_meta(meta)
+    _validate_meta_state(meta)
+    if meta.get("feature_schema_sha256") != meta_feature_schema_sha256():
+        raise ArtifactValidationError(
+            "recommendation meta feature schema digest mismatch"
+        )
+    recorded_artifact_digest = meta.get("artifact_sha256")
+    if (
+        not isinstance(recorded_artifact_digest, str)
+        or _SHA256_RE.fullmatch(recorded_artifact_digest) is None
+        or recorded_artifact_digest
+        != payload_digest(meta, digest_key="artifact_sha256")
+    ):
+        raise ArtifactValidationError(
+            "recommendation meta artifact digest mismatch"
+        )
+
+    if meta.get("model_file") is None:
+        return _inactive_artifact(meta, "REJECTED")
+
+    model_path = _validated_generation_path(model_root, meta)
+    model_bytes = _stable_file_bytes(model_path)
+    if sha256_bytes(model_bytes) != meta["model_sha256"]:
+        raise ArtifactValidationError("recommendation meta model hash mismatch")
+
+    # Re-observe the pointer after reading its generation. This prevents a
+    # concurrent publisher from mixing metadata from one generation with model
+    # bytes from another.
+    if _stable_file_bytes(meta_path) != meta_bytes:
+        raise ArtifactSourceChangedError(
+            f"recommendation meta changed during bundle read: {meta_path}"
+        )
+
+    approval_key = (str(meta["model_id"]), str(meta["model_version"]))
+    approved_digest = APPROVED_META_ARTIFACT_SHA256.get(approval_key)
+    if approved_digest != recorded_artifact_digest:
+        return _inactive_artifact(meta, "UNAPPROVED")
+    if not meta["deployable"]:
+        return _inactive_artifact(meta, "COLLECT")
+
+    if not execute_approved_pickle:
+        inspected_meta = dict(meta)
+        inspected_meta["declared_deployable"] = True
+        inspected_meta["runtime_artifact_status"] = "DEPLOYED"
+        return {
+            "meta": inspected_meta,
+            "model": None,
+            "artifact_status": "DEPLOYED",
+        }
+
+    # This is intentionally the final step: no untrusted pickle bytes execute
+    # before strict metadata, feature contract, content hash, coherent-pair,
+    # and explicit promotion approval validation all succeed.
+    model = pickle.loads(model_bytes)  # noqa: S301
+    predict_proba = getattr(model, "predict_proba", None)
+    if not callable(predict_proba):
+        raise ArtifactValidationError(
+            "approved recommendation meta model lacks predict_proba"
+        )
+    feature_names = getattr(model, "feature_names_in_", None)
+    if feature_names is None or list(map(str, feature_names)) != META_FEATURES:
+        raise ArtifactValidationError(
+            "approved recommendation meta model feature names mismatch"
+        )
+    classes = getattr(model, "classes_", None)
+    if classes is None or list(classes) != [0, 1]:
+        raise ArtifactValidationError(
+            "approved recommendation meta model class contract mismatch"
+        )
+    return {
+        "meta": meta,
+        "model": model,
+        "artifact_status": "DEPLOYED",
+    }
+
+
+def inspect_trained_meta_model(
+    model_dir: str | Path = DEFAULT_META_MODEL_DIR,
+) -> dict | None:
+    """Inspect a complete artifact without ever executing pickle bytes."""
+    return _read_trained_meta_model(
+        model_dir,
+        execute_approved_pickle=False,
+    )
+
+
+def load_trained_meta_model(
+    model_dir: str | Path = DEFAULT_META_MODEL_DIR,
+    *,
+    enabled: bool = True,
+) -> dict | None:
+    """Load an explicitly approved, content-bound meta-label artifact."""
+    if type(enabled) is not bool:
+        raise TypeError("enabled must be boolean")
+    if not enabled:
+        return None
+    return _read_trained_meta_model(
+        model_dir,
+        execute_approved_pickle=True,
+    )
 
 
 def _safe_float(value: Any, default: float = np.nan) -> float:
@@ -134,7 +632,11 @@ def _safe_float(value: Any, default: float = np.nan) -> float:
 def _safe_str(value: Any, default: str = "") -> str:
     if value is None:
         return default
-    if isinstance(value, float) and np.isnan(value):
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        missing = False
+    if isinstance(missing, (bool, np.bool_)) and missing:
         return default
     text = str(value)
     return text if text else default
@@ -236,10 +738,28 @@ def _closed_before(history: pd.DataFrame, asof: pd.Timestamp, channel: str) -> p
     if len(history) == 0:
         return history
     cutoff = pd.Timestamp(asof).normalize()
+    # Legacy rows may not carry a status, but an explicitly non-closed row
+    # must not become realized evidence merely because partial outcome
+    # columns were populated.
+    status = (
+        history["status"].astype(str).str.strip().str.lower()
+        if "status" in history.columns
+        else pd.Series("", index=history.index, dtype=str)
+    )
+    coin = (
+        history["coin"].astype("string").str.strip().str.lower()
+        if "coin" in history.columns
+        else pd.Series("", index=history.index, dtype="string")
+    )
+    valid_coin = coin.notna() & ~coin.fillna("").isin(
+        {"", "nan", "none", "<na>", "nat"}
+    )
     closed = history[
         (history["channel"].astype(str) == channel)
         & history["date_dt"].notna()
         & (history["date_dt"] < cutoff)
+        & status.isin({"", "closed"})
+        & valid_coin
         & history["net_pnl_pct"].notna()
     ].copy()
     return closed
@@ -259,11 +779,14 @@ def _summarize(grp: pd.DataFrame, key: str) -> Evidence:
     )
 
 
-def _key_values(row: pd.Series, channel: str) -> list[tuple[str, tuple]]:
+def _key_values(
+    row: pd.Series,
+    channel: str,
+) -> list[tuple[str, tuple[str, ...]]]:
     idea = _safe_str(row.get("idea_id"))
     setup_q = _safe_str(row.get("setup_quality"), "UNKNOWN")
     regime = _safe_str(row.get("btc_regime"), "unknown")
-    keys = []
+    keys: list[tuple[str, tuple[str, ...]]] = []
     if idea:
         keys.append(("idea", (channel, idea)))
     keys.extend([
@@ -274,8 +797,10 @@ def _key_values(row: pd.Series, channel: str) -> list[tuple[str, tuple]]:
     return keys
 
 
-def _evidence_maps(closed: pd.DataFrame) -> dict[str, dict[tuple, Evidence]]:
-    maps: dict[str, dict[tuple, Evidence]] = {
+def _evidence_maps(
+    closed: pd.DataFrame,
+) -> dict[str, dict[tuple[str, ...], Evidence]]:
+    maps: dict[str, dict[tuple[str, ...], Evidence]] = {
         "idea": {},
         "setup_regime": {},
         "setup": {},
@@ -296,7 +821,11 @@ def _evidence_maps(closed: pd.DataFrame) -> dict[str, dict[tuple, Evidence]]:
     return maps
 
 
-def _select_evidence(row: pd.Series, maps: dict[str, dict[tuple, Evidence]], channel: str) -> Evidence:
+def _select_evidence(
+    row: pd.Series,
+    maps: dict[str, dict[tuple[str, ...], Evidence]],
+    channel: str,
+) -> Evidence:
     fallback = Evidence()
     for level, values in _key_values(row, channel):
         ev = maps.get(level, {}).get(values)
@@ -338,10 +867,35 @@ def _predict_trained_model(row: pd.Series, channel: str, trained_model: dict | N
             "trained_model_threshold": np.nan,
         }
     meta = trained_model.get("meta", {})
+    model = trained_model.get("model")
+    artifact_status = _safe_str(trained_model.get("artifact_status"))
+    if model is None:
+        return {
+            "trained_model_id": meta.get("model_id", ""),
+            "trained_model_version": meta.get("model_version", ""),
+            "trained_model_status": artifact_status or "COLLECT",
+            "trained_model_p_win": np.nan,
+            "trained_model_threshold": _safe_float(meta.get("threshold")),
+        }
     X = build_meta_feature_frame(pd.DataFrame([row.to_dict()]), channel=channel)
-    model = trained_model["model"]
-    p = float(model.predict_proba(X)[:, 1][0])
-    status = "DEPLOYED" if bool(meta.get("deployable", False)) else "COLLECT"
+    probabilities = np.asarray(model.predict_proba(X), dtype=float)
+    if (
+        probabilities.shape != (1, 2)
+        or not np.isfinite(probabilities).all()
+        or (probabilities < 0.0).any()
+        or (probabilities > 1.0).any()
+        or not np.isclose(probabilities.sum(axis=1), 1.0, atol=1e-8).all()
+    ):
+        raise ArtifactValidationError(
+            "recommendation meta predict_proba returned invalid probabilities"
+        )
+    p = float(probabilities[0, 1])
+    status = (
+        "DEPLOYED"
+        if bool(meta.get("deployable", False))
+        and artifact_status in {"", "DEPLOYED"}
+        else "COLLECT"
+    )
     return {
         "trained_model_id": meta.get("model_id", "recommendation_quality_v1"),
         "trained_model_version": meta.get("model_version", ""),
@@ -410,11 +964,14 @@ def apply_recommendation_quality(
             and not np.isnan(model_p)
             and not np.isnan(model_threshold)
         ):
-            score = model_p * 100
             if model_p < model_threshold:
+                score = model_p * 100
                 tier = "MODEL_DOWNRANK"
                 reason = f"trained meta model p_win {model_p:.2f} below threshold {model_threshold:.2f}"
-            else:
+            elif tier != "DOWNRANK":
+                # A positive model score may confirm an ACTIVE candidate, but
+                # it must not erase directly observed negative PnL evidence.
+                score = model_p * 100
                 tier = "MODEL_OK"
                 reason = f"trained meta model p_win {model_p:.2f} above threshold {model_threshold:.2f}"
 

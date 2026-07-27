@@ -19,12 +19,15 @@ stale 이면 후보 0 + meta 에 사유 기록 (조용히 잘못된 신호 내�
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
 from data.database import load_candles
+from data.market_universe import is_excluded_signal_market
 from signals.pump_detector_v1 import (
     UNIVERSE_TOP_N,
     build_feature_frame,
@@ -47,53 +50,137 @@ OOS_NET_TP5SL3_PCT = -0.36  # 자동 룰 기준 net (음수 — radar 고지용)
 SL_PCT = -0.03
 TP_PCT = 0.05
 
-# 스테이블/래핑 등 Binance USDT 페어 매핑 제외 (binance_leadlag_v1 과 동일)
-_UNMAPPABLE = {"KRW-USDT", "KRW-USDC", "KRW-DAI", "KRW-TUSD", "KRW-WBTC", "KRW-WETH"}
+_BINANCE_FEATURE_COLUMNS = ["bn_market", "b_vol_surge", "b_ret_1d"]
 
 
 def krw_to_binance(market: str) -> str | None:
-    if market in _UNMAPPABLE:
+    market = str(market)
+    if (
+        is_excluded_signal_market(market)
+        or re.fullmatch(r"KRW-[A-Z0-9]+", market) is None
+    ):
         return None
-    base = str(market).replace("KRW-", "")
+    base = market.removeprefix("KRW-")
     return f"BINANCE-{base}USDT"
 
 
 def binance_volsurge_for_date(feature_date, needed_bn: set[str],
                               binance_db: str = BINANCE_DB) -> tuple[pd.DataFrame, str]:
-    """feature_date 의 Binance b_vol_surge. (df, status) — status 는 freshness 진단."""
-    f_ts = pd.Timestamp(feature_date)
-    rows = []
-    latest_seen = None
+    """필요한 모든 Binance symbol의 D-1 vol-surge를 원자적으로 만든다.
+
+    symbol 하나라도 feature_date candle 또는 직전 연속 20일 history가 없으면
+    부분 frame을 반환하지 않는다. inner join으로 누락 자산만 조용히 제거되는 선택편향을
+    막기 위한 fail-closed 계약이다.
+    """
+    feature_timestamp = pd.Timestamp(feature_date)
+    if pd.isna(feature_timestamp):
+        raise ValueError("feature_date must be a valid timestamp")
+    if feature_timestamp.tzinfo is not None:
+        feature_timestamp = feature_timestamp.tz_convert(
+            "Asia/Seoul"
+        ).tz_localize(None)
+    f_day = feature_timestamp.normalize()
+    empty = pd.DataFrame(columns=_BINANCE_FEATURE_COLUMNS)
+    if not needed_bn:
+        return empty, "ok"
+
+    rows: list[dict] = []
+    issues: list[str] = []
     for bm in sorted(needed_bn):
-        raw = load_candles(binance_db, bm)
-        if raw is None or len(raw) < BN_VOL_LOOKBACK + 2:
+        try:
+            raw = load_candles(binance_db, bm)
+        except Exception as exc:
+            issues.append(f"{bm}:read_error[{type(exc).__name__}]")
             continue
+        if raw is None or raw.empty:
+            issues.append(f"{bm}:missing")
+            continue
+
         d = raw.sort_values("timestamp").copy()
         d["timestamp"] = pd.to_datetime(d["timestamp"])
-        if latest_seen is None or d["timestamp"].max() > latest_seen:
-            latest_seen = d["timestamp"].max()
-        d = d[d["timestamp"] <= f_ts]
-        if len(d) < BN_VOL_LOOKBACK + 1:
+        d["day"] = d["timestamp"].dt.normalize()
+        through_feature = d[d["day"] <= f_day]
+        feature_rows = through_feature[through_feature["day"] == f_day]
+        if len(feature_rows) != 1:
+            latest = (
+                through_feature["day"].max().date()
+                if not through_feature.empty
+                else "none"
+            )
+            issues.append(
+                f"{bm}:feature_date_missing[latest={latest},need={f_day.date()}]"
+            )
             continue
-        last = d.iloc[-1]
-        if pd.Timestamp(last["timestamp"]).normalize() != f_ts.normalize():
-            continue  # feature_date 봉 없음 (stale/미상장)
-        qv = d["quote_volume"].astype(float)
-        base = qv.iloc[-(BN_VOL_LOOKBACK + 1):-1].mean()
-        if not np.isfinite(base) or base <= 0:
+
+        history = through_feature[through_feature["day"] < f_day].tail(
+            BN_VOL_LOOKBACK
+        )
+        if len(history) != BN_VOL_LOOKBACK:
+            issues.append(
+                f"{bm}:history_short[{len(history)}/{BN_VOL_LOOKBACK}]"
+            )
             continue
+
+        expected_days = pd.date_range(
+            f_day - pd.Timedelta(days=BN_VOL_LOOKBACK),
+            f_day - pd.Timedelta(days=1),
+            freq="D",
+        )
+        actual_days = pd.DatetimeIndex(history["day"])
+        if not actual_days.equals(expected_days):
+            issues.append(f"{bm}:history_gap")
+            continue
+
+        last = feature_rows.iloc[0]
+        baseline_qv = pd.to_numeric(
+            history["quote_volume"], errors="coerce"
+        ).to_numpy(dtype=float)
+        current_qv = float(
+            pd.to_numeric(
+                pd.Series([last["quote_volume"]]), errors="coerce"
+            ).iloc[0]
+        )
+        base = float(np.mean(baseline_qv))
+        if (
+            not np.isfinite(baseline_qv).all()
+            or not np.isfinite(current_qv)
+            or not np.isfinite(base)
+            or base <= 0
+            or current_qv < 0
+            or (baseline_qv < 0).any()
+        ):
+            issues.append(f"{bm}:invalid_quote_volume")
+            continue
+
+        close_pair = pd.to_numeric(
+            pd.Series([history["close"].iloc[-1], last["close"]]),
+            errors="coerce",
+        ).to_numpy(dtype=float)
+        previous_close, current_close = close_pair
         rows.append({
             "bn_market": bm,
-            "b_vol_surge": float(qv.iloc[-1] / base),
-            "b_ret_1d": float(np.log(d["close"].iloc[-1] / d["close"].iloc[-2]))
-            if len(d) >= 2 and d["close"].iloc[-2] > 0 else np.nan,
+            "b_vol_surge": float(current_qv / base),
+            "b_ret_1d": (
+                float(np.log(current_close / previous_close))
+                if (
+                    np.isfinite(current_close)
+                    and np.isfinite(previous_close)
+                    and current_close > 0
+                    and previous_close > 0
+                )
+                else np.nan
+            ),
         })
-    out = pd.DataFrame(rows)
-    if latest_seen is None:
-        return out, "binance_db_empty"
-    if latest_seen.normalize() < f_ts.normalize():
-        return out, f"binance_stale (latest={latest_seen.date()}, need={f_ts.date()})"
-    return out, "ok"
+
+    if issues:
+        shown = ",".join(issues[:8])
+        if len(issues) > 8:
+            shown += f",+{len(issues) - 8}"
+        return (
+            empty,
+            f"binance_partial (ready={len(rows)}/{len(needed_bn)}; {shown})",
+        )
+    return pd.DataFrame(rows, columns=_BINANCE_FEATURE_COLUMNS), "ok"
 
 
 def score_pump_v2_candidates(asof_date, *, db_path: str | None = None,
@@ -102,11 +189,33 @@ def score_pump_v2_candidates(asof_date, *, db_path: str | None = None,
                              max_candidates: int = MAX_CANDIDATES,
                              limit_markets: int | None = None) -> dict:
     """결정일 D 의 v2 후보 (record-only scoring). 텔레그램/원장 기록 없음."""
+    if top_universe <= 0:
+        raise ValueError("top_universe must be positive")
+    if max_candidates <= 0:
+        raise ValueError("max_candidates must be positive")
+    if limit_markets is not None and limit_markets <= 0:
+        raise ValueError("limit_markets must be positive when provided")
     asof = pd.Timestamp(asof_date).normalize()
-    kwargs = {"top_universe": top_universe, "limit_markets": limit_markets}
+    kwargs: dict[str, Any] = {
+        "top_universe": top_universe,
+        "limit_markets": limit_markets,
+    }
     if db_path:
         kwargs["db_path"] = db_path
     frame = build_feature_frame(asof, **kwargs)
+    if not frame.empty:
+        if "market" not in frame.columns:
+            raise ValueError("v2 Upbit feature frame is missing market identity")
+        excluded_rows = sorted({
+            str(market)
+            for market in frame["market"]
+            if is_excluded_signal_market(str(market))
+        })
+        if excluded_rows:
+            raise RuntimeError(
+                "v2 upstream universe contains excluded signal market(s): "
+                + ",".join(excluded_rows)
+            )
 
     meta = {
         "asof": str(asof.date()),
@@ -136,7 +245,7 @@ def score_pump_v2_candidates(asof_date, *, db_path: str | None = None,
     needed = set(frame.loc[base_mask, "bn_market"].dropna())
     bn, status = binance_volsurge_for_date(meta["feature_date"], needed, binance_db)
     meta["binance_status"] = status
-    if bn.empty:
+    if status != "ok" or bn.empty:
         return meta
 
     cand = frame[base_mask].merge(bn, on="bn_market", how="inner")

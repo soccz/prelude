@@ -6,7 +6,7 @@ confidence requires future shadow/live samples.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 GATE_ID = "policy_gate_v1"
@@ -24,7 +24,10 @@ def _bootstrap_avg_low(stats: dict):
 
 def _late_avg(row: dict):
     late = next((p for p in row.get("replay_period_stability", []) if p.get("period") == "late"), None)
-    return None if late is None else late.get("avg_net_pnl_pct")
+    promotion = {} if late is None else (late.get("promotion_evidence") or {})
+    if promotion.get("eligible") is not True:
+        return None
+    return promotion.get("avg_net_pnl_pct")
 
 
 def _shadow_closed_count(summary_rows: list[dict], channel: str) -> int:
@@ -37,7 +40,7 @@ def _shadow_closed_count(summary_rows: list[dict], channel: str) -> int:
         if row.get("channel") != channel:
             continue
         if row.get("decision") in {"WATCH_ONLY", "SILENCE"}:
-            n += int(row.get("n_closed") or 0)
+            n += int(row.get("n_promotion_eligible_closed") or 0)
     return n
 
 
@@ -53,11 +56,13 @@ def evaluate_policy_gate(report_payload: dict) -> dict:
             continue
         observed = row.get("observed_active", {})
         replay = row.get("replay_active", {})
-        delta = row.get("delta_net_pnl_sum_pct") or 0
-        replay_n = int(replay.get("n_closed") or 0)
-        replay_avg = replay.get("avg_net_pnl_pct")
-        replay_net = replay.get("net_pnl_sum_pct")
-        ci_low = _bootstrap_avg_low(replay)
+        promotion = replay.get("promotion_evidence") or {}
+        promotion_eligible = promotion.get("eligible") is True
+        delta = row.get("promotion_delta_net_pnl_sum_pct") or 0
+        replay_n = int(promotion.get("n_closed") or 0)
+        replay_avg = promotion.get("avg_net_pnl_pct")
+        replay_net = promotion.get("net_pnl_sum_pct")
+        ci_low = _bootstrap_avg_low(promotion)
         late_avg = _late_avg(row)
         shadow_n = _shadow_closed_count(summary_rows, channel)
 
@@ -72,7 +77,8 @@ def evaluate_policy_gate(report_payload: dict) -> dict:
             confidence = "MEDIUM_REPLAY_ONLY"
             reasons.append("observed active preopen book is materially negative")
         elif (
-            replay_n >= MIN_REPLAY_ACTIVE_TRADES
+            promotion_eligible
+            and replay_n >= MIN_REPLAY_ACTIVE_TRADES
             and replay_avg is not None and replay_avg > 0
             and replay_net is not None and replay_net > 0
             and delta > 0
@@ -100,7 +106,13 @@ def evaluate_policy_gate(report_payload: dict) -> dict:
             "replay_bootstrap_avg_ci95_low_pct": ci_low,
             "replay_late_avg_net_pnl_pct": late_avg,
             "observed_net_pnl_sum_pct": observed.get("net_pnl_sum_pct"),
-            "delta_net_pnl_sum_pct": row.get("delta_net_pnl_sum_pct"),
+            "delta_net_pnl_sum_pct": row.get(
+                "promotion_delta_net_pnl_sum_pct"
+            ),
+            "diagnostic_replay_n_closed": replay.get("n_closed"),
+            "diagnostic_replay_net_pnl_sum_pct": replay.get(
+                "net_pnl_sum_pct"
+            ),
             "shadow_closed_for_confidence": shadow_n,
             "reasons": reasons,
         })
@@ -108,6 +120,6 @@ def evaluate_policy_gate(report_payload: dict) -> dict:
     return {
         "gate_id": GATE_ID,
         "gate_version": GATE_VERSION,
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "rows": out_rows,
     }

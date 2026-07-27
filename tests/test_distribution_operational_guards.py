@@ -4,6 +4,7 @@ import sys
 
 import pandas as pd
 
+from ledger.path_quality import PathAssessment
 from notifier.format import format_distribution_beta, format_preopen_beta
 from scripts.predict_today_distribution import append_to_paper_ledger, is_decision_window
 
@@ -225,28 +226,51 @@ def test_close_paper_ledger_also_closes_shadow(tmp_path, monkeypatch):
 def test_preopen_close_waits_for_full_first_hour(monkeypatch):
     import scripts.close_preopen_ledger as close_mod
 
-    df = pd.DataFrame([
-        {"timestamp": "2026-05-05 09:00:00", "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0},
-        {"timestamp": "2026-05-05 09:15:00", "open": 100.0, "high": 102.0, "low": 99.0, "close": 101.0},
-    ])
-    monkeypatch.setattr(close_mod, "load_candles", lambda *args, **kwargs: df.copy())
+    timestamps = tuple(
+        pd.date_range("2026-05-05 09:00:00", periods=4, freq="15min")
+    )
+    assessment = PathAssessment(
+        bars=[],
+        timestamps=timestamps,
+        path_complete=False,
+        path_quality="db_horizon_end_incomplete",
+        raw_bars=2,
+        expected_bars=4,
+        benchmark_bars=2,
+    )
+    monkeypatch.setattr(
+        close_mod, "assess_first_hour_path", lambda *args, **kwargs: assessment
+    )
 
     result = close_mod.compute_realized_preopen("KRW-AAA", pd.Timestamp("2026-05-05"))
 
     assert result["status"] == "pending"
-    assert "only 2" in result["notes"]
+    assert result["notes"] == "db_horizon_end_incomplete"
 
 
 def test_preopen_close_closes_with_four_15m_bars(monkeypatch):
     import scripts.close_preopen_ledger as close_mod
 
-    df = pd.DataFrame([
-        {"timestamp": "2026-05-05 09:00:00", "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0},
-        {"timestamp": "2026-05-05 09:15:00", "open": 100.0, "high": 104.0, "low": 99.0, "close": 103.0},
-        {"timestamp": "2026-05-05 09:30:00", "open": 103.0, "high": 105.5, "low": 102.0, "close": 105.0},
-        {"timestamp": "2026-05-05 09:45:00", "open": 105.0, "high": 106.0, "low": 104.0, "close": 105.5},
-    ])
-    monkeypatch.setattr(close_mod, "load_candles", lambda *args, **kwargs: df.copy())
+    timestamps = tuple(
+        pd.date_range("2026-05-05 09:00:00", periods=4, freq="15min")
+    )
+    assessment = PathAssessment(
+        bars=[
+            (100.0, 101.0, 99.0, 100.0),
+            (100.0, 104.0, 99.0, 103.0),
+            (103.0, 105.5, 102.0, 105.0),
+            (105.0, 106.0, 104.0, 105.5),
+        ],
+        timestamps=timestamps,
+        path_complete=True,
+        path_quality="complete",
+        raw_bars=4,
+        expected_bars=4,
+        benchmark_bars=4,
+    )
+    monkeypatch.setattr(
+        close_mod, "assess_first_hour_path", lambda *args, **kwargs: assessment
+    )
 
     result = close_mod.compute_realized_preopen("KRW-AAA", pd.Timestamp("2026-05-05"))
 

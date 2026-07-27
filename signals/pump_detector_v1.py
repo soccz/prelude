@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 
 from data.database import list_markets, load_candles
+from data.market_universe import is_excluded_signal_market
 from signals.features import compute_btc_features
 
 DB_PATH = str(Path(__file__).resolve().parent.parent / "data" / "upbit_d1.db")
@@ -53,7 +54,12 @@ class PumpDetectorConfig:
 
 
 def _asof_ts(asof_date) -> pd.Timestamp:
-    return pd.Timestamp(asof_date).normalize() + pd.Timedelta(hours=9)
+    timestamp = pd.Timestamp(asof_date)
+    if pd.isna(timestamp):
+        raise ValueError("asof_date must be a valid timestamp")
+    if timestamp.tzinfo is not None:
+        timestamp = timestamp.tz_convert("Asia/Seoul").tz_localize(None)
+    return timestamp.normalize() + pd.Timedelta(hours=9)
 
 
 def _feature_ts(asof_date) -> pd.Timestamp:
@@ -102,10 +108,24 @@ def build_feature_frame(asof_date, *, db_path: str = DB_PATH,
                         top_universe: int = UNIVERSE_TOP_N,
                         limit_markets: int | None = None) -> pd.DataFrame:
     """Build D-1 feature rows plus D entry open for all eligible KRW markets."""
+    if isinstance(top_universe, bool) or top_universe <= 0:
+        raise ValueError("top_universe must be positive")
+    if (
+        limit_markets is not None
+        and (isinstance(limit_markets, bool) or limit_markets <= 0)
+    ):
+        raise ValueError("limit_markets must be positive when provided")
     decision_ts = _asof_ts(asof_date)
     feature_ts = _feature_ts(asof_date)
 
-    markets = [m for m in list_markets(db_path) if str(m).startswith("KRW-")]
+    markets = [
+        str(market)
+        for market in list_markets(db_path)
+        if (
+            str(market).startswith("KRW-")
+            and not is_excluded_signal_market(str(market))
+        )
+    ]
     if limit_markets is not None:
         markets = markets[:limit_markets]
 
@@ -122,21 +142,48 @@ def build_feature_frame(asof_date, *, db_path: str = DB_PATH,
             continue
 
         entry_row = raw[raw["timestamp"] == decision_ts]
-        if entry_row.empty:
+        if len(entry_row) != 1:
             continue
 
         hist = raw[raw["timestamp"] <= feature_ts]
         if len(hist) < FEATURE_LOOKBACK_MIN:
             continue
+        recent_history = hist.tail(FEATURE_LOOKBACK_MIN)
+        expected_timestamps = pd.date_range(
+            end=feature_ts,
+            periods=FEATURE_LOOKBACK_MIN,
+            freq="D",
+        )
+        if not pd.DatetimeIndex(recent_history["timestamp"]).equals(
+            expected_timestamps
+        ):
+            continue
         feat = _compute_market_features(hist)
         feature_row = feat[feat["timestamp"] == feature_ts]
-        if feature_row.empty:
+        if len(feature_row) != 1:
             continue
         fr = feature_row.iloc[-1]
         er = entry_row.iloc[-1]
         quote_volume = fr.get("quote_volume", np.nan)
         if pd.isna(quote_volume):
             quote_volume = float(fr["close"]) * float(fr["volume"])
+        numeric_values = np.asarray(
+            [
+                er["open"],
+                quote_volume,
+                fr["log_return_1d"],
+                fr["roc_7d"],
+                fr["atr_pct_14"],
+            ],
+            dtype=float,
+        )
+        if (
+            not np.isfinite(numeric_values).all()
+            or numeric_values[0] <= 0
+            or numeric_values[1] <= 0
+            or numeric_values[4] < 0
+        ):
+            continue
 
         rows.append({
             "market": market,
@@ -171,6 +218,8 @@ def build_feature_frame(asof_date, *, db_path: str = DB_PATH,
 def apply_pump_rules(frame: pd.DataFrame,
                      max_candidates: int = MAX_CANDIDATES) -> pd.DataFrame:
     """Apply mined PUMP rules and return ranked candidate rows."""
+    if isinstance(max_candidates, bool) or max_candidates <= 0:
+        raise ValueError("max_candidates must be positive")
     if frame.empty:
         return frame.copy()
     out = frame.copy()

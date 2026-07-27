@@ -1,9 +1,9 @@
-"""Train recommendation-quality meta-label model.
+"""Train a candidate recommendation-quality meta-label model.
 
 The base XGBoost heads generate candidates. This meta model learns from closed
-paper/shadow ledger rows whether a candidate became net-positive under the
-current TP5/EOD rule, then supplies a deployable confidence filter only if a
-time holdout shows improvement.
+paper/shadow ledger rows with complete ordered TP5/SL3/EOD paths whether a
+candidate became net-positive. Automated runs only produce a validation
+candidate; live use additionally requires explicit user-approved promotion.
 """
 from __future__ import annotations
 
@@ -12,7 +12,8 @@ import json
 import logging
 import pickle
 import sys
-from datetime import datetime
+from contextlib import ExitStack
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -28,16 +29,234 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from ops.recommendation_quality import (
     CATEGORICAL_META_FEATURES,
-    DEFAULT_META_MODEL_DIR,
+    DEFAULT_META_CANDIDATE_DIR,
+    META_LEDGER_INPUT_KEYS,
     META_FEATURES,
+    META_ARTIFACT_SCHEMA,
+    META_TRAINING_GENERATOR_SOURCES,
+    META_TRAINING_LINEAGE_SCHEMA,
+    MODEL_ID,
+    MODEL_VERSION,
     NUMERIC_META_FEATURES,
+    PROJECT_ROOT,
     build_meta_feature_frame,
+    meta_feature_schema_sha256,
+    meta_runtime_versions,
+    meta_training_row_schema_sha256,
+)
+from ledger.csv_store import ledger_lock
+from ops.artifact_provenance import (
+    ArtifactSourceChangedError,
+    atomic_write_bytes,
+    atomic_write_json,
+    canonical_json_bytes,
+    file_set_identity,
+    payload_digest,
+    resolve_identity_path,
+    sha256_bytes,
+    sha256_file,
+    with_manifest_digest,
 )
 from scripts.idea_validation_report import add_result_columns, load_candidate_ledger
 
 
-MODEL_ID = "recommendation_quality_meta_label_v1"
-MODEL_VERSION = "2026-05-25.1"
+def _candidate_meta(payload: dict) -> dict:
+    """Attach the immutable artifact contract to one non-active candidate."""
+    meta = {
+        "artifact_schema": META_ARTIFACT_SCHEMA,
+        **payload,
+        # Automated training may establish statistical candidacy, but cannot
+        # satisfy the project's user-confirmation/promotion requirement.
+        "deployable": False,
+        "feature_schema_sha256": meta_feature_schema_sha256(),
+        "runtime_versions": meta_runtime_versions(),
+    }
+    meta["artifact_sha256"] = payload_digest(
+        meta,
+        digest_key="artifact_sha256",
+    )
+    return meta
+
+
+def _strict_training_rows(closed: pd.DataFrame) -> tuple[list[dict], dict]:
+    features = build_meta_feature_frame(closed)
+    rows: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for idx, source in closed.iterrows():
+        date = pd.Timestamp(source.get("date_dt"))
+        date_text = str(source.get("date"))
+        if (
+            pd.isna(date)
+            or date.time() != pd.Timestamp(0).time()
+            or date_text != date.strftime("%Y-%m-%d")
+        ):
+            raise ValueError("training row has invalid or non-canonical date")
+        channel = str(source.get("channel"))
+        coin = str(source.get("coin"))
+        if channel not in {"distribution", "preopen"} or not coin.startswith("KRW-"):
+            raise ValueError("training row has invalid channel/coin key")
+        key = (date_text, channel, coin)
+        if key in seen:
+            raise ValueError(f"duplicate recommendation training row: {key}")
+        seen.add(key)
+
+        net_pnl = float(source.get("net_pnl_pct"))
+        target = source.get("target_net_win")
+        promotion_eligible = source.get("promotion_eligible")
+        if (
+            not np.isfinite(net_pnl)
+            or not isinstance(target, (int, np.integer))
+            or isinstance(target, (bool, np.bool_))
+            or int(target) not in {0, 1}
+            or int(target) != int(net_pnl > 0)
+            or not isinstance(promotion_eligible, (bool, np.bool_))
+            or not bool(promotion_eligible)
+            or source.get("outcome_contract")
+            != "tp5_sl3_ordered_first_passage_net"
+        ):
+            raise ValueError("training row violates ordered outcome/target contract")
+        row = {
+            "date": date_text,
+            "channel": channel,
+            "coin": coin,
+            "net_pnl_pct": net_pnl,
+            "target_net_win": int(target),
+        }
+        for column in NUMERIC_META_FEATURES:
+            value = features.at[idx, column]
+            row[column] = None if pd.isna(value) else float(value)
+            if row[column] is not None and not np.isfinite(row[column]):
+                raise ValueError(f"training row has non-finite feature: {column}")
+        for column in CATEGORICAL_META_FEATURES:
+            row[column] = str(features.at[idx, column])
+        rows.append(row)
+    rows.sort(key=lambda row: (row["date"], row["channel"], row["coin"]))
+    dates = sorted({str(row["date"]) for row in rows})
+    contract = {
+        "row_schema_sha256": meta_training_row_schema_sha256(),
+        "rows_sha256": sha256_bytes(canonical_json_bytes(rows)),
+        "n_rows": len(rows),
+        "n_dates": len(dates),
+        "date_start": dates[0] if dates else None,
+        "date_end": dates[-1] if dates else None,
+    }
+    return rows, contract
+
+
+def _training_source_paths(args) -> dict[str, Path]:
+    values = {
+        "paper_ledger_distribution": args.paper_ledger,
+        "paper_ledger_preopen": args.paper_ledger_preopen,
+        "shadow_ledger_distribution": args.shadow_ledger_distribution,
+        "shadow_ledger_preopen": args.shadow_ledger_preopen,
+    }
+    if set(values) != set(META_LEDGER_INPUT_KEYS):
+        raise RuntimeError("recommendation training ledger contract drift")
+    return {
+        name: resolve_identity_path(str(path), root=PROJECT_ROOT)
+        for name, path in values.items()
+    }
+
+
+def _build_training_snapshot(args) -> tuple[pd.DataFrame, dict]:
+    ledger_paths = _training_source_paths(args)
+    generator_paths = {
+        relative: PROJECT_ROOT / relative
+        for relative in META_TRAINING_GENERATOR_SOURCES
+    }
+    all_sources = {
+        **{f"ledger:{name}": path for name, path in ledger_paths.items()},
+        **{
+            f"generator:{relative}": path
+            for relative, path in generator_paths.items()
+        },
+    }
+    unique_ledgers = sorted(
+        {Path(path).resolve() for path in ledger_paths.values()},
+        key=str,
+    )
+    with ExitStack() as stack:
+        for path in unique_ledgers:
+            stack.enter_context(ledger_lock(path))
+        before = file_set_identity(all_sources, root=PROJECT_ROOT)
+        ledger_identities = {
+            name: before[f"ledger:{name}"]
+            for name in META_LEDGER_INPUT_KEYS
+        }
+        if any(not identity.get("exists") for identity in ledger_identities.values()):
+            raise FileNotFoundError(
+                "all four recommendation training ledgers must exist"
+            )
+        closed = build_training_data(args)
+        after = file_set_identity(all_sources, root=PROJECT_ROOT)
+    if before != after:
+        raise ArtifactSourceChangedError(
+            "recommendation training inputs changed during snapshot build"
+        )
+
+    _, training_rows = _strict_training_rows(closed)
+    generator_identities = {
+        relative: before[f"generator:{relative}"]
+        for relative in META_TRAINING_GENERATOR_SOURCES
+    }
+    lineage = {
+        "schema_version": META_TRAINING_LINEAGE_SCHEMA,
+        "ledger_inputs": with_manifest_digest(
+            {"files": ledger_identities},
+            digest_key="bundle_sha256",
+        ),
+        "generator_sources": with_manifest_digest(
+            {"files": generator_identities},
+            digest_key="bundle_sha256",
+        ),
+        "training_rows": training_rows,
+    }
+    return closed, with_manifest_digest(lineage)
+
+
+def _rejected_meta(
+    closed: pd.DataFrame,
+    reason: str,
+    training_lineage: dict,
+    *,
+    n_train: int = 0,
+    n_holdout: int = 0,
+) -> dict:
+    valid_dates = closed.get("date", pd.Series(dtype=str)).dropna().astype(str)
+    return _candidate_meta({
+        "model_id": MODEL_ID,
+        "model_version": MODEL_VERSION,
+        "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "artifact_status": "REJECTED",
+        "validation_gate_passed": False,
+        "promotion_status": "NOT_ELIGIBLE",
+        "reason": reason,
+        "target": "net_win",
+        "threshold": None,
+        "model_file": None,
+        "model_sha256": None,
+        "n_samples": int(len(closed)),
+        "n_train": int(n_train),
+        "n_holdout": int(n_holdout),
+        "date_range": {
+            "start": str(valid_dates.min()) if len(valid_dates) else None,
+            "end": str(valid_dates.max()) if len(valid_dates) else None,
+        },
+        "features": META_FEATURES,
+        "numeric_features": NUMERIC_META_FEATURES,
+        "categorical_features": CATEGORICAL_META_FEATURES,
+        "training_lineage": training_lineage,
+    })
+
+
+def _write_rejected_outputs(args, out_dir: Path, meta: dict) -> None:
+    atomic_write_json(out_dir / "meta.json", meta)
+    atomic_write_json(args.out_validation_json, meta)
+    header = (
+        "date,channel,coin,net_pnl_pct,target_net_win,"
+        "p_net_win,split,selected\n"
+    )
+    atomic_write_bytes(args.out_validation_csv, header.encode("utf-8"))
 
 
 def _maybe_float(value, digits: int = 6):
@@ -168,7 +387,15 @@ def _feature_importance(pipe: Pipeline, top_n: int = 20) -> list[dict]:
 def build_training_data(args) -> pd.DataFrame:
     candidates = load_candidate_ledger(args)
     enriched = add_result_columns(candidates)
-    closed = enriched[enriched["net_pnl_pct"].notna()].copy()
+    promotion_eligible = enriched.get(
+        "promotion_eligible",
+        pd.Series(False, index=enriched.index),
+    ).map(lambda value: isinstance(value, (bool, np.bool_)) and bool(value))
+    closed = enriched[
+        enriched["net_pnl_pct"].notna()
+        & promotion_eligible
+        & enriched["date_dt"].notna()
+    ].copy()
     if len(closed) == 0:
         return closed
     closed["target_net_win"] = (closed["net_pnl_pct"] > 0).astype(int)
@@ -176,30 +403,37 @@ def build_training_data(args) -> pd.DataFrame:
     return closed
 
 
-def train_and_write(args) -> dict:
-    closed = build_training_data(args)
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+def _train_and_write_locked(args, out_dir: Path) -> dict:
+    if not 0.0 < args.holdout_frac < 1.0:
+        raise ValueError("holdout_frac must be strictly between 0 and 1")
+    if args.min_samples < 2 or args.min_holdout < 1 or args.min_selected < 1:
+        raise ValueError("sample thresholds must be positive")
+
+    closed, training_lineage = _build_training_snapshot(args)
 
     if len(closed) < args.min_samples:
-        meta = {
-            "model_id": MODEL_ID,
-            "model_version": MODEL_VERSION,
-            "built_at": datetime.now().isoformat(timespec="seconds"),
-            "deployable": False,
-            "reason": f"not enough closed samples: {len(closed)} < {args.min_samples}",
-            "n_samples": int(len(closed)),
-        }
-        (out_dir / "meta.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+        meta = _rejected_meta(
+            closed,
+            f"not enough closed samples: {len(closed)} < {args.min_samples}",
+            training_lineage,
+        )
+        _write_rejected_outputs(args, out_dir, meta)
         return meta
 
     train, holdout = _time_split(closed, args.holdout_frac)
     if len(train["target_net_win"].unique()) < 2 or len(holdout["target_net_win"].unique()) < 2:
-        deployable = False
-        split_reason = "train or holdout has one class"
-    else:
-        deployable = True
-        split_reason = ""
+        meta = _rejected_meta(
+            closed,
+            "train or holdout has one class",
+            training_lineage,
+            n_train=len(train),
+            n_holdout=len(holdout),
+        )
+        _write_rejected_outputs(args, out_dir, meta)
+        return meta
+
+    deployable = True
+    split_reason = ""
 
     X_train = build_meta_feature_frame(train)
     y_train = train["target_net_win"].astype(int)
@@ -247,14 +481,23 @@ def train_and_write(args) -> dict:
         deployable = False
         split_reason = "selected holdout net pnl is not positive"
 
-    meta = {
+    model_bytes = pickle.dumps(model, protocol=pickle.HIGHEST_PROTOCOL)
+    model_sha256 = sha256_bytes(model_bytes)
+    model_name = f"model.{model_sha256}.pkl"
+    meta = _candidate_meta({
         "model_id": MODEL_ID,
         "model_version": MODEL_VERSION,
-        "built_at": datetime.now().isoformat(timespec="seconds"),
-        "deployable": bool(deployable),
+        "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "artifact_status": "CANDIDATE" if deployable else "REJECTED",
+        "validation_gate_passed": bool(deployable),
+        "promotion_status": (
+            "AWAITING_USER_APPROVAL" if deployable else "NOT_ELIGIBLE"
+        ),
         "reason": split_reason or "time holdout gate passed",
         "target": "net_win",
         "threshold": _maybe_float(threshold),
+        "model_file": model_name,
+        "model_sha256": model_sha256,
         "n_samples": int(len(closed)),
         "n_train": int(len(train)),
         "n_holdout": int(len(holdout)),
@@ -267,6 +510,7 @@ def train_and_write(args) -> dict:
         "features": META_FEATURES,
         "numeric_features": NUMERIC_META_FEATURES,
         "categorical_features": CATEGORICAL_META_FEATURES,
+        "training_lineage": training_lineage,
         "train_metrics": train_metrics,
         "holdout_metrics": holdout_metrics,
         "train_threshold_stats": train_threshold_stats,
@@ -274,24 +518,43 @@ def train_and_write(args) -> dict:
         "top_coefficients": _feature_importance(model),
         "notes": [
             "Time holdout is used to reduce overfit risk.",
-            "Artifact is used for live demotion only when deployable=true.",
+            "Automated training writes a non-active candidate only.",
+            "Live demotion additionally requires explicit user-approved promotion.",
             "Base candidate generators are unchanged.",
         ],
-    }
+    })
 
-    with open(out_dir / "model.pkl", "wb") as f:
-        pickle.dump(model, f)
-    with open(out_dir / "meta.json", "w") as f:
-        json.dump(meta, f, indent=2, ensure_ascii=False)
+    # Publish immutable model bytes first, then atomically switch meta.json to
+    # that content-addressed generation. A concurrent reader sees either the
+    # complete previous generation or the complete new generation.
+    model_path = out_dir / model_name
+    if model_path.exists():
+        if sha256_file(model_path) != model_sha256:
+            raise RuntimeError(f"content-addressed model collision: {model_path}")
+    else:
+        atomic_write_bytes(model_path, model_bytes)
+    atomic_write_json(out_dir / "meta.json", meta)
 
     scored = closed[["date", "channel", "coin", "net_pnl_pct", "target_net_win"]].copy()
     scored["p_net_win"] = np.concatenate([p_train, p_holdout])
     scored["split"] = ["train"] * len(train) + ["holdout"] * len(holdout)
     scored["selected"] = scored["p_net_win"] >= threshold
-    scored.to_csv(args.out_validation_csv, index=False)
-    with open(args.out_validation_json, "w") as f:
-        json.dump(meta, f, indent=2, ensure_ascii=False)
+    atomic_write_bytes(
+        args.out_validation_csv,
+        scored.to_csv(index=False).encode("utf-8"),
+    )
+    atomic_write_json(args.out_validation_json, meta)
     return meta
+
+
+def train_and_write(args) -> dict:
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # The two daily close jobs and manual runs can overlap. Serialize the full
+    # read/train/publish transaction for one candidate slot so validation
+    # CSV/JSON and the meta pointer always describe the same winning run.
+    with ledger_lock(out_dir / "meta.json"):
+        return _train_and_write_locked(args, out_dir)
 
 
 def main():
@@ -300,7 +563,15 @@ def main():
     parser.add_argument("--paper-ledger-preopen", default="output/paper_ledger_preopen.csv")
     parser.add_argument("--shadow-ledger-distribution", default="output/shadow_ledger_distribution.csv")
     parser.add_argument("--shadow-ledger-preopen", default="output/shadow_ledger_preopen.csv")
-    parser.add_argument("--out-dir", default=DEFAULT_META_MODEL_DIR)
+    parser.add_argument(
+        "--out-dir",
+        default=DEFAULT_META_CANDIDATE_DIR,
+        help=(
+            "candidate-only artifact directory; live promotion requires "
+            "explicit user approval, DEPLOYED metadata, and a source-pinned "
+            "artifact digest (copying files alone never activates it)"
+        ),
+    )
     parser.add_argument("--out-validation-csv", default="output/recommendation_meta_validation.csv")
     parser.add_argument("--out-validation-json", default="output/recommendation_meta_validation.json")
     parser.add_argument("--holdout-frac", type=float, default=0.25)
