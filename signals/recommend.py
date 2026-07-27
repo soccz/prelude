@@ -20,12 +20,13 @@
   - 유니버스 = D-1 quote_volume top100 (정적). 동적 surge 는 이득 ~0.
   - 매일 top-3 추천 (R1 정렬).
   - 라벨(적중 기준) = pump20 = (high_D / open_D - 1) >= 0.20.
-  - calibrated 급등확률 = 과거(asof 이전) score→pump20 bucket historical-hit.
-    raw 90% 류 절대 금지 (이 프로젝트 +20% tail 90%→실제 11.6% 전적).
-    top bin 은 정직하게 ~8~10% (≥20% 다음날) 로 표기됨.
+  - 급등 추정치 = 과거(asof 이전) score→pump20 train-only bucket historical-hit.
+    미래 누수는 없지만 inner OOF/strict forward calibration이 아니므로
+    calibrated 확률로 부르지 않는다. raw 90% 류 과신은 금지한다.
   - dump_risk ⚠️ : D-1 게이지(ret_7d 극단 과열 + log_qv 고유동 board-top +
     bear_volatile regime)로 hi-risk(상위 1/3) bool.
-  - 청산 플랜 = -3% 손절 + 5% 익절 (shadow 가상평가용). 진입 = day-D open(09:00).
+  - 청산 플랜 = -3% 손절 + 5% 익절 (shadow 가상평가용). day-D 09:00
+    open은 표시용 기준가이며 strict ledger는 receipt 뒤 다음 15분봉부터 평가한다.
 
 ★ LEAK 방어 (same-day leak 2번 전적 — 양보 X):
   - 모든 feature 는 build_market_features 의 market 별 .shift(1) 결과 (D-1 까지).
@@ -52,6 +53,7 @@ import json
 import logging
 import sys
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -61,7 +63,15 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from data.database import list_markets, load_candles  # noqa: E402
+from data.database import (  # noqa: E402
+    connect_readonly,
+    list_markets,
+    load_candles,
+)
+from data.market_universe import (  # noqa: E402
+    signal_eligible_markets,
+    signal_market_exclusions,
+)
 from scripts.univariate_precursor_lift_v1 import (  # noqa: E402
     build_market_features,
     add_cross_sectional,
@@ -117,7 +127,8 @@ DOWNSIDE_LABELS = {
 }
 EXP_DOWNSIDE_LABEL = "intraday_low_ret"   # E[하방] = 조건부 음수 low excursion 기대값
 
-# 청산 플랜 (shadow 가상평가용). 진입 = day-D open(09:00).
+# 청산 플랜 (shadow 가상평가용). day-D open은 reference price이고
+# strict execution attribution은 receipt 뒤 다음 15분봉부터 시작한다.
 SL_PCT = -0.03              # -3% 손절
 TP_PCT = 0.05               # +5% 익절
 
@@ -140,6 +151,13 @@ RR_DN_LABELS = {"p_dn5": 0.05, "p_dn10": 0.10}                   # low/open-1 <=
 RR_RATIO_UP = "p_up10"     # R1 numerator
 RR_RATIO_DN = "p_dn5"      # R1 denominator (≤-5% — 사용자 ~-5% 손실 수용 anchor)
 RR_EPS = 1e-3              # downside floor (downside_head_riskreward_v1 와 동일)
+MODEL_RANDOM_SEED = 42     # downside_head_riskreward_v1._xgb_fit_predict 와 동일
+SCORE_SCHEMA_VERSION = "recommend_score.v2"
+RULE_VERSIONS = {
+    "R1": "r1_riskreward_v1",
+    "R2": "r2_downside_penalized_v1",
+    "A1": "a1_sustainability_v1",
+}
 
 # --- R2 downside-penalized 정렬 (challenger — ranking="R2" 일 때만) -----------
 #   R2 = p_up10 - λ*p_dn5 (선형 패널티). R1(비율) 의 대안으로, 하방을 더 강하게
@@ -192,13 +210,21 @@ def _build_panel(asof: pd.Timestamp, limit_markets: int | None = None) -> pd.Dat
     라벨(pump20/pump15)은 day D open/high (미래) 로 만든다 → 시점 분리.
     asof row 의 라벨은 NaN/관측될 수 있으나 score/calibration 에 안 섞이게 처리.
     """
-    markets = list_markets(DB_PATH)
+    persisted_markets = list_markets(DB_PATH)
+    excluded_markets = signal_market_exclusions(persisted_markets)
+    if excluded_markets:
+        log.info(
+            "excluding %d persisted signal market(s) from scorer panel: %s",
+            len(excluded_markets),
+            ", ".join(excluded_markets),
+        )
+    markets = signal_eligible_markets(persisted_markets)
     if limit_markets:
         markets = markets[:limit_markets]
     frames = []
     for m in markets:
         df = load_candles(DB_PATH, m)
-        if df is None or len(df) < MIN_HISTORY:
+        if df is None or len(df) <= MIN_HISTORY:
             continue
         df = df.copy()
         df["timestamp"] = pd.to_datetime(df["timestamp"])
@@ -206,7 +232,8 @@ def _build_panel(asof: pd.Timestamp, limit_markets: int | None = None) -> pd.Dat
         # (그 봉의 feature 는 shift(1) 로 D-1 까지만 본다 → asof row feature = D-1).
         # asof 는 normalize(자정)되어 있으므로 그 날(date) 전체를 포함하도록 date 비교.
         df = df[df["timestamp"].dt.normalize() <= asof].copy()
-        if len(df) < MIN_HISTORY:
+        df = df.sort_values("timestamp").reset_index(drop=True)
+        if len(df) <= MIN_HISTORY:
             continue
         df["market"] = m
         feat = build_market_features(df)
@@ -219,11 +246,20 @@ def _build_panel(asof: pd.Timestamp, limit_markets: int | None = None) -> pd.Dat
             pd.DataFrame({"timestamp": df["timestamp"].values,
                           "market": df["market"].values,
                           "intraday_low_ret": low_ret.values,
-                          "eod_ret": eod_ret.values}),
+                          "eod_ret": eod_ret.values,
+                          "history_prior_bars": np.arange(len(df), dtype=int)}),
             on=["timestamp", "market"], how="left")
-        frames.append(feat)
+        # Point-in-time eligibility is row-specific.  Filtering only markets
+        # that have enough history *today* admits their cold-start rows into
+        # historical cross-sections and training.  Require 70 already-closed
+        # bars before the row reaches any cross-sectional rank calculation.
+        feat = feat[feat["history_prior_bars"] >= MIN_HISTORY].copy()
+        if not feat.empty:
+            frames.append(feat)
     if not frames:
-        raise RuntimeError(f"no markets with >= {MIN_HISTORY} bars up to {asof.date()}")
+        raise RuntimeError(
+            f"no markets with >= {MIN_HISTORY} prior bars up to {asof.date()}"
+        )
     panel = pd.concat(frames, ignore_index=True)
     panel["timestamp"] = pd.to_datetime(panel["timestamp"])
     panel["date"] = panel["timestamp"].dt.date
@@ -280,7 +316,10 @@ def _apply_calibration(scores: np.ndarray, hit_map, edges, base: float) -> np.nd
         return np.full(len(scores), base, dtype=float)
     idx = np.searchsorted(edges, scores, side="left")
     idx = np.clip(idx, 0, len(edges) - 1)
-    return np.array([hit_map.get(int(b), base) for b in idx], dtype=float)
+    return np.array(
+        [hit_map.get(int(bucket), base) for bucket in cast(np.ndarray, idx)],
+        dtype=float,
+    )
 
 
 def _fit_binary_label(train: pd.DataFrame, ret_col: str, thr: float, sign: str,
@@ -333,19 +372,22 @@ def _rr_outcome_labels(panel: pd.DataFrame) -> pd.DataFrame:
 
 def _fit_rr_head(train: pd.DataFrame, asof_rows: pd.DataFrame, feats: list[str]):
     """train(asof-embargo 이전 universe) 으로 각 임계 head 를 XGB 학습 → asof 후보 추론.
-    calibration = train OOF bucket historical-hit (rare-event raw 과신 금지, leak-free).
+    calibration = 동일 train 표본의 fitted score bucket historical-hit.
+    asof와 시간 분리는 지키지만 inner OOF가 아닌 resubstitution 보정이므로 확률
+    정직성의 strict forward 증거로 간주하지 않는다.
     반환: dict[label_key -> np.ndarray (asof_rows 길이)] + exp_downside array.
 
     ★ leak 방어:
       - feature = _dh_feats(LEAK_COLS/next_* 제외) → 전부 D-1.
       - 라벨 = day-D high/low (미래) — train 에서만 fit, asof 는 predict 만.
-      - calibration bucket 도 train OOF 에서만 적합 → asof 적용 (train-only).
+      - calibration bucket 은 동일 train fitted score로 적합 → asof 적용.
+        미래 누수는 없지만 OOF 보정은 아니며 과적합 가능성을 별도 감사해야 한다.
     """
     Xtr = train[feats].replace([np.inf, -np.inf], np.nan)
     med = Xtr.median()
     Xtr = Xtr.fillna(med).values
     Xte = asof_rows[feats].replace([np.inf, -np.inf], np.nan).fillna(med).values
-    out = {}
+    out: dict[str, float] = {}
     n = len(asof_rows)
     for k in list(RR_UP_LABELS) + list(RR_DN_LABELS):
         y = train[f"lab_{k}"].values
@@ -383,11 +425,12 @@ def _fit_rr_head(train: pd.DataFrame, asof_rows: pd.DataFrame, feats: list[str])
 #     라벨 = day-D dump_B = (high/open-1 >= A1_DUMP_UP) AND (close/open-1 < A1_DUMP_EOD)
 #       → 펌프-후-덤프. day-D 타겟(미래)이라 학습 입력 feature(D-1)에 안 섞임 (leak X).
 #     반환: (p_dump_asof[np.ndarray], cutoff[float]).
-#       cutoff = train calibrated p_dump 의 A1_CUTOFF_Q 분위 (train-only, asof/미래 미사용).
+#       cutoff = train resubstitution p_dump 의 A1_CUTOFF_Q 분위
+#       (train-only, asof/미래 미사용; strict calibrated 아님).
 # ==========================================================================
 def _fit_dump_head(train: pd.DataFrame, asof_rows: pd.DataFrame, feats: list[str]):
     """train(asof-embargo 이전 universe) 으로 dump_B head 학습 → asof 후보 p_dump 추론.
-    cutoff = train 의 calibrated p_dump 분위(train-only) → 라이브에서 매일 재계산하되
+    cutoff = train resubstitution p_dump 분위(train-only) → 라이브에서 매일 재계산하되
     asof/미래 outcome 은 안 본다 (train < asof-embargo).
 
     ★ leak 방어 (R1 head 와 동일 규율):
@@ -486,7 +529,8 @@ def score_candidates(asof_date, limit_markets: int | None = None,
 
     두 호출 시점(slot):
       - **open** (09:05, post-open): asof 당일 일봉(09:00)이 이미 DB 에 있음.
-        feature 는 그 봉의 .shift(1)=D-1 까지, 진입가 entry_open = asof open(09:00 실제값).
+        feature 는 그 봉의 .shift(1)=D-1 까지, entry_open은 asof open 표시용
+        reference다. strict forward 실행은 receipt 뒤 다음 15분봉부터다.
         기존 동작 그대로 (무변경 경로).
       - **preopen** (08:50, 개장 전): asof 당일 봉이 아직 없음(09:00 미개장).
         가장 최신 가용일(D-1)까지의 feature 로 '다음 거래일(asof)' 후보를 예측.
@@ -498,7 +542,8 @@ def score_candidates(asof_date, limit_markets: int | None = None,
     Parameters
     ----------
     asof_date : str | datetime | date
-        예측 대상일 D (KST 일봉 09:00 기준). post-open 이면 이 날의 open 이 진입가.
+        예측 대상일 D (KST 일봉 09:00 기준). post-open 이면 이 날의 open을
+        표시용 reference price로 제공한다.
         pre-open 이면 이 날은 '다음 거래일'이고 진입가는 미확정(None).
     limit_markets : int | None
         개발용 마켓 수 제한 (None = 전체).
@@ -521,13 +566,13 @@ def score_candidates(asof_date, limit_markets: int | None = None,
         "top3": [
           {
             "coin": "KRW-XXX", "rank": 1, "score": float,
-            "pump_prob": float,            # calibrated (~0.06~0.10 top bin) = p_up20
-            "pump_prob_pct": "8.5%",       # 정직 표기 (≥20% 다음날)
+            "pump_prob": float,            # train-only score-bucket historical estimate
+            "pump_prob_pct": "8.5%",       # ≥20% descriptive estimate; not calibrated
             "p_up5": float, "p_up10": float, "p_up20": float,  # P(고가 ≥5/10/20%)
             "p_dn5": float, "p_dn10": float,                   # P(저가 ≤-5/-10%)
             "exp_downside": float,         # E[하방] (음수 low excursion 기대값)
             "dump_risk_flag": bool,        # ⚠️ hi-risk (상위 1/3)
-            "entry_open": float | None,    # open: asof open(09:00). preopen: None(미개장).
+            "entry_open": float | None,    # open: 09:00 reference. preopen: None.
             "sl": -0.03, "tp": 0.05,       # shadow 청산 플랜
             "btc_regime": <D-1 regime>,
           }, ...
@@ -544,6 +589,15 @@ def score_candidates(asof_date, limit_markets: int | None = None,
       - calibration/head train cutoff 도 reference date 기준 embargo (asof 미래 안 봄).
     """
     asof = pd.Timestamp(asof_date).normalize()
+    if (
+        limit_markets is not None
+        and (
+            isinstance(limit_markets, bool)
+            or not isinstance(limit_markets, int)
+            or limit_markets <= 0
+        )
+    ):
+        raise ValueError("limit_markets must be a positive integer when provided")
     if slot not in ("auto", "open", "preopen"):
         raise ValueError(f"slot must be auto|open|preopen, got {slot!r}")
     if ranking not in ("R1", "R2", "A1"):
@@ -588,6 +642,13 @@ def score_candidates(asof_date, limit_markets: int | None = None,
             raise RuntimeError(
                 f"slot='preopen' 인데 reference {feat_date} >= asof {asof_date} "
                 f"(asof 봉이 이미 존재). post-open 이면 slot='open'/'auto' 사용.")
+        expected_feat_date = (asof - pd.Timedelta(days=1)).date()
+        if feat_date != expected_feat_date:
+            raise RuntimeError(
+                f"slot='preopen' requires feature reference exactly asof-1 "
+                f"calendar day ({expected_feat_date}), got {feat_date}; "
+                "D1 panel is stale or discontinuous"
+            )
         log.info("  pre-open: reference(feature) date=%s, predicting next trading day=%s",
                  feat_date, asof_date)
 
@@ -596,8 +657,8 @@ def score_candidates(asof_date, limit_markets: int | None = None,
     #   preopen: feat_date == 최신 가용일 (asof 봉이 없으므로 그날의 후보를 평가).
     panel = _add_dump_risk(panel, feat_date)
 
-    # --- 2) entry_open — DB 에서 직접 (라벨 아님, 진입가) ---
-    #   open: asof open(09:00) = 실제 진입가.
+    # --- 2) entry_open — DB 에서 직접 (라벨 아님, 표시용 기준가) ---
+    #   open: asof open(09:00) reference. strict ledger는 receipt 이후 시작.
     #   preopen: 09:00 이 아직 미개장 → 진입가 미확정. open_map 비움(전부 None).
     if resolved_slot == "open":
         open_map = _load_asof_open(
@@ -632,6 +693,7 @@ def score_candidates(asof_date, limit_markets: int | None = None,
     #   D-1 feature 로 P(≥10%)/P(≤-5%)/P(≤-10%)를 코인별로 따로 XGB 학습 → 하방 분리.
     #   train = 같은 cutoff(asof-embargo 이전 universe), asof 는 추론만 → leak-free.
     rr_head_ok = False
+    dh_feats: list[str] = []
     today_all = panel[(panel["date"] == feat_date) & panel["in_universe"]].copy()
     today_all = today_all.dropna(subset=["score"])
     try:
@@ -713,20 +775,23 @@ def score_candidates(asof_date, limit_markets: int | None = None,
         rank_basis = "score_rank(fallback)"
 
     btc_regime = _mode_regime(today)
-    top = today.head(TOP_K).reset_index(drop=True)
+    ranked = today.reset_index(drop=True)
 
     items = []
-    for i, r in top.iterrows():
+    for i, r in ranked.iterrows():
         coin = r["market"]
         eo = open_map.get(coin, np.nan)
         prob = float(r["pump_prob"]) if pd.notna(r["pump_prob"]) else float(base)
         s = float(r["score"])
         sc = np.array([s])
         if rr_head_ok:
-            # de-correlated head 확률 (코인별 분리). p_up20 은 head 에 없으므로
-            # score-bucket calibration 유지(희소 tail — rank-mean 이 더 정직).
-            # p_up20 만 head 가 아니라 score-bucket calib → 소표본 시 base=NaN 가능 →
-            # None 으로 가드(CSV 빈칸·JSON null 안전, NaN 토큰 방지).
+            # Frozen live output still uses the legacy score-bucket p_up20,
+            # even though _fit_rr_head also fits rr_p_up20. Mixing that bucket
+            # estimate with the independent p_up5/p_up10 heads can violate
+            # P(+20%) <= P(+10%) <= P(+5%); snapshot v2 therefore rejects such
+            # a run fail-closed. Switching heads or projecting the probabilities
+            # changes displayed model semantics and remains user-approval gated.
+            # Non-finite sparse-tail estimates become JSON null, never NaN.
             _pu20 = float(_apply_calibration(sc, *up_cal["p_up20"])[0])
             up = {"p_up5": round(float(r["rr_p_up5"]), 4),
                   "p_up10": round(float(r["rr_p_up10"]), 4),
@@ -762,6 +827,19 @@ def score_candidates(asof_date, limit_markets: int | None = None,
             "sl": SL_PCT,
             "tp": TP_PCT,
             "btc_regime": str(r.get("regime", "unknown")),
+            # Forward audit/rebuild inputs from the exact same leak-free row.
+            # These are record-only metadata: they do not affect sorting or
+            # the Telegram format. Keeping them now makes later liquidity-
+            # matched and within-volatility-band evaluation reproducible.
+            "feature_values": {
+                feature: (
+                    round(float(r[feature]), 8)
+                    if pd.notna(r.get(feature))
+                    and np.isfinite(float(r[feature]))
+                    else None
+                )
+                for feature in dh_feats
+            },
         })
 
     return {
@@ -773,24 +851,43 @@ def score_candidates(asof_date, limit_markets: int | None = None,
         "calibration_source": cal_source,
         "rank_basis": rank_basis,          # "R1_riskreward(de-corr head)" | fallback
         "n_history_dates": int(train["date"].nunique()),
-        "top3": items,
+        "ranking": ranking,
+        "score_schema_version": SCORE_SCHEMA_VERSION,
+        "rule_version": RULE_VERSIONS[ranking],
+        "model_random_seed": MODEL_RANDOM_SEED,
+        "feature_columns": dh_feats,
+        "training": {
+            "start": str(train["date"].min()) if len(train) else None,
+            "end": str(train["date"].max()) if len(train) else None,
+            "cutoff_exclusive": str(cutoff),
+            "embargo_days": EMBARGO_DAYS,
+            "rows": int(len(train)),
+            "dates": int(train["date"].nunique()),
+        },
+        # top-3 와 같은 score snapshot 에서 나온 전 유니버스. 별도 재학습 없이
+        # forward 라벨을 사후 join 할 수 있도록 매일 약 100개 행을 보존한다.
+        "universe": items,
+        "top3": items[:TOP_K],
     }
 
 
 def _load_asof_open(asof: pd.Timestamp, markets: set) -> dict:
-    """asof 당일 open(09:00 진입가) 를 DB 에서 직접 로드. 진입가는 라벨이 아니라
-    실제 거래 진입 시점 가격 → shadow ledger 진입가로 사용 (leak 아님: 09:00 진입)."""
-    import sqlite3
-    out = {}
+    """Load the day-D 09:00 open as a display/reference price.
+
+    It is not a future label, but it is also not claimed as an executable fill:
+    strict forward ledgers start at the first 15-minute boundary after the
+    validated Telegram receipt.
+    """
+    out: dict[str, float] = {}
     if not markets:
         return out
-    conn = sqlite3.connect(DB_PATH)
     ts = asof.strftime("%Y-%m-%d 09:00:00")
-    q = "SELECT market, open FROM candles WHERE timestamp = ? AND market IN ({})".format(
+    # Only the number of bound ``?`` parameters is formatted into SQL.
+    q = "SELECT market, open FROM candles WHERE timestamp = ? AND market IN ({})".format(  # noqa: S608
         ",".join("?" * len(markets)))
-    for m, o in conn.execute(q, [ts, *markets]).fetchall():
-        out[m] = o
-    conn.close()
+    with connect_readonly(DB_PATH) as conn:
+        for m, o in conn.execute(q, [ts, *markets]).fetchall():
+            out[m] = o
     return out
 
 
