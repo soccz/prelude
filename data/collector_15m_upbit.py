@@ -20,7 +20,7 @@ import argparse
 import logging
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -31,12 +31,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from data.database import (  # noqa: E402
     init_db,
     latest_timestamp,
-    list_markets,
     oldest_timestamp,
     save_candles,
     stats,
 )
-from data.collector_d1 import get_krw_markets, get_top_markets
+from data.collector_d1 import (
+    FetchPageError,
+    _is_confirmed_empty_page,
+    _kst_wall_to_utc_naive,
+    _now_kst_naive,
+    get_krw_markets,
+    get_top_markets,
+)
 
 
 DB_PATH = Path(__file__).resolve().parent / "upbit_15m.db"
@@ -52,40 +58,67 @@ logger = logging.getLogger("collector_15m")
 
 def _fetch_page(market: str, to: datetime, count: int = PAGE_SIZE) -> pd.DataFrame | None:
     last_err = None
+    api_to = _kst_wall_to_utc_naive(to)
     for attempt in range(1, RETRY_MAX + 1):
         try:
             df = pyupbit.get_ohlcv(
-                market, interval=INTERVAL, to=to.strftime("%Y%m%d %H%M%S"), count=count
+                market,
+                interval=INTERVAL,
+                to=api_to.strftime("%Y%m%d %H%M%S"),
+                count=count,
             )
-            if df is None or len(df) == 0:
-                return None
+            if df is None:
+                if _is_confirmed_empty_page(
+                    market,
+                    to,
+                    count,
+                    INTERVAL,
+                ):
+                    return None
+                raise RuntimeError("pyupbit.get_ohlcv returned None")
+            if len(df) == 0:
+                if _is_confirmed_empty_page(
+                    market,
+                    to,
+                    count,
+                    INTERVAL,
+                ):
+                    return None
+                raise RuntimeError("pyupbit.get_ohlcv returned unconfirmed empty")
             return df
         except Exception as e:
             last_err = e
-            sleep_for = RETRY_BACKOFF ** attempt
-            logger.warning(f"fetch {market} attempt {attempt}/{RETRY_MAX} fail: {e}; sleep {sleep_for:.1f}s")
-            time.sleep(sleep_for)
+            if attempt < RETRY_MAX:
+                sleep_for = RETRY_BACKOFF ** attempt
+                logger.warning(f"fetch {market} attempt {attempt}/{RETRY_MAX} fail: {e}; sleep {sleep_for:.1f}s")
+                time.sleep(sleep_for)
     logger.error(f"fetch {market} all retries failed: {last_err}")
-    return None
+    raise FetchPageError(f"{market}: 15m all retries failed: {last_err}")
 
 
 def collect_market(market: str, days: int = 365 * 3, db_path: Path = DB_PATH) -> int:
     """단일 마켓 15m 백필. 15m 봉 = 일 96봉, 3년 = ~105k봉 = ~525페이지."""
+    if days <= 0:
+        raise ValueError("days must be positive")
     init_db(db_path)
-    target_oldest = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+    now = _now_kst_naive()
+    target_oldest = now - timedelta(days=days)
     saved = 0
 
     # incremental update
     latest = latest_timestamp(db_path, market)
     if latest is not None:
-        df_recent = _fetch_page(market, datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=1))
-        if df_recent is not None and len(df_recent) > 0:
-            n = save_candles(db_path, df_recent, market)
-            saved += n
+        df_recent = _fetch_page(market, now + timedelta(days=1))
+        if df_recent is None or len(df_recent) == 0:
+            raise FetchPageError(
+                f"{market}: empty recent 15m page during live update"
+            )
+        n = save_candles(db_path, df_recent, market)
+        saved += n
 
     oldest = oldest_timestamp(db_path, market)
     if oldest is None:
-        cur_to = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=1)
+        cur_to = now + timedelta(days=1)
     else:
         cur_to = oldest
 
@@ -128,11 +161,12 @@ def collect_all(markets: list[str], days: int = 365 * 3, db_path: Path = DB_PATH
     return results
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description="Upbit KRW 15m 봉 수집기")
-    parser.add_argument("--coin", type=str, help="단일 코인")
-    parser.add_argument("--top", type=int, help="24h 거래대금 top N")
-    parser.add_argument("--all", action="store_true", help="KRW 전체 마켓")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--coin", type=str, help="단일 코인")
+    mode.add_argument("--top", type=int, help="완결 D1 거래대금 top N")
+    mode.add_argument("--all", action="store_true", help="KRW 전체 마켓")
     parser.add_argument("--days", type=int, default=365 * 3)
     parser.add_argument("--db", type=str, default=str(DB_PATH))
     parser.add_argument("--verbose", "-v", action="store_true")
@@ -149,6 +183,7 @@ def main():
     if args.coin:
         n = collect_market(args.coin, days=args.days, db_path=db_path)
         print(f"Saved {n} rows for {args.coin} (15m)")
+        failed = n < 0
     elif args.all:
         markets = get_krw_markets()
         print(f"전체 KRW 15m 백필 {len(markets)}개 시작 (days={args.days})")
@@ -157,17 +192,17 @@ def main():
         fail = sum(1 for v in results.values() if v < 0)
         total = sum(v for v in results.values() if v >= 0)
         print(f"\n=== 15m Done: OK {ok} / FAIL {fail} / Total {total} rows ===")
-    elif args.top:
+        failed = fail > 0
+    elif args.top is not None:
         markets = get_top_markets(args.top)
         results = collect_all(markets, days=args.days, db_path=db_path)
         print(f"15m Done: {len(results)} markets")
-    else:
-        parser.print_help()
-        return
+        failed = any(value < 0 for value in results.values())
 
     print("\n=== 15m DB stats ===")
     print(stats(db_path).to_string(index=False))
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

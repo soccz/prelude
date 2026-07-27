@@ -6,6 +6,8 @@ __pycache__/
 .Python
 *.egg-info/
 .pytest_cache/
+.coverage
+.coverage.*
 .ipynb_checkpoints/
 
 # Virtual env
@@ -54,6 +56,36 @@ output/shadow_ledger_*.csv
 output/distribution_log_*.json
 output/preopen_log_*.json
 output/detector_log_*.json
+output/recommend_snapshots/
+output/recommend_receipts/
+output/recommend_score_labels/
+output/recommend_score_label_evaluation*.json
+output/pump_v2_decisions/
+output/radar_terminal_verdict.json
+output/radar_terminal_verdict.json.corrupt-*
+data/radar_terminal_verdict.anchor.json
+data/radar_terminal_verdict.anchor.json.corrupt-*
+output/.*.lock
+output/**/.*.lock
+output/pump_v1_decisions/
+output/pump_v2_receipts/
+
+# Microstructure raw capture (data — git 추적 X, 로컬+백업 보관)
+data/microstructure/
+
+# 대용량 row-level 연구 증거 ≥5MB (manifest sha256 로 무결성 고정 — 로컬+versioned backup 보관)
+output/upside_head_challenger_v1_predictions.csv.gz
+output/case_study_panel.parquet
+output/cc_filtered_multiday_oos_v1.parquet
+output/downside_head_oos_picks_v1.csv
+output/first_passage_head_challenger_v1_path_panel.csv.gz
+output/safeup_head_challenger_v1_predictions.csv.gz
+output/cc_filtered_multiday_picks_v1.csv
+output/semivol_joint_challenger_v1_predictions.csv.gz
+output/safeup_head_challenger_v1_fp_schedule_predictions.csv.gz
+
+# 세션 트랜스크립트 (개인 메모)
+etc.md
 
 # OS
 .DS_Store

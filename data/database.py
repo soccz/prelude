@@ -7,15 +7,19 @@ Adapted from: gan_t/data/database.py
 Changes:
   - 단순화 (단일 candles 테이블, generic interval)
   - pyupbit DataFrame 직접 받음
-  - timestamp 항상 UTC (KST 09:00 = UTC 00:00 일봉 마감 — SIGNAL.md §1.3)
+  - timestamp는 timezone-naive 거래소 원시 경계
+    (Upbit=KST 09:00, Binance=UTC 00:00; 호출자가 거래소별 의미를 보존)
 """
 from __future__ import annotations
 
+import os
 import sqlite3
+import stat
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 
 # ============================================================================
@@ -37,6 +41,21 @@ CREATE TABLE IF NOT EXISTS candles (
 CREATE INDEX IF NOT EXISTS idx_candles_market ON candles(market);
 CREATE INDEX IF NOT EXISTS idx_candles_timestamp ON candles(timestamp);
 """
+_MARKET_ID_PUNCTUATION = frozenset("-._:")
+_MAX_MARKET_ID_LENGTH = 128
+
+
+def _valid_market_identifier(value: object) -> bool:
+    """Accept exchange Unicode symbols without accepting ambiguous controls."""
+    return (
+        isinstance(value, str)
+        and 0 < len(value) <= _MAX_MARKET_ID_LENGTH
+        and value == value.strip()
+        and all(
+            char.isalnum() or char in _MARKET_ID_PUNCTUATION
+            for char in value
+        )
+    )
 
 
 # ============================================================================
@@ -44,15 +63,95 @@ CREATE INDEX IF NOT EXISTS idx_candles_timestamp ON candles(timestamp);
 # ============================================================================
 @contextmanager
 def connect(db_path: str | Path):
-    """sqlite 연결 context manager."""
-    db_path = Path(db_path)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path))
+    """실제 regular-file inode에 고정된 writable SQLite 연결."""
+    path = Path(os.path.abspath(Path(db_path)))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW
+    fd = os.open(path, flags, 0o600)
+    conn: sqlite3.Connection | None = None
     try:
+        fd_stat = os.fstat(fd)
+        path_stat = path.lstat()
+        if (
+            not stat.S_ISREG(fd_stat.st_mode)
+            or (path_stat.st_dev, path_stat.st_ino)
+            != (fd_stat.st_dev, fd_stat.st_ino)
+        ):
+            raise RuntimeError(f"SQLite DB changed while opening: {path}")
+
+        fd_uri = Path(f"/proc/self/fd/{fd}").as_uri()
+        conn = sqlite3.connect(f"{fd_uri}?mode=rw", uri=True)
+        path_after_connect = path.lstat()
+        if (path_after_connect.st_dev, path_after_connect.st_ino) != (
+            fd_stat.st_dev,
+            fd_stat.st_ino,
+        ):
+            raise RuntimeError(f"SQLite DB changed while connecting: {path}")
         yield conn
         conn.commit()
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
+        os.close(fd)
+
+
+@contextmanager
+def connect_readonly(db_path: str | Path):
+    """기존 SQLite 파일을 생성·변형하지 않고 연다.
+
+    health/preflight 같은 관측 경로에서 일반 ``connect``/``init_db`` 를 쓰면
+    경로 오타나 파일 유실 자체가 빈 정상 DB 생성으로 가려질 수 있다. SQLite URI의
+    ``mode=ro`` 를 사용해 missing/invalid DB를 호출자에게 그대로 실패로 전달한다.
+    """
+    # Keep the lexical path instead of resolving it: the project root itself
+    # may intentionally be reached through a parent symlink, while the DB
+    # filename must still identify a real regular file (not a final-component
+    # symlink).  Open it first with O_NOFOLLOW, then make SQLite duplicate that
+    # stable inode through /proc/self/fd.  This closes the common
+    # lstat->replace->sqlite-open TOCTOU window.
+    path = Path(os.path.abspath(Path(db_path)))
+    try:
+        path_before = path.lstat()
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"SQLite DB does not exist: {path}") from exc
+    if not stat.S_ISREG(path_before.st_mode):
+        raise ValueError(
+            f"SQLite DB must be a regular file, not a symlink/device: {path}"
+        )
+
+    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    conn: sqlite3.Connection | None = None
+    try:
+        fd_stat = os.fstat(fd)
+        path_after_open = path.lstat()
+        if (
+            not stat.S_ISREG(fd_stat.st_mode)
+            or (path_before.st_dev, path_before.st_ino)
+            != (fd_stat.st_dev, fd_stat.st_ino)
+            or (path_after_open.st_dev, path_after_open.st_ino)
+            != (fd_stat.st_dev, fd_stat.st_ino)
+        ):
+            raise RuntimeError(
+                f"SQLite DB changed while opening read-only: {path}"
+            )
+
+        fd_uri = Path(f"/proc/self/fd/{fd}").as_uri()
+        conn = sqlite3.connect(f"{fd_uri}?mode=ro", uri=True)
+        conn.execute("PRAGMA query_only = ON")
+
+        path_after_connect = path.lstat()
+        if (path_after_connect.st_dev, path_after_connect.st_ino) != (
+            fd_stat.st_dev,
+            fd_stat.st_ino,
+        ):
+            raise RuntimeError(
+                f"SQLite DB changed while connecting read-only: {path}"
+            )
+        yield conn
+    finally:
+        if conn is not None:
+            conn.close()
+        os.close(fd)
 
 
 def init_db(db_path: str | Path) -> None:
@@ -77,12 +176,16 @@ def save_candles(db_path: str | Path, df: pd.DataFrame, market: str) -> int:
     """
     if df is None or len(df) == 0:
         return 0
-
-    init_db(db_path)
+    if not _valid_market_identifier(market):
+        raise ValueError(f"invalid market identifier: {market!r}")
 
     # pyupbit format 호환 처리
     df = df.copy()
-    if df.index.name in ("timestamp", None) and "timestamp" not in df.columns:
+    if "timestamp" not in df.columns:
+        if not isinstance(df.index, pd.DatetimeIndex):
+            raise ValueError(
+                "timestamp column missing and index is not a DatetimeIndex"
+            )
         df = df.reset_index()
         if "index" in df.columns and "timestamp" not in df.columns:
             df = df.rename(columns={"index": "timestamp"})
@@ -93,18 +196,60 @@ def save_candles(db_path: str | Path, df: pd.DataFrame, market: str) -> int:
     if "quote_volume" not in df.columns:
         df["quote_volume"] = None
 
-    df["market"] = market
-
     # timestamp 타입 정규화.
     # 각 collector 가 만든 exchange timestamp 를 timezone-naive 로 저장한다.
     # Upbit 는 KST candle boundary, Binance 는 UTC candle boundary 를 사용한다.
-    df["timestamp"] = pd.to_datetime(df["timestamp"]).dt.tz_localize(None)
+    required = {"timestamp", "open", "high", "low", "close", "volume"}
+    missing = sorted(required - set(df.columns))
+    if missing:
+        raise ValueError(f"candle columns missing: {missing}")
+    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="raise")
+    if df["timestamp"].isna().any():
+        raise ValueError("candle timestamp contains NaT")
+    try:
+        df["timestamp"] = df["timestamp"].dt.tz_localize(None)
+    except AttributeError as exc:
+        raise ValueError("candle timestamp values are not datetime-like") from exc
     df["timestamp"] = df["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
+    if df["timestamp"].duplicated().any():
+        duplicates = sorted(df.loc[df["timestamp"].duplicated(), "timestamp"].unique())
+        raise ValueError(f"duplicate candle timestamps in input: {duplicates[:3]}")
 
+    for column in ("open", "high", "low", "close", "volume", "quote_volume"):
+        df[column] = pd.to_numeric(df[column], errors="raise")
+    prices = df[["open", "high", "low", "close"]]
+    if not np.isfinite(prices.to_numpy(dtype=float)).all():
+        raise ValueError("candle OHLC contains NaN or infinity")
+    if (prices <= 0).any().any():
+        raise ValueError("candle OHLC must be positive")
+    if (
+        (df["high"] < df[["open", "close"]].max(axis=1)).any()
+        or (df["low"] > df[["open", "close"]].min(axis=1)).any()
+        or (df["high"] < df["low"]).any()
+    ):
+        raise ValueError("candle OHLC relationship is invalid")
+    if (
+        not np.isfinite(df["volume"].to_numpy(dtype=float)).all()
+        or (df["volume"] < 0).any()
+    ):
+        raise ValueError("candle volume must be finite and non-negative")
+    quote_volume = df["quote_volume"]
+    finite_quote = quote_volume.dropna().to_numpy(dtype=float)
+    if (
+        not np.isfinite(finite_quote).all()
+        or (quote_volume.dropna() < 0).any()
+    ):
+        raise ValueError("candle quote_volume must be null or finite and non-negative")
+
+    df["market"] = market
     cols = ["market", "timestamp", "open", "high", "low", "close", "volume", "quote_volume"]
     df = df[cols]
 
     with connect(db_path) as conn:
+        # Keep first-use schema creation and the hot-path UPSERT on one
+        # connection.  Collectors already initialize once per market; opening
+        # a second SQLite connection for every 15m page was pure overhead.
+        conn.executescript(SCHEMA)
         # UPSERT (sqlite 3.24+) — 중복 (market, timestamp) 시 update
         conn.executemany(
             """
@@ -171,7 +316,7 @@ def latest_timestamp(db_path: str | Path, market: str) -> Optional[pd.Timestamp]
 
 
 def oldest_timestamp(db_path: str | Path, market: str) -> Optional[pd.Timestamp]:
-    """특정 market 의 가장 오래된 candle timestamp (UTC)."""
+    """특정 market 의 가장 오래된 timezone-naive exchange timestamp."""
     init_db(db_path)
     with connect(db_path) as conn:
         row = conn.execute(
@@ -180,6 +325,32 @@ def oldest_timestamp(db_path: str | Path, market: str) -> Optional[pd.Timestamp]
     if row and row[0]:
         return pd.to_datetime(row[0])
     return None
+
+
+def market_timestamp_ranges_readonly(
+    db_path: str | Path,
+) -> dict[str, tuple[pd.Timestamp, pd.Timestamp]]:
+    """market별 ``(oldest, latest)``를 단일 grouped query로 읽는다.
+
+    DB 파일·디렉터리·스키마를 생성하지 않는다. 관측 중 파일이 없거나 schema가
+    손상됐으면 예외를 내어 health gate가 fail closed 하도록 한다.
+    """
+    with connect_readonly(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT market, MIN(timestamp), MAX(timestamp)
+            FROM candles
+            GROUP BY market
+            ORDER BY market
+            """
+        ).fetchall()
+
+    ranges: dict[str, tuple[pd.Timestamp, pd.Timestamp]] = {}
+    for market, oldest, latest in rows:
+        if oldest is None or latest is None:
+            continue
+        ranges[str(market)] = (pd.Timestamp(oldest), pd.Timestamp(latest))
+    return ranges
 
 
 def stats(db_path: str | Path) -> pd.DataFrame:
