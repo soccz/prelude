@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from ledger.shadow import append_shadow_ledger
 from ops.decision_policy import (
@@ -113,3 +114,104 @@ def test_shadow_ledger_keeps_one_snapshot_per_date_channel(tmp_path):
             "idea_id": "dist_h6_a_triple_bear_quiet_v1",
         }
     ]
+
+
+def test_shadow_ledger_rejects_changed_same_date_cohort(tmp_path):
+    candidates = apply_distribution_policy(
+        pd.DataFrame(
+            [
+                {
+                    "market": "KRW-AAA",
+                    "primary_setups": ["S01", "S02", "S03"],
+                    "btc_regime": "bear_quiet",
+                    "p_h6_hit_5_24h": 0.90,
+                    "p_h2_hit_3_4h": 0.80,
+                    "p_h5_tail_20": 0.20,
+                    "composite": 3.0,
+                    "alert_rank": 1,
+                }
+            ]
+        ),
+        btc_regime="bear_quiet",
+    )
+    path = tmp_path / "shadow.csv"
+    asof = pd.Timestamp("2026-05-25 09:05")
+    assert append_shadow_ledger(
+        candidates,
+        asof,
+        str(path),
+        "distribution",
+    ) == 1
+    before = path.read_bytes()
+    changed = candidates.copy()
+    changed.loc[0, "composite"] = 2.5
+
+    with pytest.raises(RuntimeError, match="snapshot identity conflict"):
+        append_shadow_ledger(changed, asof, str(path), "distribution")
+
+    assert path.read_bytes() == before
+
+
+def test_shadow_ledger_uses_kst_date_for_aware_asof(tmp_path):
+    candidates = pd.DataFrame(
+        [{"market": "KRW-AAA", "decision": WATCH_ONLY}]
+    )
+    path = tmp_path / "shadow.csv"
+
+    assert append_shadow_ledger(
+        candidates,
+        pd.Timestamp("2026-05-25T15:05:00+00:00"),
+        str(path),
+        "distribution",
+    ) == 1
+
+    ledger = pd.read_csv(path)
+    assert ledger.loc[0, "date"] == "2026-05-26"
+
+
+@pytest.mark.parametrize(
+    "candidates, error",
+    [
+        (
+            pd.DataFrame(
+                [
+                    {"market": "KRW-AAA", "decision": WATCH_ONLY},
+                    {"market": "KRW-AAA", "decision": WATCH_ONLY},
+                ]
+            ),
+            "duplicate coin identity",
+        ),
+        (
+            pd.DataFrame([{"market": "", "decision": WATCH_ONLY}]),
+            "empty coin identity",
+        ),
+        (
+            pd.DataFrame(
+                [
+                    {
+                        "market": "KRW-AAA",
+                        "decision": WATCH_ONLY,
+                        "confidence_score": float("inf"),
+                    }
+                ]
+            ),
+            "infinite numeric identity",
+        ),
+    ],
+)
+def test_shadow_ledger_rejects_invalid_first_snapshot(
+    candidates,
+    error,
+    tmp_path,
+):
+    path = tmp_path / "shadow.csv"
+
+    with pytest.raises(RuntimeError, match=error):
+        append_shadow_ledger(
+            candidates,
+            pd.Timestamp("2026-05-25 09:05"),
+            str(path),
+            "distribution",
+        )
+
+    assert not path.exists()

@@ -33,7 +33,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from data.database import load_candles
+from ledger.csv_store import atomic_write_csv, ledger_lock
+from ledger.path_quality import PATH_QUALITY_COLS, assess_4h_path
 from scripts.predict_today_distribution import PAPER_LEDGER_COLS
 
 
@@ -43,31 +44,49 @@ DEFAULT_SHADOW_LEDGER = "output/shadow_ledger_distribution.csv"
 
 def compute_realized(coin: str, target_date: pd.Timestamp,
                      candles_4h_db: str = "data/upbit_4h.db") -> dict:
-    """coin 의 target_date 4h bars 로 realized 계산.
+    """coin 의 target_date 6개 4h bars로 realized 계산.
 
     target_date = paper_ledger.date = 예측 대상 day (= label day after leak fix).
     target_date 의 09:00 KST = first 4h bar (timestamp - 9h = target_date 00:00)
     """
-    df = load_candles(candles_4h_db, coin)
-    if df is None or len(df) == 0:
-        return {"status": "no_data"}
-    df = df.copy()
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
-    df["bar_date"] = (df["timestamp"] - pd.Timedelta(hours=9)).dt.date
-    target_date = pd.to_datetime(target_date).date()
-    sub = df[df["bar_date"] == target_date].sort_values("timestamp")
-    if len(sub) < 1:
-        return {"status": "no_data"}
+    assessment = assess_4h_path(coin, target_date, db_path=candles_4h_db)
+    metadata = {
+        **assessment.metadata(),
+        "path_start_at": (
+            assessment.timestamps[0].isoformat()
+            if assessment.timestamps else None
+        ),
+        "path_used_bars": len(assessment.bars),
+    }
+    if not assessment.path_complete:
+        return {
+            "status": "no_data",
+            "notes": assessment.path_quality,
+            **metadata,
+        }
 
-    n = min(len(sub), MAX_BARS)
-    bars = sub.head(n)
-    open_t = float(bars.iloc[0]["open"])
-    close_t = float(bars.iloc[-1]["close"])
+    bars = np.asarray(assessment.bars, dtype=float)
+    if bars.shape != (MAX_BARS, 4) or not np.isfinite(bars).all():
+        return {
+            "status": "no_data",
+            "notes": "assessment_contract_invalid",
+            **metadata,
+            "path_complete": False,
+            "path_quality": "assessment_contract_invalid",
+        }
+    open_t = float(bars[0, 0])
+    close_t = float(bars[-1, 3])
     if open_t <= 0:
-        return {"status": "bad_open"}
+        return {
+            "status": "no_data",
+            "notes": "bad_open",
+            **metadata,
+            "path_complete": False,
+            "path_quality": "bad_open",
+        }
 
-    highs = bars["high"].values.astype(float)
-    lows = bars["low"].values.astype(float)
+    highs = bars[:, 1]
+    lows = bars[:, 2]
     high_max = float(highs.max())
     low_min = float(lows.min())
 
@@ -81,12 +100,13 @@ def compute_realized(coin: str, target_date: pd.Timestamp,
     n_bars_h6 = max(1, 24 // 4)  # 6
     n_bars_h5 = 6  # 24h
 
-    hit_h2 = bool((highs[:n_bars_h2] >= open_t * 1.03).any()) if n >= 1 else False
-    hit_h6 = bool((highs[:n_bars_h6] >= open_t * 1.05).any()) if n >= 1 else False
-    hit_h5 = bool((highs[:n_bars_h5] >= open_t * 1.20).any()) if n >= 1 else False
+    hit_h2 = bool((highs[:n_bars_h2] >= open_t * 1.03).any())
+    hit_h6 = bool((highs[:n_bars_h6] >= open_t * 1.05).any())
+    hit_h5 = bool((highs[:n_bars_h5] >= open_t * 1.20).any())
 
     return {
         "status": "closed",
+        **metadata,
         "next_open": open_t,
         "next_high": high_max,
         "next_low": low_min,
@@ -110,6 +130,26 @@ def close_ledger_file(
     required: bool = True,
 ) -> None:
     p = Path(ledger_path)
+    with ledger_lock(p):
+        _close_ledger_file_locked(
+            p,
+            candles_4h_db,
+            asof,
+            dry_run,
+            log,
+            required=required,
+        )
+
+
+def _close_ledger_file_locked(
+    p: Path,
+    candles_4h_db: str,
+    asof: pd.Timestamp,
+    dry_run: bool,
+    log: logging.Logger,
+    *,
+    required: bool,
+) -> None:
     if not p.exists():
         msg = f"ledger missing: {p}"
         if required:
@@ -123,6 +163,10 @@ def close_ledger_file(
     for col in PAPER_LEDGER_COLS:
         if col not in ledger.columns:
             ledger[col] = np.nan
+    for col in PATH_QUALITY_COLS:
+        if col not in ledger.columns:
+            ledger[col] = pd.NA
+        ledger[col] = ledger[col].astype(object)
     ledger["status"] = ledger["status"].fillna("").astype(str)
     ledger["notes"] = ledger["notes"].fillna("").astype(str)
     log.info(f"ledger: {len(ledger)} rows total")
@@ -153,8 +197,13 @@ def close_ledger_file(
 
         result = compute_realized(r["coin"], target_date, candles_4h_db)
         if result["status"] == "no_data":
+            for key in PATH_QUALITY_COLS:
+                if key in result:
+                    ledger.at[idx, key] = result[key]
             ledger.at[idx, "status"] = "no_data"
-            ledger.at[idx, "notes"] = f"no 4h data for {target_date.date()}"
+            ledger.at[idx, "notes"] = result.get(
+                "notes", f"no 4h data for {target_date.date()}"
+            )
             n_no_data += 1
             continue
         if result["status"] != "closed":
@@ -180,7 +229,7 @@ def close_ledger_file(
         ordered = [c for c in PAPER_LEDGER_COLS if c in ledger.columns]
         extras = [c for c in ledger.columns if c not in ordered]
         ledger = ledger[ordered + extras]
-        ledger.to_csv(p, index=False)
+        atomic_write_csv(ledger, p)
         log.info(f"saved {p}")
 
     # show closed rows summary
@@ -190,14 +239,14 @@ def close_ledger_file(
         print(df.to_string(index=False, float_format=lambda x: f"{x:+.2f}"))
 
         # Per-head hit rate (closed only)
-        print(f"\n=== Realized hit rate (closed alerts) ===")
+        print("\n=== Realized hit rate (closed alerts) ===")
         for h in ["h2", "h6", "h5"]:
             n = len(df)
             h_pct = float(df[h].mean()) * 100
             print(f"  hit_{h}: {h_pct:.1f}% ({int(df[h].sum())}/{n})")
 
         # Per-setup hit rate (intersection)
-        print(f"\n=== Per-setup hit rate ===")
+        print("\n=== Per-setup hit rate ===")
         setups_seen = set()
         for s in df["setups"].fillna(""):
             for s_id in s.split("+"):
@@ -228,7 +277,11 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     log = logging.getLogger("close")
 
-    asof = pd.Timestamp(args.asof) if args.asof else pd.Timestamp.now()
+    asof = (
+        pd.Timestamp(args.asof)
+        if args.asof
+        else pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None)
+    )
     close_ledger_file(args.paper_ledger, args.upbit_4h, asof, args.dry_run, log, required=True)
 
     if not args.skip_shadow_ledger and Path(args.shadow_ledger) != Path(args.paper_ledger):

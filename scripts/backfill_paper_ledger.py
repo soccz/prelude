@@ -38,10 +38,11 @@ from sklearn.utils.class_weight import compute_sample_weight
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import list_markets, load_candles
+from data.market_universe import signal_eligible_markets
 from signals.features import assemble_training_panel, compute_btc_features
 from signals.labels_distribution import HEADS, compute_distribution_labels, MAX_BARS
 from signals.models.xgb_phase1 import EXCLUDE_COLS
-from signals.setups import detect_setups, SETUP_LIBRARY
+from signals.setups import detect_setups
 from signals.validate import PurgedWalkForward
 
 
@@ -71,7 +72,7 @@ def feature_cols_from(df, label_cols):
         if c.startswith("next_"):
             continue
         dt = df[c].dtype
-        if dt == object or "datetime" in str(dt):
+        if pd.api.types.is_object_dtype(dt) or "datetime" in str(dt):
             continue
         cols.append(c)
     return cols
@@ -94,8 +95,10 @@ def build_4h_panel_for_labels(candles_4h, btc_regime_map):
             closes = g2["close"].values.astype(float)
             highs = g2["high"].values.astype(float)[:MAX_BARS]
             lows = g2["low"].values.astype(float)[:MAX_BARS]
-            highs_p = np.full(MAX_BARS, np.nan); lows_p = np.full(MAX_BARS, np.nan)
-            highs_p[:n] = highs[:n]; lows_p[:n] = lows[:n]
+            highs_p = np.full(MAX_BARS, np.nan)
+            lows_p = np.full(MAX_BARS, np.nan)
+            highs_p[:n] = highs[:n]
+            lows_p[:n] = lows[:n]
             rows.append({
                 "market": market, "date_only": date,
                 "open_4h": float(opens[0]), "close_4h": float(closes[-1]),
@@ -135,7 +138,7 @@ def main():
 
     # ===== load data =====
     log.info("loading panel + labels...")
-    krw = list_markets(args.upbit_d1)
+    krw = signal_eligible_markets(list_markets(args.upbit_d1))
     candles_d1 = {m: load_candles(args.upbit_d1, m) for m in krw}
     if Path(args.binance_d1).exists():
         for m in list_markets(args.binance_d1):
@@ -148,7 +151,11 @@ def main():
     panel["date_only"] = panel["timestamp"].dt.date
     panel["quote_volume_d1"] = panel.get("quote_volume", np.nan)
 
-    krw_4h = [m for m in list_markets(args.upbit_4h) if m.startswith("KRW-")]
+    krw_4h = [
+        m
+        for m in signal_eligible_markets(list_markets(args.upbit_4h))
+        if m.startswith("KRW-")
+    ]
     candles_4h = {m: load_candles(args.upbit_4h, m) for m in krw_4h}
     candles_4h = {k: v for k, v in candles_4h.items() if v is not None and len(v) > 0}
     btc_feat = compute_btc_features(btc_d1.copy())
@@ -278,14 +285,14 @@ def main():
     # ===== summary =====
     print(f"\n=== Backfill summary ({len(df_out):,} alerts) ===")
     print(f"date range: {df_out['date'].min()} → {df_out['date'].max()}")
-    print(f"\nrealized hit rate (overall):")
+    print("\nrealized hit rate (overall):")
     for h in ["h2", "h6", "h5"]:
         col = f"hit_{h}"
         n = len(df_out)
         h_rate = float(df_out[col].mean()) * 100
         print(f"  hit_{h}: {h_rate:.2f}% ({int(df_out[col].sum())}/{n})")
 
-    print(f"\nper-setup hit rate:")
+    print("\nper-setup hit rate:")
     setups_seen = set()
     for s in df_out["setup_ids"].fillna(""):
         for s_id in s.split("+"):
@@ -294,18 +301,20 @@ def main():
     for s_id in sorted(setups_seen):
         mask = df_out["setup_ids"].str.contains(s_id, na=False)
         n = int(mask.sum())
-        if n == 0: continue
+        if n == 0:
+            continue
         sub = df_out[mask]
         print(f"  {s_id} (n={n}): hit_h2 {sub['hit_h2'].mean()*100:.1f}%, "
               f"hit_h6 {sub['hit_h6'].mean()*100:.1f}%, hit_h5 {sub['hit_h5'].mean()*100:.1f}%, "
               f"avg max_ret {sub['next_max_return_pct'].mean():.2f}%, "
               f"avg close_ret {sub['next_close_return_pct'].mean():.2f}%")
 
-    print(f"\nper-regime hit rate:")
+    print("\nper-regime hit rate:")
     for reg in df_out["btc_regime"].unique():
         mask = df_out["btc_regime"] == reg
         n = int(mask.sum())
-        if n < 10: continue
+        if n < 10:
+            continue
         sub = df_out[mask]
         print(f"  {reg} (n={n}): hit_h2 {sub['hit_h2'].mean()*100:.1f}%, "
               f"hit_h6 {sub['hit_h6'].mean()*100:.1f}%, hit_h5 {sub['hit_h5'].mean()*100:.1f}%")

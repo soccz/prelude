@@ -6,6 +6,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from ledger.csv_store import atomic_write_csv, ledger_lock
+from ledger.portfolio_metrics import normalize_kst_date
+
 
 SHADOW_LEDGER_COLS = [
     "date", "channel", "coin",
@@ -39,6 +42,35 @@ SHADOW_LEDGER_COLS = [
     "hit_first1h_3pct", "hit_first1h_5pct",
     "status", "notes",
 ]
+_SHADOW_IDENTITY_COLS = SHADOW_LEDGER_COLS[
+    :SHADOW_LEDGER_COLS.index("next_open")
+]
+_SHADOW_NUMERIC_IDENTITY_COLS = {
+    "trained_model_p_win",
+    "trained_model_threshold",
+    "confidence_score",
+    "evidence_n_closed",
+    "evidence_net_pnl_sum_pct",
+    "evidence_avg_net_pnl_pct",
+    "evidence_tp5_hit_rate_pct",
+    "evidence_win_rate_pct",
+    "source_rank",
+    "alert_rank",
+    "composite_score",
+    "calibrated_hit_pct",
+    "calibrated_bucket",
+    "expected_edge_pct",
+    "p_h2_3pct_4h",
+    "p_h6_5pct_24h",
+    "p_h5_20pct_tail",
+    "p_first15_3pct",
+    "p_first15_5pct",
+    "p_first30_3pct",
+    "p_first30_5pct",
+    "p_first1h_3pct",
+    "p_first1h_5pct",
+    "entry_price_proxy",
+}
 
 
 def _setup_ids(row: pd.Series) -> str:
@@ -144,6 +176,49 @@ def _records(candidates: pd.DataFrame, asof: pd.Timestamp, channel: str) -> list
     return rows
 
 
+def _normalise_snapshot_identity(frame: pd.DataFrame) -> pd.DataFrame:
+    missing = [column for column in _SHADOW_IDENTITY_COLS if column not in frame]
+    if missing:
+        raise RuntimeError(
+            f"existing shadow snapshot lacks identity columns: {missing}"
+        )
+    identity = frame[_SHADOW_IDENTITY_COLS].copy()
+    coins = identity["coin"].fillna("").astype(str).str.strip()
+    if bool(coins.eq("").any()):
+        raise RuntimeError("shadow snapshot has empty coin identity")
+    if bool(coins.duplicated().any()):
+        raise RuntimeError("shadow snapshot has duplicate coin identity")
+    identity["coin"] = coins
+    for column in _SHADOW_IDENTITY_COLS:
+        if column in _SHADOW_NUMERIC_IDENTITY_COLS:
+            identity[column] = pd.to_numeric(identity[column], errors="coerce")
+            if bool(np.isinf(identity[column].to_numpy(dtype=float)).any()):
+                raise RuntimeError(
+                    f"shadow snapshot has infinite numeric identity: {column}"
+                )
+        else:
+            identity[column] = identity[column].fillna("").astype(str)
+    return identity.sort_values("coin").reset_index(drop=True)
+
+
+def _assert_same_snapshot(existing: pd.DataFrame, new: pd.DataFrame) -> None:
+    actual = _normalise_snapshot_identity(existing)
+    expected = _normalise_snapshot_identity(new)
+    try:
+        pd.testing.assert_frame_equal(
+            actual,
+            expected,
+            check_dtype=False,
+            check_exact=False,
+            rtol=1e-12,
+            atol=1e-12,
+        )
+    except AssertionError as exc:
+        raise RuntimeError(
+            "shadow snapshot identity conflict for existing date/channel"
+        ) from exc
+
+
 def append_shadow_ledger(
     candidates: pd.DataFrame,
     asof: pd.Timestamp,
@@ -154,25 +229,36 @@ def append_shadow_ledger(
     if len(candidates) == 0:
         return 0
 
-    new_df = pd.DataFrame(_records(candidates, asof, channel))[SHADOW_LEDGER_COLS]
+    asof_date = normalize_kst_date(asof)
+    new_df = pd.DataFrame(
+        _records(candidates, asof_date, channel)
+    )[SHADOW_LEDGER_COLS]
+    # Validate the first write too.  Otherwise a duplicate/empty cohort would
+    # be persisted and only discovered on the next idempotency check.
+    _normalise_snapshot_identity(new_df)
     p = Path(ledger_path)
-    p.parent.mkdir(parents=True, exist_ok=True)
+    with ledger_lock(p):
+        # Existence/read and idempotency checks belong inside the same lock as
+        # the replacement; otherwise concurrent daily runners can both append.
+        if p.exists():
+            existing = pd.read_csv(p)
+            if "channel" not in existing.columns:
+                existing["channel"] = channel
+            same_snapshot = (
+                (
+                    existing["date"].astype(str)
+                    == asof_date.strftime("%Y-%m-%d")
+                )
+                & (existing["channel"].astype(str) == channel)
+            )
+            if bool(same_snapshot.any()):
+                _assert_same_snapshot(existing.loc[same_snapshot], new_df)
+                return 0
+            combined = pd.concat([existing, new_df], ignore_index=True)
+            ordered = [c for c in SHADOW_LEDGER_COLS if c in combined.columns]
+            extras = [c for c in combined.columns if c not in ordered]
+            atomic_write_csv(combined[ordered + extras], p)
+            return len(new_df)
 
-    if p.exists():
-        existing = pd.read_csv(p)
-        if "channel" not in existing.columns:
-            existing["channel"] = channel
-        same_snapshot = (
-            (existing["date"].astype(str) == asof.strftime("%Y-%m-%d"))
-            & (existing["channel"].astype(str) == channel)
-        )
-        if bool(same_snapshot.any()):
-            return 0
-        combined = pd.concat([existing, new_df], ignore_index=True)
-        ordered = [c for c in SHADOW_LEDGER_COLS if c in combined.columns]
-        extras = [c for c in combined.columns if c not in ordered]
-        combined[ordered + extras].to_csv(p, index=False)
+        atomic_write_csv(new_df, p)
         return len(new_df)
-
-    new_df.to_csv(p, index=False)
-    return len(new_df)

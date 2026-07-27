@@ -28,7 +28,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from data.database import load_candles
+from ledger.csv_store import atomic_write_csv, ledger_lock
+from ledger.path_quality import PATH_QUALITY_COLS, assess_first_hour_path
 from scripts.predict_preopen_trigger import PAPER_LEDGER_COLS
 
 
@@ -38,35 +39,53 @@ DEFAULT_SHADOW_LEDGER = "output/shadow_ledger_preopen.csv"
 def compute_realized_preopen(coin: str, label_date: pd.Timestamp,
                               candles_15m_db: str = "data/upbit_15m.db") -> dict:
     """coin 의 label_date 09:00 첫 N 15m bars 로 realized 계산."""
-    df = load_candles(candles_15m_db, coin)
-    if df is None or len(df) == 0:
-        return {"status": "no_data"}
-    df = df.copy()
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    assessment = assess_first_hour_path(
+        coin,
+        label_date,
+        db_path=candles_15m_db,
+    )
+    metadata = {
+        **assessment.metadata(),
+        "path_start_at": (
+            assessment.timestamps[0].isoformat()
+            if assessment.timestamps else None
+        ),
+        "path_used_bars": len(assessment.bars),
+    }
+    if not assessment.path_complete:
+        status = (
+            "pending"
+            if assessment.path_quality == "db_horizon_end_incomplete"
+            else "no_data"
+        )
+        return {
+            "status": status,
+            "notes": assessment.path_quality,
+            **metadata,
+        }
 
-    target_date = pd.to_datetime(label_date).date()
-    target_ts_start = pd.Timestamp(target_date) + pd.Timedelta(hours=9)
-    target_ts_end = target_ts_start + pd.Timedelta(hours=1)
-    bars = df[(df["timestamp"] >= target_ts_start) &
-              (df["timestamp"] < target_ts_end)].sort_values("timestamp")
-
-    if len(bars) < 1:
-        return {"status": "no_data"}
-
-    first_bar = bars.iloc[0]
-    if first_bar["timestamp"] != target_ts_start:
-        return {"status": "no_data", "notes": f"first bar timestamp mismatch: {first_bar['timestamp']}"}
-
-    opn = float(first_bar["open"])
+    bars = np.asarray(assessment.bars, dtype=float)
+    if bars.shape != (4, 4) or not np.isfinite(bars).all():
+        return {
+            "status": "no_data",
+            "notes": "assessment_contract_invalid",
+            **metadata,
+            "path_complete": False,
+            "path_quality": "assessment_contract_invalid",
+        }
+    opn = float(bars[0, 0])
     if opn <= 0:
-        return {"status": "bad_open"}
+        return {
+            "status": "no_data",
+            "notes": "bad_open",
+            **metadata,
+            "path_complete": False,
+            "path_quality": "bad_open",
+        }
 
-    if len(bars) < 4:
-        return {"status": "pending", "notes": f"only {len(bars)} 15m bars available"}
-
-    highs = bars["high"].values.astype(float)
-    lows = bars["low"].values.astype(float)
-    closes = bars["close"].values.astype(float)
+    highs = bars[:, 1]
+    lows = bars[:, 2]
+    closes = bars[:, 3]
 
     h15 = float(highs[0])
     h30 = float(highs[:2].max())
@@ -78,6 +97,7 @@ def compute_realized_preopen(coin: str, label_date: pd.Timestamp,
 
     return {
         "status": "closed",
+        **metadata,
         "first_open": opn,
         "first_15m_high": h15,
         "first_30m_high": h30,
@@ -109,6 +129,26 @@ def close_ledger_file(
     required: bool = True,
 ) -> None:
     p = Path(ledger_path)
+    with ledger_lock(p):
+        _close_ledger_file_locked(
+            p,
+            candles_15m_db,
+            asof,
+            dry_run,
+            log,
+            required=required,
+        )
+
+
+def _close_ledger_file_locked(
+    p: Path,
+    candles_15m_db: str,
+    asof: pd.Timestamp,
+    dry_run: bool,
+    log: logging.Logger,
+    *,
+    required: bool,
+) -> None:
     if not p.exists():
         msg = f"ledger missing (no entries yet): {p}"
         if required:
@@ -121,6 +161,10 @@ def close_ledger_file(
     for col in PAPER_LEDGER_COLS:
         if col not in ledger.columns:
             ledger[col] = np.nan
+    for col in PATH_QUALITY_COLS:
+        if col not in ledger.columns:
+            ledger[col] = pd.NA
+        ledger[col] = ledger[col].astype(object)
     ledger["status"] = ledger["status"].fillna("").astype(str)
     ledger["notes"] = ledger["notes"].fillna("").astype(str)
     log.info(f"ledger: {len(ledger)} rows total")
@@ -147,11 +191,17 @@ def close_ledger_file(
 
         result = compute_realized_preopen(r["coin"], entry_date, candles_15m_db)
         if result["status"] == "no_data":
+            for key in PATH_QUALITY_COLS:
+                if key in result:
+                    ledger.at[idx, key] = result[key]
             ledger.at[idx, "status"] = "no_data"
             ledger.at[idx, "notes"] = result.get("notes", "no 15m data")
             n_no_data += 1
             continue
         if result["status"] == "pending":
+            for key in PATH_QUALITY_COLS:
+                if key in result:
+                    ledger.at[idx, key] = result[key]
             ledger.at[idx, "notes"] = result.get("notes", "pending")
             continue
         if result["status"] != "closed":
@@ -175,7 +225,7 @@ def close_ledger_file(
         ordered = [c for c in PAPER_LEDGER_COLS if c in ledger.columns]
         extras = [c for c in ledger.columns if c not in ordered]
         ledger = ledger[ordered + extras]
-        ledger.to_csv(p, index=False)
+        atomic_write_csv(ledger, p)
         log.info(f"saved {p}")
 
     if rows_summary:
@@ -200,7 +250,11 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     log = logging.getLogger("close-preopen")
 
-    asof = pd.Timestamp(args.asof) if args.asof else pd.Timestamp.now()
+    asof = (
+        pd.Timestamp(args.asof)
+        if args.asof
+        else pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None)
+    )
     close_ledger_file(args.paper_ledger, args.upbit_15m, asof, args.dry_run, log, required=True)
 
     if not args.skip_shadow_ledger and Path(args.shadow_ledger) != Path(args.paper_ledger):

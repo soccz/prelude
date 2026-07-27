@@ -10,13 +10,11 @@ ledger.csv → Sharpe / MDD / hit rate / 평균 hold 등.
 """
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Optional
-
 import numpy as np
 import pandas as pd
 
 from ledger.config import INITIAL_CAPITAL_KRW
+from ledger.portfolio_metrics import max_drawdown_from_equity
 
 
 # ============================================================================
@@ -33,13 +31,26 @@ def compute_sharpe(daily_returns: pd.Series, periods_per_year: int = 365) -> flo
     return float(mu / sigma * np.sqrt(periods_per_year))
 
 
-def compute_mdd(equity_curve: pd.Series) -> float:
-    """최대 낙폭 (peak 대비)."""
+def compute_mdd(
+    equity_curve: pd.Series,
+    *,
+    initial_equity: float | None = None,
+) -> float:
+    """최대 낙폭.
+
+    ``initial_equity``를 주면 첫 관측 전 자본도 peak 후보에 포함한다. 입력
+    curve의 단위(1.0 normalized vs KRW)를 추측하지 않도록 기본값은 기존
+    호환 방식(None)이며, 운영 호출자는 시작 자본을 명시한다.
+    """
     if len(equity_curve) == 0:
         return 0.0
-    peak = equity_curve.cummax()
-    dd = (equity_curve - peak) / peak
-    return float(dd.min())
+    values = pd.to_numeric(equity_curve, errors="coerce").dropna()
+    if initial_equity is not None:
+        values = pd.concat([
+            pd.Series([float(initial_equity)]),
+            values.reset_index(drop=True),
+        ], ignore_index=True)
+    return max_drawdown_from_equity(values)
 
 
 def compute_daily_pnl(ledger_df: pd.DataFrame) -> pd.DataFrame:
@@ -68,7 +79,7 @@ def compute_daily_pnl(ledger_df: pd.DataFrame) -> pd.DataFrame:
     # equity curve
     daily["equity_krw"] = INITIAL_CAPITAL_KRW * (1 + daily["daily_net_return"]).cumprod()
     daily["daily_pnl_krw"] = daily["equity_krw"].diff().fillna(daily["equity_krw"] - INITIAL_CAPITAL_KRW)
-    daily["peak"] = daily["equity_krw"].cummax()
+    daily["peak"] = daily["equity_krw"].cummax().clip(lower=INITIAL_CAPITAL_KRW)
     daily["drawdown"] = (daily["equity_krw"] - daily["peak"]) / daily["peak"]
 
     return daily
@@ -92,7 +103,10 @@ def compute_summary(ledger_df: pd.DataFrame) -> dict:
     cum_return = float(daily["equity_krw"].iloc[-1] / INITIAL_CAPITAL_KRW - 1) if len(daily) > 0 else 0.0
     cum_pnl_krw = float(daily["equity_krw"].iloc[-1] - INITIAL_CAPITAL_KRW) if len(daily) > 0 else 0.0
     sharpe = compute_sharpe(daily["daily_net_return"]) if len(daily) > 0 else 0.0
-    mdd = compute_mdd(daily["equity_krw"]) if len(daily) > 0 else 0.0
+    mdd = (
+        compute_mdd(daily["equity_krw"], initial_equity=INITIAL_CAPITAL_KRW)
+        if len(daily) > 0 else 0.0
+    )
 
     return {
         "n_positions": n,
