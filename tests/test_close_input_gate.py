@@ -320,9 +320,12 @@ def test_canonical_close_evidence_rejects_symlink(
         )
 
 
-def test_pre_activation_pending_row_without_evidence_fails_closed(
+def test_pre_activation_pending_row_without_evidence_stays_legacy_open(
     tmp_path: Path,
 ) -> None:
+    # 계약 이전 pending 행 + 증거 전무 = 영원히 검증 불가.  매일 close 전체를
+    # fail 시키는 대신 legacy-unverifiable 로 열어 둔다 (행은 원장에 그대로
+    # 보이고 verified 통계에는 인증 행만 들어간다) — 2026-07-28 회귀 수리.
     output = tmp_path / "output"
     output.mkdir()
     (output / "shadow_ledger_pump_hunter.csv").write_text(
@@ -330,12 +333,26 @@ def test_pre_activation_pending_row_without_evidence_fails_closed(
         encoding="utf-8",
     )
 
-    with pytest.raises(
-        gate.CloseInputError,
-        match="pending ledger rows lack canonical evidence",
-    ):
+    assert gate.validate_close_input(
+        asof="2026-07-26",
+        cohort="pump-v1",
+        output_root=output,
+    ) == "skip-legacy-unverifiable"
+
+
+def test_post_activation_pending_row_without_evidence_still_fails(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+    (output / "shadow_ledger_pump_hunter.csv").write_text(
+        "date,status\n2026-07-27,open\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(gate.MissingCloseEvidenceError):
         gate.validate_close_input(
-            asof="2026-07-26",
+            asof="2026-07-27",
             cohort="pump-v1",
             output_root=output,
         )

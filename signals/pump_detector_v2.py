@@ -351,7 +351,13 @@ def score_pump_v2_candidates(asof_date, *, db_path: str | None = None,
     if frame.empty:
         meta["binance_status"] = "upbit_frame_empty"
         return meta
-    meta["feature_date"] = str(frame["feature_date"].iloc[0])
+    # D1 캔들 정본 시각(KST 09:00)을 명시한다 — healthy 결정 검증기가 이 정밀도를
+    # 요구한다 (07-26 강화의 healthy 경로는 07-28 게이트 소생 전까지 한 번도
+    # 실행된 적이 없어 date-only 포맷 결함이 잠복해 있었다).
+    meta["feature_date"] = str(
+        pd.Timestamp(str(frame["feature_date"].iloc[0])).normalize()
+        + pd.Timedelta(hours=9)
+    )
     meta["btc_regime"] = str(frame["btc_regime"].iloc[0])
 
     frame = frame.copy()

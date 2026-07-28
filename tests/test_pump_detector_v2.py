@@ -551,3 +551,59 @@ def test_binance_all_excluded_is_no_ready_not_ok(monkeypatch):
 
     assert result.empty
     assert status == "binance_no_ready (excluded=1/1)"
+
+
+def test_healthy_decision_passes_runner_validation(monkeypatch):
+    # healthy(ok) 경로는 07-26 강화 이후 07-28 게이트 소생 전까지 한 번도
+    # 실행된 적이 없어, scorer 의 date-only feature_date 가 runner 검증기
+    # ("prior KST D1 09:00 candle")에서 잠복 폭발했다 — 그 회귀 방지.
+    import scripts.pump_detector_v2_today as runner
+
+    feature_date = "2026-07-25 09:00:00"
+    frame = pd.DataFrame(
+        [
+            {
+                "market": "KRW-BTC",
+                "feature_date": feature_date,
+                "btc_regime": "bull_quiet",
+                "roc_7d_rank": 0.99,
+                "liq_rank_daily": 1,
+                "roc_7d": 0.2,
+                "atr_pct_14": 0.08,
+                "log_return_1d": 0.04,
+                "entry_open": 100.0,
+            },
+            {
+                "market": "KRW-ETH",
+                "feature_date": feature_date,
+                "btc_regime": "bull_quiet",
+                "roc_7d_rank": 0.98,
+                "liq_rank_daily": 2,
+                "roc_7d": 0.18,
+                "atr_pct_14": 0.07,
+                "log_return_1d": 0.03,
+                "entry_open": 200.0,
+            },
+        ]
+    )
+    frames = {
+        "BINANCE-BTCUSDT": _binance_daily("2026-07-25"),
+        "BINANCE-ETHUSDT": _binance_daily("2026-07-25"),
+    }
+    monkeypatch.setattr(
+        pump_detector_v2,
+        "build_feature_frame",
+        lambda *_args, **_kwargs: frame,
+    )
+    monkeypatch.setattr(
+        pump_detector_v2,
+        "load_candles",
+        lambda _db, market: frames[market],
+    )
+
+    result = score_pump_v2_candidates("2026-07-26", binance_db="unused.db")
+
+    assert result["binance_status"] == "ok"
+    assert result["n_candidates"] == 2
+    assert result["feature_date"] == "2026-07-25 09:00:00"
+    runner._validate_decision_result(result, expected_asof="2026-07-26")

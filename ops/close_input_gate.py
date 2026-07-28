@@ -62,6 +62,17 @@ ALLOWED_LEDGER_STATUSES = frozenset(
 SEAM_TOLERATED_COLUMNS = frozenset({"decision_completed_at"})
 
 log = logging.getLogger(__name__)
+# 이 모듈의 stdout 은 NUL 레코드 프로토콜(--output-format nul)로 셸이 기계
+# 파싱한다.  import 되는 다른 스크립트가 root logging 을 stdout 으로 구성해도
+# 이 로거의 경고가 레코드 스트림을 오염시키지 않도록 stderr 로 고정한다
+# (2026-07-28 09:30 close 3채널이 이 오염으로 전멸했던 회귀의 수리).
+if not log.handlers:
+    _stderr_handler = logging.StreamHandler(sys.stderr)
+    _stderr_handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    )
+    log.addHandler(_stderr_handler)
+    log.propagate = False
 
 
 class CloseInputError(RuntimeError):
@@ -950,10 +961,20 @@ def validate_close_input(
                 through_asof=asof,
             )
         ):
-            raise CloseInputError(
-                f"{cohort} pending ledger rows lack canonical evidence "
-                f"for {asof}"
+            # 계약 이전 날의 pending 행인데 정본 증거가 없다 — 영원히 검증
+            # 불가능하므로 매일 close 를 죽이는 대신 legacy-unverifiable 로
+            # 남긴다.  행은 open 상태로 원장에 그대로 보이고, forward/verified
+            # 통계에는 어차피 인증된 행만 들어간다.  (pump-v1 2026-07-26:
+            # decision manifest 는 07-27 활성부터 존재하는데 그날 close 체인이
+            # 죽어 있어 잔존 — 이 독이 매일 close 전체를 fail 시키던 회귀 수리)
+            log.warning(
+                "%s: %s pre-activation pending rows have no canonical "
+                "evidence and can never be verified — leaving them open as "
+                "legacy-unverifiable",
+                cohort,
+                asof,
             )
+            return "skip-legacy-unverifiable"
         # v1 has no receipt and must never be reconstructed.  A present v2
         # receipt is validated end-to-end, but remains legacy-unverifiable
         # rather than being promoted into a canonical decision manifest.
