@@ -17,6 +17,14 @@ from notifier.telegram import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _allow_mocked_sends(monkeypatch):
+    # 이 모듈은 발송 경로 자체를 mock 된 requests 로 검증한다 —
+    # 전역 kill-switch(tests/conftest.py)를 in-process 한정 해제.
+    # subprocess 를 띄우는 테스트는 이 모듈에 두지 말 것.
+    monkeypatch.delenv("PRELUDE_FORBID_TELEGRAM", raising=False)
+
+
 class _Response:
     def __init__(self, status_code: int, payload):
         self.status_code = status_code
@@ -792,3 +800,25 @@ def test_interior_text_mismatch_stays_ambiguous_after_trim_allowance(
 
     assert result.delivery_ok is False
     assert telegram_error_is_ambiguous(result.error)
+
+
+def test_forbid_env_blocks_send_without_network(monkeypatch):
+    # 전역 kill-switch 계약 — 네트워크 계층에 절대 도달하지 않는다.
+    monkeypatch.setenv("PRELUDE_FORBID_TELEGRAM", "1")
+    monkeypatch.setattr(
+        telegram.requests,
+        "post",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("network must not be touched")
+        ),
+    )
+
+    result = send_telegram_with_receipt(
+        "must not leave the process",
+        token="123:SECRET",
+        chat_id="456",
+        retries=3,
+    )
+
+    assert result.delivery_ok is False
+    assert "PRELUDE_FORBID_TELEGRAM" in result.error

@@ -31,6 +31,14 @@ from ops.radar_verdict import (
 from scripts.v2_scoreboard import build_scoreboard, run_scoreboard
 
 
+@pytest.fixture(autouse=True)
+def _allow_mocked_sends(monkeypatch):
+    # 이 모듈은 발송 경로 자체를 mock 된 requests 로 검증한다 —
+    # 전역 kill-switch(tests/conftest.py)를 in-process 한정 해제.
+    # subprocess 를 띄우는 테스트는 이 모듈에 두지 말 것.
+    monkeypatch.delenv("PRELUDE_FORBID_TELEGRAM", raising=False)
+
+
 def _scorecard(
     *,
     status: str,

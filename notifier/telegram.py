@@ -466,6 +466,23 @@ def send_telegram_with_receipt(
     """
     message_for_digest = message if isinstance(message, str) else ""
     message_sha256 = _sha256_text(message_for_digest)
+    if os.environ.get("PRELUDE_FORBID_TELEGRAM"):
+        # 프로세스 단위 kill-switch — pytest 픽스처가 실제 셸 스크립트를
+        # subprocess 로 실행해도(환경 상속) 실발송이 구조적으로 불가능하다.
+        # 2026-07-28: 픽스처의 유도 백업 실패가 실 봇으로 수십 통 발송된
+        # 사고의 재발 방지. 발송 경로 자체를 검증하는 테스트는 이 변수를
+        # 명시적으로 해제하고 requests 를 mock 한다.
+        return TelegramSendResult(
+            delivery_ok=False,
+            message_sha256=message_sha256,
+            chunk_count=0,
+            chat_id_sha256=_sha256_text(""),
+            telegram_messages=(),
+            error=(
+                "telegram sending forbidden by PRELUDE_FORBID_TELEGRAM "
+                "(test/sandbox guard)"
+            ),
+        )
     chunks: list[str] = []
     resolved_chat_id: str | None = None
 
