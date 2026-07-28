@@ -1742,8 +1742,42 @@ def compute_recommend_summary(
 # ============================================================================
 # History (combined rows)
 # ============================================================================
-def history_rows(df_dist: pd.DataFrame, df_preopen: pd.DataFrame) -> list[dict]:
+def history_rows(
+    df_dist: pd.DataFrame,
+    df_preopen: pd.DataFrame,
+    df_rec: pd.DataFrame | None = None,
+) -> list[dict]:
     rows = []
+    # 현행 라이브 채널 R1 — 알림 히스토리 표의 정본 첫 채널 (2026-07-28 추가:
+    # 뷰어가 legacy 2채널만 보여 '3일 전에 죽은 시스템'처럼 보이던 결함 수리).
+    if df_rec is not None and len(df_rec):
+        for _, r in df_rec.iterrows():
+            realized = _safe_float(r.get("realized_pct"))
+            rows.append({
+                "date": str(r["date"]),
+                "channel": "recommend",
+                "coin": str(r["coin"]).replace("KRW-", ""),
+                "setups": str(r.get("exit_reason", "") or ""),
+                "btc_regime": str(r.get("btc_regime", "")),
+                "entry_price": _safe_float(r.get("entry_open")),
+                "p_up10": _safe_float(r.get("p_up10")),
+                "p_dn5": _safe_float(r.get("p_dn5")),
+                "composite": _safe_float(r.get("score")),
+                "next_max_pct": _safe_float(r.get("max_return_pct")),
+                "next_min_pct": _safe_float(r.get("min_return_pct")),
+                "next_close_pct": realized,
+                "hit_h2": None,
+                "hit_h6": None,
+                "hit_h5": None,
+                "virtual_pnl_pct": realized,
+                "status": str(r.get("status", "")),
+                "decision": "R1 champion",
+                "idea_id": "—",
+                "setup_quality": "—",
+                "calibrated_hit_pct": None,
+                "expected_edge_pct": None,
+                "decision_reason": "",
+            })
     for _, r in df_dist.iterrows():
         max_pct = r.get("next_max_return_pct")
         close_pct = r.get("next_close_return_pct")
@@ -1960,6 +1994,15 @@ def _load_optional_artifact(
         )
         built_at = payload.get("built_at")
         if not trained_through or not built_at:
+            # 새 ordered-증거 계약 이후 표본 0 → REJECTED 진단 아티팩트.
+            # null 로 삼키면 뷰어가 침묵하므로 상태·사유만 최소 노출한다.
+            status = payload.get("artifact_status")
+            if status:
+                return {
+                    "artifact_status": str(status),
+                    "reason": str(payload.get("reason") or ""),
+                    "built_at": str(built_at or ""),
+                }
             return None
         try:
             trained_date = normalize_kst_date(trained_through)
@@ -2174,7 +2217,7 @@ def main():
         "dashboard_generation_id": generation_id,
         "asof": asof.isoformat(),
         "asof_timezone": "Asia/Seoul",
-        "rows": history_rows(df_dist, df_pre),
+        "rows": history_rows(df_dist, df_pre, df_rec),
     }
     _write_json(out_dir / "history.json", history, passphrase=pin)
     log.info(f"saved history.json ({len(history['rows'])} rows)")
@@ -2607,8 +2650,10 @@ def _encrypt_payload(payload: dict, passphrase: str) -> dict:
     """PBKDF2-HMAC-SHA256 + AES-256-CBC + HMAC-SHA256(salt||iv||ct).
 
     Viewer 의 decryptPayload (papers index.html 동일) 와 호환. client-side
-    ciphertext라 offline brute-force 자체를 막을 수는 없으므로 12자 이상
-    비공개 passphrase를 강제한다. 이는 서버 측 접근제어를 대체하지 않는다.
+    ciphertext라 offline brute-force 자체를 막을 수는 없으므로
+    MIN_DASHBOARD_PASSPHRASE_LENGTH(현재 4 — 사용자 명시 승인 2026-07-28,
+    짧은 PIN 의 무차별 대입 취약 수용) 이상 passphrase 를 강제한다.
+    이는 서버 측 접근제어를 대체하지 않는다.
     """
     from cryptography.hazmat.primitives import hashes, hmac as crypto_hmac
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes

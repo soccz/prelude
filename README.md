@@ -4,9 +4,9 @@
 > KST 08:50·09:05에 알려 주는 개인 트레이딩 보조 레이더.
 > 사용자가 직접 판단·매매하며 **자동 주문은 없다.**
 
-![tests](https://img.shields.io/badge/tests-1273%20passed-brightgreen)
+![tests](https://img.shields.io/badge/tests-1276%20passed-brightgreen)
 ![status](https://img.shields.io/badge/verdict-radar--not--strategy-orange)
-![evidence](https://img.shields.io/badge/evidence-snapshot→receipt→label-blue)
+![evidence](https://img.shields.io/badge/evidence-snapshot%E2%86%92receipt%E2%86%92label-blue)
 ![judgment](https://img.shields.io/badge/v2%20GO%2FKILL-2026--09--01%20(frozen)-red)
 
 **전체 여정(실패 포함) 공개 보고서** → [soccz.github.io/projects/prelude](https://soccz.github.io/projects/prelude/) ·
@@ -113,7 +113,7 @@ cd /home/soccz/22tb/prelude
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
-# 상태 잡기 (30초)
+# 상태 잡기 (30초) — 운영 머신 기준. 신규 클론엔 forward 산출물(output/*.csv)이 없다
 head -60 PHASES.md                                    # 현재 단계·동결 경계
 tail -10 output/shadow_ledger_recommend.csv           # 최근 R1 forward 결과
 git log --oneline -5
@@ -124,7 +124,7 @@ python scripts/recommend_today.py --slot open --dry-run
 sudo bash deploy/install_systemd.sh --check-only      # 설치본-저장소 정합 검사
 
 # 전체 검증
-python -m pytest -q tests/                            # 1273 passed 기대
+python -m pytest -q tests/                            # 1276 passed 기대
 ```
 
 ---
@@ -135,7 +135,7 @@ python -m pytest -q tests/                            # 1273 passed 기대
 prelude/
 ├── README.md          # ← 지금 이 파일
 ├── CLAUDE.md          # 작업 규칙 · SIGNAL.md 시그널 · LEDGER.md 원장 · OPS.md 운영
-├── PHASES.md          # 단계·판정 기록 (변경 이력 정본) · NOTES.md 사용자 손글
+├── PHASES.md          # 단계·판정 기록 (변경 이력 정본) · NOTES.md 사용자 손글(비공개·로컬 전용)
 ├── ASSETS.md          # 외부 참조 매핑 · ADDITIONAL_IDEAS.md 검증된 결함·로드맵
 ├── data/              # D1/4h/15m/Binance 수집 + DB (fail-closed collectors)
 ├── signals/           # 라벨·피처·모델·snapshot·score 라벨러
@@ -144,7 +144,7 @@ prelude/
 ├── notifier/          # Telegram + delivery receipt
 ├── scripts/           # 일일 러너·백테스트·챌린저·감사 평가기
 ├── deploy/            # systemd 15유닛 + 트랜잭션 installer (실패 시 롤백)
-├── tests/             # pytest 1273 (warnings=error)
+├── tests/             # pytest 1276 (warnings=error)
 ├── _workspace/        # 연구 노트·설계·독립 재검산 판정서 (negative results 박제)
 └── output/            # 산출물 (증거 아티팩트는 gitignore + versioned backup)
 ```
