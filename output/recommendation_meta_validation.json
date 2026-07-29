@@ -1,8 +1,8 @@
 {
   "artifact_schema": "prelude.recommendation_quality_model.v2",
-  "artifact_sha256": "5fe134c9c9f4473e2082b1c0d1e23b9dc87512e528ec59da6ce9fadb539bb18b",
+  "artifact_sha256": "2190a7414864bbb07c6e7079366f1fe8ff924c74a28c9fc1c915348cdeebe9e1",
   "artifact_status": "REJECTED",
-  "built_at": "2026-07-27T01:07:16+00:00",
+  "built_at": "2026-07-29T01:58:54+00:00",
   "categorical_features": [
     "channel",
     "setup_quality",
@@ -129,7 +129,7 @@
       }
     },
     "ledger_inputs": {
-      "bundle_sha256": "fad7c0c7fd147f16109d083a890c072bb451dda5dd7219ad435140af61db94ef",
+      "bundle_sha256": "ad48abbd162e8faa16a8c1e7f67d61b93a4a6990301358692d54c02db2f6522c",
       "files": {
         "paper_ledger_distribution": {
           "exists": true,
@@ -146,18 +146,18 @@
         "shadow_ledger_distribution": {
           "exists": true,
           "path": "output/shadow_ledger_distribution.csv",
-          "sha256": "2d1190b9837cd517f5c709c1e652466c35e5c9921e328006b5903fe9e91b931b",
-          "size": 414059
+          "sha256": "8f58ef435074f2912c38dc621db58cfa70a98d3ee70d5fce79dbc0751703fb7a",
+          "size": 421407
         },
         "shadow_ledger_preopen": {
           "exists": true,
           "path": "output/shadow_ledger_preopen.csv",
-          "sha256": "b4cf4da37f49aad29314cfb12299ad48b6a7f8a405eedef3100cc2bb7d31b812",
-          "size": 433849
+          "sha256": "0fec2db96d47e61dc226c84dc52c6941534cbebefaeede40d0d62d49102f1afe",
+          "size": 441476
         }
       }
     },
-    "manifest_sha256": "bf97242b5cffdfff297b6b325292a87a687d1bbf23a1ea524c0db9921005eb89",
+    "manifest_sha256": "5ac67b76c0a4468765519dc5478f142b12648b0ccf1439ec201fd388a46cad1f",
     "schema_version": 1,
     "training_rows": {
       "date_end": null,

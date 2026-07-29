@@ -1,5 +1,5 @@
 {
-  "asof": "2026-07-27",
+  "asof": "2026-07-29",
   "ci95": null,
   "closed_n": 0,
   "companion_metric_note": "day_equal fields are diagnostic only; do not replace the frozen 2026-09-01 per-trade decision metric retroactively",
@@ -13,7 +13,7 @@
   "criteria_met": 0,
   "day_cluster_ci95": null,
   "day_equal_mean_net_pct": null,
-  "days_to_judgment": 36,
+  "days_to_judgment": 34,
   "early_kill_breached": false,
   "evidence_scope": "verified_post_contract_closed_positions_only",
   "legacy_diagnostic": {

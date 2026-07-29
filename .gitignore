@@ -38,6 +38,7 @@ signals/models/configs/phase1_*.json
 output/holdout_metrics_*.json
 output/retrain_history.json
 output/risk_state.json
+output/pipeline_state/
 
 # Logs
 *.log
