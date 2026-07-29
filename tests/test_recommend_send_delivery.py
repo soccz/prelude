@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 import multiprocessing
+import os
 import time
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +25,20 @@ def _allow_mocked_sends(monkeypatch):
     # 전역 kill-switch(tests/conftest.py)를 in-process 한정 해제.
     # subprocess 를 띄우는 테스트는 이 모듈에 두지 말 것.
     monkeypatch.delenv("PRELUDE_FORBID_TELEGRAM", raising=False)
+
+    def forbid_unmocked_transport(*_args, **_kwargs):
+        pytest.fail("unmocked Telegram transport reached")
+
+    monkeypatch.setattr(
+        recommend_send,
+        "send_telegram",
+        forbid_unmocked_transport,
+    )
+    monkeypatch.setattr(
+        recommend_send,
+        "send_telegram_with_receipt",
+        forbid_unmocked_transport,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -282,6 +297,11 @@ def _concurrent_send_worker(
     api_calls: Any,
 ) -> None:
     """Run one isolated sender with spawn-safe in-child test doubles."""
+    # spawn 자식은 부모의 kill-switch-해제 fixture 환경을 물려받고 부모의
+    # monkeypatch 는 하나도 살아남지 않는다 — 아래 수동 stub 이 커버하지
+    # 못하는 어떤 경로(post-activation receipt 전송 등)도 실 텔레그램에
+    # 닿지 못하게 자식 첫 줄에서 재봉쇄한다.
+    os.environ["PRELUDE_FORBID_TELEGRAM"] = "1"
     spec = SimpleNamespace(
         id="recommend_r1_open",
         predict_ref="signals.recommend:score_candidates",
@@ -397,6 +417,11 @@ def test_real_send_rejects_unapproved_r1_rank_basis(
         recommend_send,
         "send_telegram",
         lambda *_args, **_kwargs: calls.append("send") or True,
+    )
+    monkeypatch.setattr(
+        recommend_send,
+        "send_telegram_with_receipt",
+        lambda *_args, **_kwargs: calls.append("send-with-receipt"),
     )
 
     with pytest.raises(RuntimeError, match="unapproved live rank basis"):
@@ -622,6 +647,11 @@ def test_sender_rejects_postactivation_receipt_outer_tamper(
         recommend_send,
         "send_telegram",
         lambda *_args, **_kwargs: calls.append("send") or True,
+    )
+    monkeypatch.setattr(
+        recommend_send,
+        "send_telegram_with_receipt",
+        lambda *_args, **_kwargs: calls.append("send-with-receipt"),
     )
 
     with pytest.raises(
@@ -1002,6 +1032,18 @@ def test_real_send_rejects_market_limited_snapshot_before_scoring(
         recommend_send,
         "call_predict",
         lambda *_args, **_kwargs: calls.append("score") or snapshot,
+    )
+    # 가드가 회귀하면 실 전송 경로로 떨어진다(이 모듈은 kill-switch 해제) —
+    # 이웃 window 테스트처럼 transport 를 recorder 로 봉쇄하고 0건 단언.
+    monkeypatch.setattr(
+        recommend_send,
+        "send_telegram",
+        lambda *_a, **_k: calls.append("send") or True,
+    )
+    monkeypatch.setattr(
+        recommend_send,
+        "send_telegram_with_receipt",
+        lambda *_a, **_k: calls.append("receipt") or None,
     )
 
     with pytest.raises(RuntimeError, match="dry-run-only"):

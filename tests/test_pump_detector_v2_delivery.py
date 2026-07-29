@@ -4,6 +4,7 @@ import json
 import hashlib
 import math
 import multiprocessing
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,11 +17,38 @@ from notifier.telegram import TelegramSendResult, TelegramServerMessage
 
 
 @pytest.fixture(autouse=True)
-def _allow_mocked_sends(monkeypatch):
+def _allow_mocked_sends(monkeypatch, tmp_path):
     # 이 모듈은 발송 경로 자체를 mock 된 requests 로 검증한다 —
     # 전역 kill-switch(tests/conftest.py)를 in-process 한정 해제.
     # subprocess 를 띄우는 테스트는 이 모듈에 두지 말 것.
+    # guard 회귀가 나도 실제 forward output에 decision/receipt/ledger를
+    # 기록하지 못하도록 모든 기본 경로도 테스트별 tmp로 격리한다.
     monkeypatch.delenv("PRELUDE_FORBID_TELEGRAM", raising=False)
+    monkeypatch.setattr(
+        runner,
+        "PUMP_V2_LEDGER",
+        str(tmp_path / "default-pump-v2-ledger.csv"),
+    )
+    monkeypatch.setattr(
+        runner,
+        "PUMP_V2_RECEIPT_ROOT",
+        str(tmp_path / "default-pump-v2-receipts"),
+    )
+    monkeypatch.setattr(
+        runner,
+        "PUMP_V2_DECISION_ROOT",
+        str(tmp_path / "default-pump-v2-decisions"),
+    )
+
+    def forbid_unmocked_transport(*_args, **_kwargs):
+        pytest.fail("unmocked Telegram transport reached")
+
+    monkeypatch.setattr(runner, "send_telegram", forbid_unmocked_transport)
+    monkeypatch.setattr(
+        runner,
+        "send_telegram_with_receipt",
+        forbid_unmocked_transport,
+    )
 
 
 def _telegram_result(
@@ -146,6 +174,9 @@ def _run_main(
 
 
 def _append_in_child(ledger: str, result: dict, start) -> None:
+    # spawn 자식은 이 모듈의 kill-switch-해제 fixture 환경을 물려받는다 —
+    # 어떤 코드 경로도 실 텔레그램에 닿지 못하게 자식에서 재봉쇄한다.
+    os.environ["PRELUDE_FORBID_TELEGRAM"] = "1"
     start.wait()
     runner.append_ledger(
         result,
@@ -520,6 +551,19 @@ def test_zero_candidate_run_persists_observed_decision_day(monkeypatch, tmp_path
     result["candidates"] = []
     ledger = tmp_path / "v2.csv"
     receipts = tmp_path / "receipts"
+    # 무소음 정책이 회귀하면 실 전송 경로로 떨어진다 — 이 모듈은
+    # kill-switch 를 지우므로 반드시 recorder 로 봉쇄하고 0건을 단언한다.
+    forbidden_sends: list = []
+    monkeypatch.setattr(
+        runner,
+        "send_telegram",
+        lambda *a, **k: forbidden_sends.append("send") or True,
+    )
+    monkeypatch.setattr(
+        runner,
+        "send_telegram_with_receipt",
+        lambda *a, **k: forbidden_sends.append("receipt") or None,
+    )
 
     assert _run_main(
         monkeypatch,
@@ -528,6 +572,8 @@ def test_zero_candidate_run_persists_observed_decision_day(monkeypatch, tmp_path
         result,
         send=True,
     ) == 0
+
+    assert forbidden_sends == []
 
     manifest = tmp_path / "decisions" / "2026-07-26.json"
     payload = json.loads(manifest.read_text(encoding="utf-8"))
@@ -1062,6 +1108,16 @@ def test_main_rejects_custom_live_outputs_before_scoring(
     tmp_path,
 ):
     calls: list[str] = []
+    monkeypatch.setattr(
+        runner,
+        "send_telegram",
+        lambda *_args, **_kwargs: calls.append("send"),
+    )
+    monkeypatch.setattr(
+        runner,
+        "send_telegram_with_receipt",
+        lambda *_args, **_kwargs: calls.append("send-with-receipt"),
+    )
     monkeypatch.setattr(
         sys,
         "argv",

@@ -178,9 +178,11 @@ def _config(tmp_path: Path, *, queue_max: int = 1000):
     return collector.CaptureConfig(
         markets=("KRW-BTC",),
         output_root=tmp_path / "raw",
-        duration_seconds=0.15,
+        # 스레드 기동 지터(eeee302 참조)보다 넉넉한 cutoff — 0.15s 는
+        # 부하 시 recv 진입 전 stop 으로 flake 났던 마진이다.
+        duration_seconds=0.5,
         required_warmup_seconds=0,
-        max_wait_seconds=2,
+        max_wait_seconds=3,
         queue_max=queue_max,
         asof=date(2026, 7, 26),
     )
@@ -545,7 +547,9 @@ def test_worker_force_closes_stuck_socket_before_writer_finalization(tmp_path):
     assert websocket.subscribed.wait(1)
 
     stop_event.set()
-    worker.join(timeout=0.5)
+    # join 은 스레드 종료 즉시 반환한다 — 짧은 timeout 은 forced-close
+    # 경로에 250ms 예산만 남겨 부하 시 spurious RuntimeError 를 만든다.
+    worker.join(timeout=6.0)
 
     assert websocket.released.is_set()
     assert worker.state.receiver_error == "receiver required forced websocket close"
