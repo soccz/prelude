@@ -285,6 +285,14 @@ def main():
         if args.asof
         else pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None)
     )
+    if not args.allow_late_ledger and not is_decision_window(asof):
+        log.error(
+            "paper_ledger: refused run outside decision window "
+            f"(asof={asof.strftime('%H:%M')}; use --allow-late-ledger "
+            "only for intentional backfill)"
+        )
+        sys.exit(3)
+
     date_str = asof.strftime("%Y%m%d")
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -436,16 +444,15 @@ def main():
     log.info(f"saved {log_path}")
 
     # 6) Append to paper ledger
-    if args.allow_late_ledger or is_decision_window(asof):
-        n_shadow = append_shadow_ledger(decisions, asof, args.shadow_ledger, "distribution")
-        log.info(f"shadow_ledger: {n_shadow} new rows → {args.shadow_ledger}")
-        n_new = append_to_paper_ledger(alerts, asof, args.paper_ledger)
-        log.info(f"paper_ledger: {n_new} new rows → {args.paper_ledger}")
-    else:
-        log.warning(
-            "paper_ledger: skipped append outside decision window "
-            f"(asof={asof.strftime('%H:%M')}; use --allow-late-ledger only for intentional backfill)"
-        )
+    n_shadow = append_shadow_ledger(
+        decisions,
+        asof,
+        args.shadow_ledger,
+        "distribution",
+    )
+    log.info(f"shadow_ledger: {n_shadow} new rows → {args.shadow_ledger}")
+    n_new = append_to_paper_ledger(alerts, asof, args.paper_ledger)
+    log.info(f"paper_ledger: {n_new} new rows → {args.paper_ledger}")
 
     # 7) Format + (optional) telegram
     # 진단/Setup library 블록은 텔레그램에서 빼고 stdout/log 로만.
@@ -482,7 +489,6 @@ def main():
                 log.error("telegram not sent")
         except Exception as e:
             log.error(f"telegram fail: {e}")
-
 
 if __name__ == "__main__":
     main()

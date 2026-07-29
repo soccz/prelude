@@ -59,6 +59,57 @@ def _upbit_daily_frame(
     )
 
 
+def test_btc_regime_propagates_candle_load_failure(monkeypatch):
+    def fail_load(_db_path, _market):
+        raise OSError("BTC candle database unavailable")
+
+    monkeypatch.setattr(pump_detector_v1, "load_candles", fail_load)
+
+    with pytest.raises(OSError, match="database unavailable"):
+        pump_detector_v1._btc_regime_for_feature_date(
+            "unavailable.db",
+            pd.Timestamp("2026-07-25 09:00:00"),
+        )
+
+
+def test_btc_regime_is_unknown_when_candle_query_is_empty(monkeypatch):
+    monkeypatch.setattr(
+        pump_detector_v1,
+        "load_candles",
+        lambda _db_path, _market: pd.DataFrame(),
+    )
+
+    assert (
+        pump_detector_v1._btc_regime_for_feature_date(
+            "empty.db",
+            pd.Timestamp("2026-07-25 09:00:00"),
+        )
+        == "unknown"
+    )
+
+
+def test_btc_regime_is_unknown_without_feature_date_candle(monkeypatch):
+    btc = pd.DataFrame(
+        {
+            "timestamp": [pd.Timestamp("2026-07-24 09:00:00")],
+            "close": [100.0],
+        }
+    )
+    monkeypatch.setattr(
+        pump_detector_v1,
+        "load_candles",
+        lambda _db_path, _market: btc.copy(),
+    )
+
+    assert (
+        pump_detector_v1._btc_regime_for_feature_date(
+            "insufficient.db",
+            pd.Timestamp("2026-07-25 09:00:00"),
+        )
+        == "unknown"
+    )
+
+
 @pytest.mark.parametrize(
     "excluded_market",
     sorted(SIGNAL_EXCLUDED_KRW_MARKETS),

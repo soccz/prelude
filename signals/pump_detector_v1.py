@@ -86,10 +86,11 @@ def _compute_market_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _btc_regime_for_feature_date(db_path: str, feature_ts: pd.Timestamp) -> str:
-    try:
-        btc = load_candles(db_path, "KRW-BTC")
-    except Exception:
-        return "unknown"
+    # DB/파일/SQLite 장애를 정상 데이터값인 "unknown" 으로 강등하지 않는다.
+    # load_candles 예외는 일일 runner까지 전파해 nonzero 실패·운영 경보로
+    # 이어져야 한다. "unknown" 은 조회가 정상 완료됐지만 해당 시점의
+    # BTC 데이터가 실제로 없는 경우에만 사용한다.
+    btc = load_candles(db_path, "KRW-BTC")
     if btc is None or btc.empty:
         return "unknown"
     btc = btc.copy()

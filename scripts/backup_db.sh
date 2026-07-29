@@ -50,12 +50,17 @@ if [[ -v PRELUDE_BACKUP_LOCK_FD ]]; then
         --lock-file "$LOCK_FILE" \
         --fd "$PRELUDE_BACKUP_LOCK_FD"
 else
-    exec /usr/bin/python3 "$LOCK_EXEC" run \
+    # 짧은 수동/timer 경합은 기다리되 stuck lock은 수동 실행에서도
+    # 무한 대기하지 않는다. 3000s rc=124가 systemd 3600s보다 먼저
+    # OnFailure 경로로 전파된다.
+    exec /usr/bin/timeout --signal=TERM --kill-after=30s 3000s \
+        /usr/bin/python3 "$LOCK_EXEC" run \
         --lock-file "$LOCK_FILE" \
         --fd-env PRELUDE_BACKUP_LOCK_FD \
-        --busy-exit 0 \
+        --busy-exit 75 \
+        --wait \
         --busy-message \
-        "  another backup process holds $LOCK_FILE — skip" \
+        "  another backup process holds $LOCK_FILE" \
         --busy-log "$LOG" \
         -- /bin/bash "$PROJ_ROOT/scripts/backup_db.sh" "$@"
 fi

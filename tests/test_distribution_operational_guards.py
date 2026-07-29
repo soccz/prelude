@@ -3,9 +3,11 @@ from __future__ import annotations
 import sys
 
 import pandas as pd
+import pytest
 
 from ledger.path_quality import PathAssessment
 from notifier.format import format_distribution_beta, format_preopen_beta
+import scripts.predict_today_distribution as distribution_runner
 from scripts.predict_today_distribution import append_to_paper_ledger, is_decision_window
 
 
@@ -49,6 +51,45 @@ def test_decision_window_blocks_late_ledger_runs():
     assert is_decision_window(pd.Timestamp("2026-05-05 09:20:00"))
     assert not is_decision_window(pd.Timestamp("2026-05-05 09:21:00"))
     assert not is_decision_window(pd.Timestamp("2026-05-05 20:54:00"))
+
+
+def test_late_run_fails_before_loading_engine_or_writing_outputs(
+    tmp_path,
+    monkeypatch,
+):
+    out_dir = tmp_path / "output"
+    paper_ledger = tmp_path / "paper.csv"
+    shadow_ledger = tmp_path / "shadow.csv"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "predict_today_distribution.py",
+            "--asof",
+            "2026-05-05 09:21:00",
+            "--out-dir",
+            str(out_dir),
+            "--paper-ledger",
+            str(paper_ledger),
+            "--shadow-ledger",
+            str(shadow_ledger),
+        ],
+    )
+    monkeypatch.setattr(
+        distribution_runner.DistributionEngine,
+        "load",
+        lambda *_args, **_kwargs: pytest.fail(
+            "late run reached model loading"
+        ),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        distribution_runner.main()
+
+    assert exc_info.value.code == 3
+    assert not out_dir.exists()
+    assert not paper_ledger.exists()
+    assert not shadow_ledger.exists()
 
 
 def test_append_to_paper_ledger_keeps_one_snapshot_per_date(tmp_path):

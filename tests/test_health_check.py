@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
@@ -160,6 +161,47 @@ def test_missing_health_states_are_explicit_bootstrap(
     assert "BOOTSTRAP_UNINITIALIZED" in drift_message
     assert "evaluator unwired" in risk_message
     assert "evaluator unwired" in drift_message
+
+
+def test_runtime_health_does_not_report_unwired_risk_or_drift(
+    monkeypatch,
+    capsys,
+):
+    """Legacy validators must not masquerade as live production monitors."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["health_check.py", "--channel", "recommend", "--no-telegram"],
+    )
+    monkeypatch.setattr(
+        health_check,
+        "check_universe_coverage",
+        lambda *_args, **_kwargs: (True, "coverage ok"),
+    )
+    monkeypatch.setattr(
+        health_check,
+        "log_names_for_channel",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        health_check,
+        "check_risk_state",
+        lambda: pytest.fail("unwired risk validator called by runtime health"),
+    )
+    monkeypatch.setattr(
+        health_check,
+        "check_drift_state",
+        lambda: pytest.fail("unwired drift validator called by runtime health"),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        health_check.main()
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "risk" not in output
+    assert "drift" not in output
+    assert "ALL OK" in output
 
 
 def test_valid_risk_states_follow_active_and_silenced_semantics(

@@ -6,6 +6,7 @@ import os
 import shutil
 import sqlite3
 import subprocess
+import sys
 import tarfile
 import time
 from datetime import date, datetime, timezone
@@ -805,10 +806,64 @@ def test_backup_and_heartbeat_finish_nonzero_on_detected_failures():
 
     assert 'if [ "$N_FAIL" -gt 0 ]; then' in backup
     assert "exit 1" in backup
+    assert "--busy-exit 75" in backup
+    assert "--wait" in backup
+    assert "/usr/bin/timeout --signal=TERM --kill-after=30s 3000s" in backup
     assert 'EXIT=1' in heartbeat
     assert 'exit "$EXIT"' in heartbeat
     assert "send_telegram(os.environ['HEARTBEAT_MESSAGE']) else 1" in heartbeat
     assert "heartbeat alert delivery FAIL" in heartbeat
+
+
+def test_backup_lock_wait_is_bounded_and_fails_loud(tmp_path):
+    repo = tmp_path / "repo"
+    scripts = repo / "scripts"
+    backup = repo / "backup"
+    scripts.mkdir(parents=True)
+    backup.mkdir()
+    source = _backup_script_source(repo).replace(
+        "--kill-after=30s 3000s",
+        "--kill-after=1s 1s",
+        1,
+    )
+    backup_script = scripts / "backup_db.sh"
+    backup_script.write_text(source, encoding="utf-8")
+    lock_file = backup / ".backup.lock"
+    holder_code = (
+        "import fcntl, pathlib, sys, time\n"
+        "path = pathlib.Path(sys.argv[1])\n"
+        "with path.open('a+') as handle:\n"
+        "    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)\n"
+        "    print('locked', flush=True)\n"
+        "    time.sleep(10)\n"
+    )
+    holder = subprocess.Popen(
+        [sys.executable, "-c", holder_code, str(lock_file)],
+        cwd=repo,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "locked"
+        started = time.monotonic()
+        result = subprocess.run(
+            ["bash", str(backup_script)],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        elapsed = time.monotonic() - started
+    finally:
+        holder.terminate()
+        holder.wait(timeout=5)
+        if holder.stdout is not None:
+            holder.stdout.close()
+
+    assert result.returncode == 124
+    assert elapsed < 4
 
 
 def test_backup_failure_continues_to_ledger_tar_then_exits_nonzero(tmp_path):
@@ -1784,14 +1839,23 @@ def test_heartbeat_uses_onfailure_only_when_detailed_alert_delivery_fails(
     scripts.mkdir(parents=True)
     fake_bin.mkdir()
     (repo / "output").mkdir()
+    (repo / "output" / "policy_competition_summary.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
     shutil.copy2(Path("scripts/heartbeat.sh"), scripts / "heartbeat.sh")
 
     fake_python = fake_bin / "python"
     fake_python.write_text(
         """#!/usr/bin/env bash
 if [ "$1" = "-" ]; then
-    cat >/dev/null
-    echo ok
+    content=$(cat)
+    if [[ "$content" == *load_policy_artifact* ]] ||
+       [[ "$content" == *"today's snapshot missing"* ]]; then
+        echo HOSTILE-STDOUT-POLLUTION
+    else
+        echo ok
+    fi
     exit 0
 fi
 if [ "$1" = "scripts/v2_scoreboard.py" ]; then
@@ -1825,15 +1889,107 @@ exit 0
 
     assert result.returncode == expected_rc
     assert "paper_ledger.csv 파일 없음" in log
+    assert "HOSTILE-STDOUT-POLLUTION" in log
+    assert "policy_competition JSON/CSV/SQLite provenance ok" in log
+    assert "recommend snapshot chain ok" in log
+    assert "policy_competition provenance probe FAIL" not in log
+    assert "recommend snapshot chain probe FAIL" not in log
     assert expected_log in log
 
 
-def test_heartbeat_zero_count_does_not_duplicate_grep_output():
+def test_heartbeat_row_count_preserves_grep_failure_status():
     heartbeat = Path("scripts/heartbeat.sh").read_text()
 
-    assert 'grep -c "^$YESTERDAY," "$ledger" 2>/dev/null || true' in heartbeat
-    assert 'grep -c "^$YESTERDAY," "$ledger" 2>/dev/null || echo 0' not in heartbeat
+    assert 'grep -c "^$YESTERDAY," "$ledger" 2>>"$LOG"' in heartbeat
+    assert "grep_rc=$?" in heartbeat
+    assert 'if [ "$grep_rc" -gt 1 ]' in heartbeat
+    ledger_probe = heartbeat.split(
+        "# 1) paper_ledger",
+        1,
+    )[1].split("# 2) DB integrity", 1)[0]
+    assert "|| true" not in ledger_probe
     assert "today's snapshot missing" in heartbeat
+
+
+def test_heartbeat_requires_todays_bound_backup_manifest():
+    heartbeat = Path("scripts/heartbeat.sh").read_text()
+    backup_probe = heartbeat.split(
+        "# 3a) 오늘 04:00 evidence backup",
+        1,
+    )[1].split("# 3b) close no-decision", 1)[0]
+
+    assert "BACKUP_DATE=$(date +%Y%m%d)" in backup_probe
+    assert "python -m ops.backup_manifest" in backup_probe
+    assert '--date "$BACKUP_DATE"' in backup_probe
+    assert '--wait-seconds "$BACKUP_WAIT_SECONDS"' in backup_probe
+    assert "-mtime -2" not in backup_probe
+
+
+def test_heartbeat_rejects_numeric_output_from_failed_grep(tmp_path):
+    repo = tmp_path / "repo"
+    scripts = repo / "scripts"
+    output = repo / "output"
+    backup = repo / "backup"
+    fake_bin = tmp_path / "bin"
+    for path in (scripts, output, backup, fake_bin):
+        path.mkdir(parents=True)
+    shutil.copy2(Path("scripts/heartbeat.sh"), scripts / "heartbeat.sh")
+    (output / "paper_ledger.csv").write_text(
+        "date,coin,status\n",
+        encoding="utf-8",
+    )
+
+    fake_grep = fake_bin / "grep"
+    fake_grep.write_text(
+        "#!/bin/bash\n"
+        'case "$*" in\n'
+        "  *paper_ledger.csv*) echo 7; exit 2 ;;\n"
+        "esac\n"
+        'exec /usr/bin/grep "$@"\n',
+        encoding="utf-8",
+    )
+    fake_python = fake_bin / "python"
+    fake_python.write_text(
+        "#!/bin/bash\n"
+        'if [ "${1:-}" = "-" ]; then cat >/dev/null; exit 0; fi\n'
+        'if [ "${1:-}" = "-m" ]; then exit 1; fi\n'
+        'if [ "${1:-}" = "scripts/v2_scoreboard.py" ]; then\n'
+        "  echo 'v2 scoreboard mock ok'; exit 0\n"
+        "fi\n"
+        'if [ "${1:-}" = "-c" ]; then exit 0; fi\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    fake_df = fake_bin / "df"
+    fake_df.write_text(
+        "#!/bin/bash\n"
+        "printf 'Filesystem 1K-blocks Used Available Use%% Mounted on\\n'\n"
+        "printf '/dev/mock 100 10 90 10%% /mock\\n'\n",
+        encoding="utf-8",
+    )
+    for executable in (fake_grep, fake_python, fake_df):
+        executable.chmod(0o755)
+
+    result = subprocess.run(
+        ["bash", str(scripts / "heartbeat.sh")],
+        cwd=repo,
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "PRELUDE_BACKUP_DIR": str(backup),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    log = (output / "cron_heartbeat.log").read_text(encoding="utf-8")
+
+    assert result.returncode == 0
+    assert (
+        "paper_ledger.csv row count probe FAIL "
+        "(exit=2; output='7')"
+    ) in log
+    assert "paper_ledger.csv: 어제" not in log
 
 
 def test_heartbeat_uses_canonical_policy_triplet_validator():
@@ -1842,7 +1998,27 @@ def test_heartbeat_uses_canonical_policy_triplet_validator():
     assert "from ops.policy_competition import load_policy_artifact" in heartbeat
     assert "require_exact_asof=True" in heartbeat
     assert "require_current=True" in heartbeat
-    assert "policy_competition provenance FAIL" in heartbeat
+    assert "policy_competition provenance probe FAIL" in heartbeat
+
+
+def test_heartbeat_policy_and_snapshot_probes_use_exit_code_contracts():
+    heartbeat = Path("scripts/heartbeat.sh").read_text()
+    policy_probe = heartbeat.split(
+        "# 2b) policy competition",
+        1,
+    )[1].split("# 2c) ledger CSV", 1)[0]
+    snapshot_probe = heartbeat.split(
+        "# 2d) 단일 snapshot",
+        1,
+    )[1].split("# 3) disk", 1)[0]
+
+    for probe in (policy_probe, snapshot_probe):
+        assert 'if python - >>"$LOG" 2>&1 <<\'PYEOF\'' in probe
+        assert "=$(python -" not in probe
+        assert 'print("ok")' not in probe
+
+    assert "raise SystemExit(1)" in policy_probe
+    assert "raise SystemExit(1)" in snapshot_probe
 
 
 def test_heartbeat_uses_stable_strict_json_for_v2_and_score_artifacts():
@@ -1864,12 +2040,14 @@ def test_heartbeat_uses_stable_strict_json_for_v2_and_score_artifacts():
         ("sqlite", "upbit_d1.db integrity probe FAIL (exit=7): ok"),
         (
             "policy",
-            "policy_competition provenance probe FAIL (exit=7): ok",
+            "policy_competition provenance probe FAIL "
+            "(exit=7; details logged)",
         ),
         ("csv", "ledger CSV 스키마 probe FAIL (exit=7): ok"),
         (
             "snapshot",
-            "recommend snapshot chain probe FAIL (exit=7): ok",
+            "recommend snapshot chain probe FAIL "
+            "(exit=7; details logged)",
         ),
     ],
 )
@@ -1906,13 +2084,19 @@ if [ "$1" = "-" ]; then
     echo ok
     case "$FAIL_PROBE" in
         policy)
-            [[ "$content" == *load_policy_artifact* ]] && exit 7
+            if [[ "$content" == *load_policy_artifact* ]]; then
+                echo "policy probe diagnostic" >&2
+                exit 7
+            fi
             ;;
         csv)
             [[ "$content" == *"REQUIRED ="* ]] && exit 7
             ;;
         snapshot)
-            [[ "$content" == *"today's snapshot missing"* ]] && exit 7
+            if [[ "$content" == *"today's snapshot missing"* ]]; then
+                echo "snapshot probe diagnostic" >&2
+                exit 7
+            fi
             ;;
     esac
     exit 0
@@ -1963,6 +2147,8 @@ exit 0
 
     assert result.returncode == 0
     assert expected_log in log
+    if probe in {"policy", "snapshot"}:
+        assert f"{probe} probe diagnostic" in log
     assert "[alert sent]" in log
 
 

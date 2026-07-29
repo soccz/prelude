@@ -65,19 +65,48 @@ for ledger in "$PROJ_ROOT/output/paper_ledger.csv" "$PROJ_ROOT/output/paper_ledg
     if [ "$name" = "paper_ledger_preopen.csv" ]; then
         shadow="$PROJ_ROOT/output/shadow_ledger_preopen.csv"
         if [ -f "$shadow" ]; then
-            shadow_n=$(grep -c "^$YESTERDAY," "$shadow" 2>/dev/null || true)
-            echo "  $name: DEMOTED — shadow row $shadow_n 개" >> "$LOG"
+            shadow_n=""
+            if shadow_n=$(grep -c "^$YESTERDAY," "$shadow" 2>>"$LOG"); then
+                shadow_rc=0
+            else
+                shadow_rc=$?
+            fi
+            if [ "$shadow_rc" -le 1 ] && \
+               [[ "$shadow_n" =~ ^[0-9]+$ ]]; then
+                echo "  $name: DEMOTED — shadow row $shadow_n 개" >> "$LOG"
+            else
+                WARN "$name shadow row count probe FAIL (exit=$shadow_rc; output='${shadow_n:-empty}')"
+            fi
         else
             echo "  $name: DEMOTED — shadow ledger 미생성" >> "$LOG"
         fi
         continue
     fi
-    n=$(grep -c "^$YESTERDAY," "$ledger" 2>/dev/null || true)
+    n=""
+    if n=$(grep -c "^$YESTERDAY," "$ledger" 2>>"$LOG"); then
+        grep_rc=0
+    else
+        grep_rc=$?
+    fi
+    # grep rc=1은 정상 no-match(count=0), rc>=2는 일부 숫자를 출력했어도 실패.
+    if [ "$grep_rc" -gt 1 ] || ! [[ "$n" =~ ^[0-9]+$ ]]; then
+        WARN "$name row count probe FAIL (exit=$grep_rc; output='${n:-empty}')"
+        continue
+    fi
     echo "  $name: 어제 ($YESTERDAY) row $n 개" >> "$LOG"
     # bear silence 라 0 정상. 7일 연속 0 이면 alert.
     if [ "$n" = "0" ]; then
         week_ago=$(date -d "7 days ago" +%Y-%m-%d)
-        n_week=$(awk -F',' -v d="$week_ago" -v t="$YESTERDAY" 'NR>1 && $1>=d && $1<=t' "$ledger" | wc -l)
+        n_week=""
+        if ! n_week=$(awk -F',' -v d="$week_ago" -v t="$YESTERDAY" \
+            'NR>1 && $1>=d && $1<=t' "$ledger" | wc -l); then
+            WARN "$name 7-day row count probe FAIL"
+            continue
+        fi
+        if ! [[ "$n_week" =~ ^[0-9]+$ ]]; then
+            WARN "$name 7-day row count probe invalid: '${n_week:-empty}'"
+            continue
+        fi
         echo "    7일 누적 $n_week 개" >> "$LOG"
         if [ "$n_week" = "0" ]; then
             WARN "$name 7일 연속 row 0 (bear silence 또는 system fail)"
@@ -87,8 +116,11 @@ done
 
 # 2) DB integrity (빠른 점검)
 for DB in "$PROJ_ROOT/data/upbit_d1.db" "$PROJ_ROOT/data/policy_competition.db"; do
-    [ -f "$DB" ] || continue
     db_name=$(basename "$DB")
+    if [ ! -f "$DB" ]; then
+        WARN "$db_name 파일 없음"
+        continue
+    fi
     result=""
     if result=$(sqlite3 "$DB" "PRAGMA integrity_check(1);" 2>>"$LOG"); then
         if [ "$result" != "ok" ]; then
@@ -105,28 +137,32 @@ done
 # 2b) policy competition triplet — JSON/CSV/SQLite/input provenance 가 모두 같아야 함.
 POLICY_JSON="$PROJ_ROOT/output/policy_competition_summary.json"
 if [ -f "$POLICY_JSON" ]; then
-    json_result=""
-    if json_result=$(python - 2>>"$LOG" <<'PYEOF'
+    if python - >>"$LOG" 2>&1 <<'PYEOF'
+import sys
+
 import pandas as pd
 
 from ops.policy_competition import load_policy_artifact
 
-load_policy_artifact(
-    asof=pd.Timestamp.now(tz="Asia/Seoul"),
-    require_exact_asof=True,
-    require_current=True,
-)
-print("ok")
+try:
+    load_policy_artifact(
+        asof=pd.Timestamp.now(tz="Asia/Seoul"),
+        require_exact_asof=True,
+        require_current=True,
+    )
+except Exception as exc:
+    print(
+        "policy_competition provenance invalid "
+        f"({type(exc).__name__}): {exc}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
 PYEOF
-); then
-    if [ "$json_result" != "ok" ]; then
-        WARN "policy_competition provenance FAIL: ${json_result:-empty output}"
-    else
+    then
         echo "  policy_competition JSON/CSV/SQLite provenance ok" >> "$LOG"
-    fi
     else
         probe_rc=$?
-        WARN "policy_competition provenance probe FAIL (exit=$probe_rc): ${json_result:-empty output}"
+        WARN "policy_competition provenance probe FAIL (exit=$probe_rc; details logged)"
     fi
 else
     WARN "policy_competition_summary.json 없음"
@@ -176,8 +212,8 @@ fi
 
 # 2d) 단일 snapshot → delivery receipt → 전유니버스 label/evaluation 연쇄.
 #     snapshot이 생긴 날에만 요구하므로 도입 첫날·정상 무신호 과거에는 오탐하지 않는다.
-snapshot_result=""
-if snapshot_result=$(python - <<'PYEOF' 2>>"$LOG"
+if python - >>"$LOG" 2>&1 <<'PYEOF'
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -273,17 +309,15 @@ if yesterday_snapshots:
     except Exception as exc:
         bad.append(f"score evaluation invalid ({type(exc).__name__})")
 
-print("; ".join(bad) if bad else "ok")
+if bad:
+    print("; ".join(bad), file=sys.stderr)
+    raise SystemExit(1)
 PYEOF
-); then
-    if [ "$snapshot_result" != "ok" ]; then
-        WARN "recommend snapshot chain: ${snapshot_result:-empty output}"
-    else
-        echo "  recommend snapshot chain ok" >> "$LOG"
-    fi
+then
+    echo "  recommend snapshot chain ok" >> "$LOG"
 else
     probe_rc=$?
-    WARN "recommend snapshot chain probe FAIL (exit=$probe_rc): ${snapshot_result:-empty output}"
+    WARN "recommend snapshot chain probe FAIL (exit=$probe_rc; details logged)"
 fi
 
 # 3) disk 사용량 — 검사 자체의 실패/비정상 출력도 silent skip하지 않는다.
@@ -298,6 +332,29 @@ if USAGE=$(df /home/soccz/22tb 2>>"$LOG" | awk 'NR==2 {print $5}' | tr -d '%'); 
     fi
 else
     WARN "disk usage 검사 실행 실패"
+fi
+
+# 3a) 오늘 04:00 evidence backup의 terminal manifest와 실제 archive/checksum
+#     SHA-256 결합을 검증한다. 어제 산출물만 남은 경우 오늘 백업 성공으로
+#     오인하지 않는다.
+BACKUP_DIR="${PRELUDE_BACKUP_DIR:-/home/soccz/22tb/backup/prelude_db}"
+BACKUP_DATE=$(date +%Y%m%d)
+# backup 자체 3000s 상한 + Persistent timer 지터(최대 수분)를 흡수하고,
+# heartbeat unit 3900s 안에는 진단/경보 시간을 남긴다.
+BACKUP_WAIT_SECONDS="${PRELUDE_BACKUP_WAIT_SECONDS:-3300}"
+if [ -d "$BACKUP_DIR" ]; then
+    if python -m ops.backup_manifest \
+        --backup-dir "$BACKUP_DIR" \
+        --date "$BACKUP_DATE" \
+        --wait-seconds "$BACKUP_WAIT_SECONDS" \
+        --poll-seconds 10 >>"$LOG" 2>&1; then
+        echo "  backup manifest/archive/checksum provenance ok" >> "$LOG"
+    else
+        backup_probe_rc=$?
+        WARN "backup provenance FAIL (date=$BACKUP_DATE exit=$backup_probe_rc; details logged)"
+    fi
+else
+    WARN "backup 디렉토리 없음: $BACKUP_DIR"
 fi
 
 # 3b) close no-decision markers — 무결정일(발송 파이프 사망일) 가시화.

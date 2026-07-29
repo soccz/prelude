@@ -11,6 +11,12 @@ S04 는 setup 이 아니라 BTC context (regime) — get_btc_context() 사용.
 """
 from __future__ import annotations
 
+import logging
+from collections.abc import Iterable, Mapping
+from typing import Any
+
+log = logging.getLogger(__name__)
+
 
 # ============================================================================
 # Setup definitions
@@ -67,16 +73,88 @@ SETUP_LIBRARY: dict[str, dict] = {
 }
 
 
-def detect_setups(row) -> list[str]:
-    """Apply all setup rules to a single panel row, return list of fired setup IDs."""
+def _detect_setups(
+    row: Any,
+    setup_library: Mapping[str, Mapping[str, Any]],
+    error_counts: dict[str, int] | None = None,
+    first_errors: dict[str, Exception] | None = None,
+) -> list[str]:
     fired = []
-    for setup_id, sdef in SETUP_LIBRARY.items():
+    for setup_id, sdef in setup_library.items():
         try:
             if sdef["detect_fn"](row):
                 fired.append(setup_id)
-        except Exception:
+        except Exception as exc:
+            # 단일 행 API의 기존 관용 계약은 유지한다. 배치 실행자는 로컬
+            # 카운터를 넘겨 일부 오류를 진단하고 전량 오류를 fail-loud 한다.
+            if error_counts is not None:
+                error_counts[setup_id] += 1
+            if first_errors is not None:
+                first_errors.setdefault(setup_id, exc)
             continue
     return fired
+
+
+def detect_setups(row: Any) -> list[str]:
+    """Apply all setup rules to one row, preserving the legacy permissive API."""
+    return _detect_setups(row, SETUP_LIBRARY)
+
+
+def evaluate_setup_rows(
+    rows: Iterable[Any],
+    *,
+    setup_library: Mapping[str, Mapping[str, Any]] | None = None,
+    log_partial_errors: bool = False,
+) -> tuple[list[list[str]], dict[str, int]]:
+    """Evaluate one execution batch and return matches plus local error counts.
+
+    A rule that raises for only part of the batch remains non-fatal so healthy
+    rows keep their existing setup matches. A rule that raises for every
+    evaluated row is a broken rule/schema contract, not a valid zero-fire
+    signal, and therefore fails the execution.
+    """
+    library = SETUP_LIBRARY if setup_library is None else setup_library
+    error_counts = {setup_id: 0 for setup_id in library}
+    first_errors: dict[str, Exception] = {}
+    matched = [
+        _detect_setups(row, library, error_counts, first_errors)
+        for row in rows
+    ]
+    row_count = len(matched)
+
+    failed_all = [
+        setup_id
+        for setup_id, count in error_counts.items()
+        if row_count > 0 and count == row_count
+    ]
+    if failed_all:
+        details = "; ".join(
+            (
+                f"{setup_id}={error_counts[setup_id]}/{row_count} "
+                f"({type(first_errors[setup_id]).__name__}: "
+                f"{first_errors[setup_id]})"
+            )
+            for setup_id in failed_all
+        )
+        raise RuntimeError(
+            "setup rule failed for every evaluated row: " + details
+        )
+
+    if log_partial_errors:
+        for setup_id, count in error_counts.items():
+            if count == 0:
+                continue
+            exc = first_errors[setup_id]
+            log.warning(
+                "setup rule %s failed for %d/%d rows (%s: %s)",
+                setup_id,
+                count,
+                row_count,
+                type(exc).__name__,
+                exc,
+            )
+
+    return matched, error_counts
 
 
 def get_setup_summary(setup_ids: list[str]) -> str:

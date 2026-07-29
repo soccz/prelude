@@ -31,7 +31,7 @@ from pathlib import Path
 import pandas as pd
 import xgboost as xgb
 
-from signals.setups import SETUP_LIBRARY, detect_setups
+from signals.setups import SETUP_LIBRARY, evaluate_setup_rows
 
 logger = logging.getLogger("dist_engine")
 
@@ -100,8 +100,13 @@ class DistributionEngine:
         if len(sub) == 0:
             return pd.DataFrame()
 
-        # setup detection (per row)
-        sub["setups"] = sub.apply(detect_setups, axis=1)
+        # setup detection (per execution batch). A rule that raises for every
+        # row is a broken schema/rule contract, not a legitimate zero-fire day.
+        setup_matches, _ = evaluate_setup_rows(
+            (row for _, row in sub.iterrows()),
+            setup_library=self.setup_library,
+        )
+        sub["setups"] = setup_matches
 
         # primary setups (S01/S02/S03), exclude S04 (context only)
         sub["primary_setups"] = sub["setups"].apply(
@@ -134,14 +139,19 @@ class DistributionEngine:
         else:
             sub_filt = sub.copy()
 
-        sub_filt["setups"] = sub_filt.apply(detect_setups, axis=1)
+        setup_matches, setup_error_counts = evaluate_setup_rows(
+            (row for _, row in sub_filt.iterrows()),
+            setup_library=self.setup_library,
+            log_partial_errors=True,
+        )
+        sub_filt["setups"] = setup_matches
         sub_filt["primary"] = sub_filt["setups"].apply(
             lambda lst: [s for s in lst if s != "S04"]
         )
 
         setup_counts = {
             sid: int(sub_filt["setups"].apply(lambda ids: sid in ids).sum())
-            for sid in SETUP_LIBRARY
+            for sid in self.setup_library
         }
 
         return {
@@ -149,6 +159,7 @@ class DistributionEngine:
             "n_universe_filtered": len(sub_filt),
             "n_with_any_primary_setup": int((sub_filt["primary"].apply(len) > 0).sum()),
             "setup_fire_counts": setup_counts,
+            "setup_error_counts": setup_error_counts,
             "p_h2_p99_pct": float(sub_filt.get("p_h2_hit_3_4h", pd.Series([0])).quantile(0.99) * 100)
                              if "p_h2_hit_3_4h" in sub_filt.columns else 0,
             "p_h5_p99_pct": float(sub_filt.get("p_h5_tail_20", pd.Series([0])).quantile(0.99) * 100)

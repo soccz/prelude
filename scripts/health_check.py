@@ -988,18 +988,6 @@ def main():
         if not ok:
             issues.append(msg)
 
-    # Risk
-    ok, msg = check_risk_state()
-    print(f"  {'OK' if ok else 'WARN'}: {msg}")
-    if not ok:
-        issues.append(msg)
-
-    # Drift
-    ok, msg = check_drift_state()
-    print(f"  {'OK' if ok else 'WARN'}: {msg}")
-    if not ok:
-        issues.append(msg)
-
     if issues:
         msg = "⚠️ prelude health issues:\n" + "\n".join(f"  • {i}" for i in issues)
         if not args.no_telegram:
