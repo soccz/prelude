@@ -592,7 +592,13 @@ def test_post_cutoff_only_frames_cannot_make_capture_complete(
     monkeypatch,
     tmp_path,
 ):
-    """recv polling lag 뒤 첫 frame이 와도 cutoff 이전 evidence 0이면 FAIL."""
+    """recv polling lag 뒤 첫 frame이 와도 cutoff 이전 evidence 0이면 FAIL.
+
+    타이밍 계약: 수신 스레드가 첫 recv에 진입한 뒤에 cutoff(duration)가
+    지나야 지연 frame이 수신될 수 있다. duration이 스레드 기동 지터보다
+    짧으면 recv 진입 전에 stop이 걸려 event_count=0으로 flake — duration을
+    지터 대비 넉넉히, first_message_delay는 duration보다 크게 유지할 것.
+    """
     monkeypatch.setattr(
         collector,
         "clock_sync_status",
@@ -600,14 +606,14 @@ def test_post_cutoff_only_frames_cannot_make_capture_complete(
     )
     connector = FakeConnector(
         messages_per_channel=1,
-        first_message_delay=0.12,
+        first_message_delay=1.2,
     )
     config = collector.CaptureConfig(
         markets=("KRW-BTC",),
         output_root=tmp_path / "raw",
-        duration_seconds=0.03,
+        duration_seconds=0.5,
         required_warmup_seconds=0,
-        max_wait_seconds=1,
+        max_wait_seconds=3,
         queue_max=10,
         asof=date(2026, 7, 26),
     )

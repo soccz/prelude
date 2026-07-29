@@ -849,6 +849,7 @@ def test_invalid_cli_date_is_rejected():
 def test_nesting_violation_row_is_labeled_complete_with_diagnostic(
     tmp_path,
     caplog,
+    monkeypatch,
 ):
     # 독립 head 의 포함관계 위반(유니버스 꼬리)은 진단 경고일 뿐, 전 유니버스
     # forward 라벨 축적을 죽이지 않는다 (2026-07-27 장애 회귀 방지).
@@ -894,6 +895,9 @@ def test_nesting_violation_row_is_labeled_complete_with_diagnostic(
     )
     bars = [(100.0, 101.0, 99.0, 100.0) for _ in range(96)]
 
+    import signals.recommend_score_labels as label_module
+
+    monkeypatch.setattr(label_module.log, "propagate", True)
     with caplog.at_level(
         "WARNING",
         logger="signals.recommend_score_labels",

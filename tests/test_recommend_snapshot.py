@@ -658,6 +658,7 @@ def test_v2_snapshot_creation_fails_closed_on_degraded_score_vector(
 def test_snapshot_tolerates_probability_nesting_violation_as_diagnostic(
     tmp_path,
     caplog,
+    monkeypatch,
 ):
     def scorer(asof, **kwargs):
         result = _score_result(asof, kwargs["slot"], kwargs["ranking"])
@@ -667,6 +668,9 @@ def test_snapshot_tolerates_probability_nesting_violation_as_diagnostic(
         degraded["pump_prob_pct"] = "20.0%"
         return result
 
+    # 모듈 로거는 운영에서 stderr 전용(propagate=False — NUL/프로브 오염 방지).
+    # caplog 는 root 전파에 의존하므로 테스트에서만 전파를 복원한다.
+    monkeypatch.setattr(recommend_snapshot.log, "propagate", True)
     with caplog.at_level("WARNING", logger="signals.recommend_snapshot"):
         snapshot = get_or_create_recommend_snapshot(
             "2026-07-25",
