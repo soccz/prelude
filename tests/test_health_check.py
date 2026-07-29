@@ -718,6 +718,12 @@ def test_open_freshness_uses_pit_top_set_and_reports_non_candidates(monkeypatch)
 def test_open_freshness_fails_when_pit_candidate_exact_row_is_missing(
     monkeypatch,
 ):
+    # 업스트림엔 봉이 있는데 DB에 없다 = 진짜 수집 갭 → 종전대로 fail.
+    monkeypatch.setattr(
+        health_check,
+        "_upstream_candle_exists",
+        lambda market, required_at, db_name: True,
+    )
     now = datetime(2026, 7, 26, 9, 5)
     d1 = "data/upbit_d1.db"
     _stub_signal_inputs(
@@ -995,3 +1001,127 @@ def test_single_freshness_missing_db_is_read_only(tmp_path):
     assert "read-only freshness check failed" in message
     assert not missing.exists()
     assert not missing.parent.exists()
+
+
+def test_missing_candidate_with_upstream_absent_is_no_trade_tolerated(
+    monkeypatch,
+):
+    # 업스트림에도 봉이 없다 = 그 경계에 거래가 없던 얇은 코인 — 구조적 관용.
+    # 코인 1개의 무거래가 발송 전체를 죽이던 2026-07-29 가용성 회귀 방지.
+    probed = []
+
+    def absent(market, required_at, db_name):
+        probed.append((market, db_name))
+        return False
+
+    monkeypatch.setattr(health_check, "_upstream_candle_exists", absent)
+    now = datetime(2026, 7, 26, 9, 5)
+    d1 = "data/upbit_d1.db"
+    _stub_signal_inputs(
+        monkeypatch,
+        quote_values={"KRW-A": 300, "KRW-B": 200},
+        history_counts={"KRW-A": 100, "KRW-B": 100},
+        ranges_by_db={
+            d1: {
+                "KRW-A": (datetime(2025, 1, 1, 9), datetime(2026, 7, 26, 9)),
+                "KRW-B": (datetime(2025, 1, 1, 9), datetime(2026, 7, 25, 9)),
+            }
+        },
+        exact_by_db_and_timestamp={
+            (d1, "2026-07-26 09:00:00"): {"KRW-A"},
+        },
+    )
+
+    ok, message = check_universe_coverage(
+        [(d1, 30)],
+        live_markets=["KRW-A", "KRW-B"],
+        now=now,
+        channel="recommend",
+        top_n=2,
+    )
+
+    assert ok is True
+    assert probed == [("KRW-B", "upbit_d1.db")]
+    assert "no_trade_confirmed=1[KRW-B]" in message
+    assert "missing=0[none]" in message
+    assert "exact 1/1" in message
+
+
+def test_missing_candidate_with_unconfirmable_upstream_fails_closed(
+    monkeypatch,
+):
+    def unconfirmable(market, required_at, db_name):
+        raise RuntimeError("probe failed")
+
+    monkeypatch.setattr(
+        health_check,
+        "_upstream_candle_exists",
+        unconfirmable,
+    )
+    now = datetime(2026, 7, 26, 9, 5)
+    d1 = "data/upbit_d1.db"
+    _stub_signal_inputs(
+        monkeypatch,
+        quote_values={"KRW-A": 300, "KRW-B": 200},
+        history_counts={"KRW-A": 100, "KRW-B": 100},
+        ranges_by_db={
+            d1: {
+                "KRW-A": (datetime(2025, 1, 1, 9), datetime(2026, 7, 26, 9)),
+                "KRW-B": (datetime(2025, 1, 1, 9), datetime(2026, 7, 25, 9)),
+            }
+        },
+        exact_by_db_and_timestamp={
+            (d1, "2026-07-26 09:00:00"): {"KRW-A"},
+        },
+    )
+
+    ok, message = check_universe_coverage(
+        [(d1, 30)],
+        live_markets=["KRW-A", "KRW-B"],
+        now=now,
+        channel="recommend",
+        top_n=2,
+    )
+
+    assert ok is False
+    assert "missing=1[KRW-B]" in message
+
+
+def test_mass_missing_skips_probes_and_fails(monkeypatch):
+    # 대량 결측(>5)은 계통 장애 — 업스트림 확인 없이 전량 fail-closed.
+    def must_not_probe(market, required_at, db_name):
+        raise AssertionError("probe must not run for mass missing")
+
+    monkeypatch.setattr(
+        health_check,
+        "_upstream_candle_exists",
+        must_not_probe,
+    )
+    now = datetime(2026, 7, 26, 9, 5)
+    d1 = "data/upbit_d1.db"
+    markets = [f"KRW-M{i}" for i in range(8)]
+    _stub_signal_inputs(
+        monkeypatch,
+        quote_values={m: 300 - i for i, m in enumerate(markets)},
+        history_counts={m: 100 for m in markets},
+        ranges_by_db={
+            d1: {
+                m: (datetime(2025, 1, 1, 9), datetime(2026, 7, 25, 9))
+                for m in markets
+            }
+        },
+        exact_by_db_and_timestamp={
+            (d1, "2026-07-26 09:00:00"): set(),
+        },
+    )
+
+    ok, message = check_universe_coverage(
+        [(d1, 30)],
+        live_markets=markets,
+        now=now,
+        channel="recommend",
+        top_n=8,
+    )
+
+    assert ok is False
+    assert "missing=8[" in message

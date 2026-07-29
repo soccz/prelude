@@ -1062,7 +1062,20 @@ def validate_close_input(
     return "close"
 
 
+def _force_stderr_logging() -> None:
+    """NUL 레코드 프로토콜 절대 방어 — 어떤 모듈이 root logging 을 stdout 으로
+    구성해 두었더라도 이 프로세스에서는 stderr 로 강제한다."""
+    root = logging.getLogger()
+    for handler in list(root.handlers):
+        stream = getattr(handler, "stream", None)
+        if stream is sys.stdout:
+            handler.setStream(sys.stderr)
+    if not root.handlers:
+        logging.basicConfig(stream=sys.stderr)
+
+
 def main() -> int:
+    _force_stderr_logging()
     parser = argparse.ArgumentParser(
         description="Validate immutable daily decision evidence before ledger close"
     )

@@ -18,6 +18,7 @@ import platform
 import re
 import sqlite3
 import subprocess
+import sys
 import tempfile
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
@@ -43,6 +44,16 @@ LEGACY_SNAPSHOT_SCHEMA_VERSION = "recommend_snapshot.v1"
 SNAPSHOT_SCHEMA_VERSION = "recommend_snapshot.v2"
 
 log = logging.getLogger(__name__)
+# 진단 경고가 root logger 를 타고 stdout 으로 새면 NUL 레코드 프로토콜·헬스
+# 프로브 캡처를 오염시킨다 (2026-07-29 close 3채널·heartbeat 도배 회귀).
+# 이 모듈의 로그는 stderr 고정 + 전파 차단.
+if not log.handlers:
+    _stderr_handler = logging.StreamHandler(sys.stderr)
+    _stderr_handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    )
+    log.addHandler(_stderr_handler)
+    log.propagate = False
 SUPPORTED_SNAPSHOT_SCHEMA_VERSIONS = frozenset(
     {LEGACY_SNAPSHOT_SCHEMA_VERSION, SNAPSHOT_SCHEMA_VERSION}
 )

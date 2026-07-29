@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import sys
 import math
 import os
 import re
@@ -78,6 +79,16 @@ _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _MARKET_RE = re.compile(r"KRW-[A-Z0-9]+")
 
 log = logging.getLogger(__name__)
+# 진단 경고가 root logger 를 타고 stdout 으로 새면 NUL 레코드 프로토콜·헬스
+# 프로브 캡처를 오염시킨다 (2026-07-29 close 3채널·heartbeat 도배 회귀).
+# 이 모듈의 로그는 stderr 고정 + 전파 차단.
+if not log.handlers:
+    _stderr_handler = logging.StreamHandler(sys.stderr)
+    _stderr_handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    )
+    log.addHandler(_stderr_handler)
+    log.propagate = False
 _SNAPSHOT_ID_RE = re.compile(r"recommend-[0-9a-f]{20}")
 _PERCENT_RE = re.compile(r"(?:100|[0-9]{1,2})\.[0-9]%")
 _DISPLAY_PROBABILITY_TOLERANCE = 5.5e-4

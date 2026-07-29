@@ -650,6 +650,65 @@ def check_log_age(log_path: str, max_age_hours: int = 26) -> tuple[bool, str]:
     return True, f"{log_path}: {age.total_seconds()/3600:.1f}h ago"
 
 
+# 결측 top100 시장의 업스트림 확인 상한 (초기값 §2.5) — 초과는 계통 장애로
+# 간주해 관용 없이 fail. 무거래(구조적)와 수집 갭을 구분하기 위한 장치다:
+# 얇은 코인이 해당 경계에 거래가 없어 봉 자체가 없는 날, 코인 1개가 발송
+# 전체를 죽이던 2026-07-29 가용성 회귀의 수리 (v2 not_listed 와 같은 원칙).
+MAX_MISSING_UPSTREAM_PROBES = 5
+_UPSTREAM_INTERVALS = {
+    "upbit_d1.db": ("day", timedelta(days=1)),
+    "upbit_15m.db": ("minute15", timedelta(minutes=15)),
+    "upbit_4h.db": ("minute240", timedelta(minutes=240)),
+}
+
+
+def _upstream_candle_exists(
+    market: str,
+    required_at: datetime,
+    db_name: str,
+) -> bool:
+    """업스트림(Upbit)에 required_at 봉이 실제로 존재하는지 확인.
+
+    True = 업스트림엔 있는데 DB에 없다 → 진짜 수집 갭 (fail 유지 근거).
+    False = 업스트림에도 없다 → 그 경계에 거래가 없었던 것 (구조적 관용).
+    확인 자체가 안 되면 예외 → 호출부가 fail-closed 로 처리한다.
+    """
+    import pyupbit
+
+    from data.collector_d1 import _is_confirmed_empty_page
+
+    interval, period = _UPSTREAM_INTERVALS[db_name]
+    api_to = (required_at + period) - timedelta(hours=9)  # KST wall → UTC naive
+    last_error: Exception | None = None
+    for _attempt in range(3):
+        try:
+            df = pyupbit.get_ohlcv(
+                market,
+                interval=interval,
+                to=api_to.strftime("%Y%m%d %H%M%S"),
+                count=1,
+            )
+        except Exception as exc:  # noqa: BLE001 — 재시도 후 fail-closed
+            last_error = exc
+            continue
+        if df is not None and len(df):
+            latest = df.index[-1].to_pydatetime().replace(tzinfo=None)
+            return latest >= required_at
+        # None/빈 응답은 pyupbit 가 오류를 삼킨 것일 수 있다 — 수집기와 동일한
+        # REST 이중확인으로 '진짜 빈 구간'일 때만 부재로 인정한다.
+        if _is_confirmed_empty_page(
+            market,
+            required_at + period,
+            1,
+            interval,
+        ):
+            return False
+    raise RuntimeError(
+        f"upstream candle probe unconfirmed: {market} {db_name} "
+        f"{required_at} ({last_error})"
+    )
+
+
 def check_universe_coverage(
     db_checks: Sequence[tuple[str, float]],
     *,
@@ -771,15 +830,35 @@ def check_universe_coverage(
         if db_name == "upbit_d1.db":
             d1_exact = exact
         missing = sorted(expected - exact)
+        # 결측을 업스트림 확인으로 이분한다: 업스트림에도 봉이 없으면 그 경계에
+        # 거래가 없던 것(구조적 — 관용·보고), 업스트림엔 있는데 DB에 없으면
+        # 진짜 수집 갭(fail 유지). 확인 불가/대량 결측은 종전대로 전량 fail.
+        no_trade_tolerated: list[str] = []
+        if missing and len(missing) <= MAX_MISSING_UPSTREAM_PROBES:
+            gap_missing: list[str] = []
+            for market in missing:
+                try:
+                    if _upstream_candle_exists(market, required_at, db_name):
+                        gap_missing.append(market)
+                    else:
+                        no_trade_tolerated.append(market)
+                except Exception:
+                    gap_missing.append(market)
+            missing = gap_missing
+        effective_expected = expected - set(no_trade_tolerated)
         future: list[str] = []
-        exact_required = sorted(expected & exact)
+        exact_required = sorted(effective_expected & exact)
         for market in sorted(expected & stored):
             latest = ranges[market][1]
             latest_wall = _wall_clock_datetime(latest)
             if latest_wall > max_allowed_start:
                 future.append(market)
 
-        ratio = len(exact_required) / len(expected)
+        ratio = (
+            len(exact_required) / len(effective_expected)
+            if effective_expected
+            else 1.0
+        )
         inactive_retained = len(stored - expected)
         db_ok = (
             ratio + 1e-12 >= min_coverage_ratio
@@ -788,9 +867,10 @@ def check_universe_coverage(
         )
         all_ok = all_ok and db_ok
         details.append(
-            f"{db_name}=exact {len(exact_required)}/{len(expected)} "
+            f"{db_name}=exact {len(exact_required)}/{len(effective_expected)} "
             f"({ratio:.2%}) expected_{boundary_name}={_timestamp_text(required_at)} "
             f"missing={_identity_summary(missing)} "
+            f"no_trade_confirmed={_identity_summary(no_trade_tolerated)} "
             f"future={_identity_summary(future)} "
             f"inactive_retained={inactive_retained}"
         )

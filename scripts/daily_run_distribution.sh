@@ -187,6 +187,9 @@ if [ "$RECOMMEND_HEALTH_OK" -eq 1 ]; then
     else
         record_critical_failure "$?" "PUMP v2 attempted send/ledger"
     fi
+else
+    # fail-loud: 침묵 스킵 금지 — health gate 연쇄로 v2 가 못 나간 날을 기록
+    echo "  [skip] PUMP v2 — recommend health gate fail 로 후보 생산 불가" >> "$LOG"
 fi
 
 # 1h/15m incremental update 는 별도 research cron 으로 분리 (Phase B/C 용, 운영 critical X)
