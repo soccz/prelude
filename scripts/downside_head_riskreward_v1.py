@@ -42,7 +42,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -95,9 +94,6 @@ CAL_BUCKETS = 10
 UNIVERSE_TOP = 100
 SURGE_CUT = 3.0
 
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s %(levelname)s %(message)s",
-                    handlers=[logging.StreamHandler(sys.stdout)])
 log = logging.getLogger("downside_rank")
 
 
@@ -113,11 +109,11 @@ def _add_outcome_labels(
     같은 row(day-D) 의 open/high/low/close 로 만든다 → feature(D-1) 와 시점분리."""
     o = g["open"].values
     h = g["high"].values
-    l = g["low"].values
+    low = g["low"].values
     c = g["close"].values
     g = g.copy()
     g["up_high_ret"] = h / (o + EPS) - 1.0     # 진입(open)→장중 최고
-    g["down_low_ret"] = l / (o + EPS) - 1.0    # 진입(open)→장중 최저 (<=0 보통)
+    g["down_low_ret"] = low / (o + EPS) - 1.0  # 진입(open)→장중 최저 (<=0 보통)
     g["eod_ret"] = c / (o + EPS) - 1.0         # 진입(open)→종가
     for name, thr in UP_THRESH.items():
         g[f"lab_{name}"] = (g["up_high_ret"] >= thr).astype(float)
@@ -249,7 +245,8 @@ def walk_forward_heads(panel, feats, label_cols, n_folds, embargo):
         te_end = edges_f[k + 1]
         if te_start >= te_end:
             continue
-        tr_d = set(dates[:tr_end]); te_d = set(dates[te_start:te_end])
+        tr_d = set(dates[:tr_end])
+        te_d = set(dates[te_start:te_end])
         tr = panel[panel["date"].isin(tr_d)].copy()
         te = panel[panel["date"].isin(te_d)].copy()
         if len(tr) < 1000 or len(te) < 100:
@@ -285,8 +282,10 @@ def walk_forward_heads(panel, feats, label_cols, n_folds, embargo):
                                                mean_lr=("lr", "mean"),
                                                med_lr=("lr", "median"))
                     edd = gg["hi"].values
-                    mmap = gg["mean_lr"].to_dict(); medmap = gg["med_lr"].to_dict()
-                    g_base = float(tdf["lr"].mean()); g_med = float(tdf["lr"].median())
+                    mmap = gg["mean_lr"].to_dict()
+                    medmap = gg["med_lr"].to_dict()
+                    g_base = float(tdf["lr"].mean())
+                    g_med = float(tdf["lr"].median())
                     idx = np.clip(np.searchsorted(edd, res["raw_lab_dn_05"].values,
                                                   side="left"), 0, len(edd) - 1)
                     res["exp_downside"] = [mmap.get(int(b), g_base) for b in idx]
@@ -321,8 +320,11 @@ def _downside_metrics(df):
     cvar = float(eod[eod <= q05].mean()) if (eod <= q05).any() else float(q05)
     # day-equal-weight cum/MaxDD/Sortino on EOD net (cost 차감)
     daily = pd.DataFrame({"date": d["date"].values, "r": netc}).groupby("date")["r"].mean().sort_index()
-    mu = daily.mean(); dstd = daily[daily < 0].std(); sd = daily.std()
-    eq = (1 + daily).cumprod(); peak = eq.cummax()
+    mu = daily.mean()
+    dstd = daily[daily < 0].std()
+    sd = daily.std()
+    eq = (1 + daily).cumprod()
+    peak = eq.cummax()
     return dict(
         n=int(len(d)),
         realized_pump10=float((d["up_high_ret"] >= 0.10).mean()),
@@ -353,22 +355,27 @@ def _topk(d, score_col, k):
 
 
 def compare_rankings(oos, k):
-    up = f"p_lab_{UP_ANCHOR}"; dn = f"p_lab_{DN_ANCHOR}"
+    up = f"p_lab_{UP_ANCHOR}"
+    dn = f"p_lab_{DN_ANCHOR}"
     d = oos.dropna(subset=[up, dn]).copy()
     rows = []
     # baseline: upside-only
     base = _topk(d, up, k)
-    b = _downside_metrics(base); b.update(policy="upside_only", k=k, param="-")
+    b = _downside_metrics(base)
+    b.update(policy="upside_only", k=k, param="-")
     rows.append(b)
     # R1 ratio
     d["rr_ratio"] = d[up] / np.maximum(d[dn], 1e-3)
     t = _topk(d, "rr_ratio", k)
-    m = _downside_metrics(t); m.update(policy="R1_ratio", k=k, param="-"); rows.append(m)
+    m = _downside_metrics(t)
+    m.update(policy="R1_ratio", k=k, param="-")
+    rows.append(m)
     # R2 penalized
     for lam in LAMBDA_GRID:
         d["rr_pen"] = d[up] - lam * d[dn]
         t = _topk(d, "rr_pen", k)
-        m = _downside_metrics(t); m.update(policy="R2_penalized", k=k, param=f"lam={lam}")
+        m = _downside_metrics(t)
+        m.update(policy="R2_penalized", k=k, param=f"lam={lam}")
         rows.append(m)
     # R3 gate: downside prob 상위 분위 제외 후 upside 정렬
     for q in GATE_CUT_GRID:
@@ -379,7 +386,8 @@ def compare_rankings(oos, k):
         t = _topk(dd, up, k)
         if len(t) < 20:
             continue
-        m = _downside_metrics(t); m.update(policy="R3_gate", k=k, param=f"qcut={q}")
+        m = _downside_metrics(t)
+        m.update(policy="R3_gate", k=k, param=f"qcut={q}")
         rows.append(m)
     return pd.DataFrame(rows)
 
@@ -422,14 +430,16 @@ def today_scan(panel, feats, label_cols, asof_date):
         log.warning("asof %s not in universe panel", asof_date)
         return pd.DataFrame()
     Xtr = tr[feats].replace([np.inf, -np.inf], np.nan)
-    med = Xtr.median(); Xtr = Xtr.fillna(med).values
+    med = Xtr.median()
+    Xtr = Xtr.fillna(med).values
     Xte = te[feats].replace([np.inf, -np.inf], np.nan).fillna(med).values
     out = te[["market", "date", "regime"]].copy()
     for lc in label_cols:
         y = tr[lc].values
         raw_te, m = _xgb_fit_predict(Xtr, y, Xte)
         if raw_te is None:
-            out[f"p_{lc}"] = float(np.nanmean(y)); continue
+            out[f"p_{lc}"] = float(np.nanmean(y))
+            continue
         raw_tr = m.predict_proba(Xtr)[:, 1]
         ed, hm, base = _oof_bucket_calib(raw_tr, y, CAL_BUCKETS)
         out[f"p_{lc}"] = _apply_calib(raw_te, ed, hm, base)
@@ -442,7 +452,9 @@ def today_scan(panel, feats, label_cols, asof_date):
                                 labels=False, duplicates="drop")
             gg = tdf.groupby("bk").agg(hi=("s", "max"), mean_lr=("lr", "mean"),
                                        med_lr=("lr", "median"))
-            edd = gg["hi"].values; mmap = gg["mean_lr"].to_dict(); medmap = gg["med_lr"].to_dict()
+            edd = gg["hi"].values
+            mmap = gg["mean_lr"].to_dict()
+            medmap = gg["med_lr"].to_dict()
             raw_te_dn = mtmp.predict_proba(Xte)[:, 1]
             idx = np.clip(np.searchsorted(edd, raw_te_dn, side="left"), 0, len(edd) - 1)
             out["exp_downside"] = [mmap.get(int(b), float(tdf["lr"].mean())) for b in idx]
@@ -451,7 +463,8 @@ def today_scan(panel, feats, label_cols, asof_date):
             out["exp_downside"] = float(tr["down_low_ret"].mean())
             out["med_downside"] = float(tr["down_low_ret"].median())
     # risk-reward 점수 (R2 lam=2 anchor — 검증 best 로 갱신될 placeholder)
-    up = f"p_lab_{UP_ANCHOR}"; dn = f"p_lab_{DN_ANCHOR}"
+    up = f"p_lab_{UP_ANCHOR}"
+    dn = f"p_lab_{DN_ANCHOR}"
     out["rr_ratio"] = out[up] / np.maximum(out[dn], 1e-3)
     out["rr_pen_lam2"] = out[up] - 2.0 * out[dn]
     out["upside_only_rank"] = out[up].rank(ascending=False, method="min").astype(int)
@@ -462,7 +475,17 @@ def today_scan(panel, feats, label_cols, asof_date):
 # ============================================================================
 # main
 # ============================================================================
+def _configure_cli_logging() -> None:
+    """Configure stdout logging only for direct CLI execution."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+
+
 def main():
+    _configure_cli_logging()
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit-markets", type=int, default=None)
     ap.add_argument("--asof", type=str, default="2026-05-31")
@@ -492,7 +515,8 @@ def main():
     log.info("=== walk-forward heads (XGB + per-threshold OOF bucket calib) ===")
     oos = walk_forward_heads(panel, feats, label_cols, N_FOLDS, EMBARGO)
     if oos.empty:
-        log.error("no OOS folds — abort"); sys.exit(1)
+        log.error("no OOS folds — abort")
+        sys.exit(1)
     log.info("OOS rows=%d dates %s..%s", len(oos), oos["date"].min(), oos["date"].max())
 
     # ---- calibration reliability ----
@@ -532,7 +556,7 @@ def main():
                      r["cum_eod_net"], r["sortino"])
 
     # ---- OOS picks 산출 (감사용) ----
-    keep = ["market", "date", "fold", "regime"] + [f"p_{l}" for l in label_cols] + \
+    keep = ["market", "date", "fold", "regime"] + [f"p_{label}" for label in label_cols] + \
            ["exp_downside", "med_downside", "up_high_ret", "down_low_ret", "eod_ret"]
     keep = [c for c in keep if c in oos.columns]
     oos[keep].to_csv(OUT / "downside_head_oos_picks_v1.csv", index=False)
@@ -542,7 +566,6 @@ def main():
     scan = today_scan(panel, feats, label_cols, pd.Timestamp(args.asof).date())
     if not scan.empty:
         scan.to_csv(OUT / "downside_head_today_v1.csv", index=False)
-        up = f"p_lab_{UP_ANCHOR}"; dn = f"p_lab_{DN_ANCHOR}"
         log.info("today universe n=%d. top-10 by rr_pen(lam=2):", len(scan))
         for _, r in scan.head(10).iterrows():
             log.info("  %-14s rr=%d(up=%d) P+5=%.3f P+10=%.3f P+15=%.3f P+20=%.3f | "

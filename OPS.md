@@ -90,7 +90,10 @@ sudo bash deploy/install_systemd.sh
 함께 queue되면 `Before=prelude-preopen.service prelude-distribution.service`가
 signal service를 selftest 종료 뒤로 정렬한다. 실패는 먼저 경보하지만 signal
 service를 영구 차단하는 배포 gate는 아니다. 코드 push 자체는 별도 pre-push
-Ruff(변경 Python)+전수 pytest gate가 차단한다.
+Ruff(변경 Python)+전수 pytest gate가 정상 `git push` 경로에서 차단한다.
+이것은 로컬 안전장치라 Git 자체의 의도적 `--no-verify`까지 막지는 못한다.
+원격에서 절대 강제하려면 별도 CI required check와 branch protection이 필요하며,
+현재 저장소에는 그 원격 정책이 구성되어 있지 않다.
 
 **2026-07-29 반영 상태:** 8개 timer를 포함한 저장소 unit과
 `/etc/systemd/system` 설치본을 동기화했다. 설치 후에도 위 `--check-only`를

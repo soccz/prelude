@@ -43,7 +43,8 @@ def _fake_repo(tmp_path: Path) -> tuple[Path, str, dict[str, str], Path]:
     (repo / "guarded.py").write_text("VALUE = 1\n", encoding="utf-8")
     python.write_text(
         "#!/bin/sh\n"
-        "printf 'pytest:%s\\n' \"$*\" >> \"$PREPUSH_CALLS\"\n"
+        "printf 'pytest:%s:guard=%s\\n' "
+        "\"$*\" \"${PRELUDE_FORBID_TELEGRAM:-}\" >> \"$PREPUSH_CALLS\"\n"
         "exit \"${FAKE_PYTEST_RC:-0}\"\n",
         encoding="utf-8",
     )
@@ -71,10 +72,15 @@ def _fake_repo(tmp_path: Path) -> tuple[Path, str, dict[str, str], Path]:
         check=True,
     ).stdout.strip()
     calls = tmp_path / "prepush-calls.log"
+    hook_tmp = tmp_path / "hook-tmp"
+    hook_tmp.mkdir()
     env = {
         **os.environ,
         "PRELUDE_RUFF_BIN": str(ruff),
         "PREPUSH_CALLS": str(calls),
+        # The fake hook must never truncate the outer real pre-push log when
+        # this test itself is running inside that hook.
+        "TMPDIR": str(hook_tmp),
     }
     return repo, head, env, calls
 
@@ -89,25 +95,31 @@ def test_pre_push_hook_is_executable_and_has_both_gates() -> None:
     assert os.access(HOOK, os.X_OK)
     assert "git diff --name-only --diff-filter=ACMR" in text
     assert '"$RUFF_BIN" check "${python_files[@]}"' in text
+    assert "PRELUDE_FORBID_TELEGRAM=1" in text
     assert "venv/bin/python -m pytest -q -p no:cacheprovider" in text
     assert text.index('"$RUFF_BIN" check') < text.index(
         "venv/bin/python -m pytest"
     )
 
 
-def test_pre_push_hook_has_only_explicit_emergency_bypass() -> None:
-    proc = subprocess.run(
-        [str(HOOK), "origin", "unused"],
-        input="",
-        capture_output=True,
-        cwd=PROJECT_ROOT,
-        env={**os.environ, "PRELUDE_SKIP_PREPUSH": "1"},
-        text=True,
-        timeout=10,
+def test_pre_push_hook_has_no_environment_bypass(tmp_path) -> None:
+    repo, head, env, calls = _fake_repo(tmp_path)
+    env["PRELUDE_SKIP_PREPUSH"] = "1"
+    env["FAKE_PYTEST_RC"] = "9"
+
+    proc = _run(
+        [str(repo / "deploy/git-hooks/pre-push"), "origin", "unused"],
+        cwd=repo,
+        env=env,
+        input_text=_push_update(head),
     )
 
-    assert proc.returncode == 0
-    assert "PRELUDE_SKIP_PREPUSH=1" in proc.stderr
+    assert proc.returncode != 0
+    assert "전수 스위트 실패" in proc.stderr
+    assert calls.read_text(encoding="utf-8").splitlines() == [
+        "ruff:check guarded.py",
+        "pytest:-m pytest -q -p no:cacheprovider:guard=1",
+    ]
 
 
 def test_pre_push_hook_parses_as_bash() -> None:
@@ -125,6 +137,7 @@ def test_pre_push_hook_runs_lint_then_full_suite_on_pushed_commit(
     tmp_path,
 ) -> None:
     repo, head, env, calls = _fake_repo(tmp_path)
+    env["PRELUDE_FORBID_TELEGRAM"] = ""
 
     proc = _run(
         [str(repo / "deploy/git-hooks/pre-push"), "origin", "unused"],
@@ -136,7 +149,7 @@ def test_pre_push_hook_runs_lint_then_full_suite_on_pushed_commit(
     assert proc.returncode == 0, proc.stderr
     assert calls.read_text(encoding="utf-8").splitlines() == [
         "ruff:check guarded.py",
-        "pytest:-m pytest -q -p no:cacheprovider",
+        "pytest:-m pytest -q -p no:cacheprovider:guard=1",
     ]
 
 

@@ -26,6 +26,7 @@ LIVE_IMPORT_GRAPH = (
     "scripts.recommend_send",
     "scripts.close_recommend_ledger",
     "scripts.v2_scoreboard",
+    "signals.recommend",
     "signals.recommend_snapshot",
     "signals.recommend_score_labels",
     "notifier.telegram",

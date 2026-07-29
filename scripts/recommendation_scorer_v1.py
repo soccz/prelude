@@ -61,10 +61,6 @@ DB_PATH = "data/upbit_d1.db"
 OUT_DIR = Path("output")
 EPS = 1e-12
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
 log = logging.getLogger("rec_scorer")
 
 REGIMES = ["bull_quiet", "bull_volatile", "bear_quiet", "bear_volatile"]
@@ -347,7 +343,17 @@ def calibration_table(oos: pd.DataFrame, score_col: str, label: str,
 # ============================================================================
 # 6. main
 # ============================================================================
+def _configure_cli_logging() -> None:
+    """Configure stdout logging only for direct CLI execution."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+
+
 def main():
+    _configure_cli_logging()
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit-markets", type=int, default=None)
     ap.add_argument("--universe-top", type=int, default=100)

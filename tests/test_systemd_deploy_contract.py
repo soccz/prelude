@@ -243,6 +243,41 @@ def _run_installer(
     )
 
 
+def _fixture_repo_for_installer(
+    tmp_path: Path,
+    env: dict[str, str],
+) -> Path:
+    repo = tmp_path / "repo-source"
+    runtime_paths = (
+        "deploy/lock_exec.py",
+        "deploy/load_runtime_env.sh",
+        "deploy/run_pipeline_stage.sh",
+        "ops/backup_manifest.py",
+        "ops/runtime_env.py",
+        "scripts/daily_run_distribution.sh",
+        "scripts/daily_close_distribution.sh",
+        "scripts/daily_run_preopen.sh",
+        "scripts/daily_close_preopen.sh",
+        "scripts/publish_dashboard.sh",
+        "scripts/validate_dashboard_assets.py",
+        "scripts/backup_db.sh",
+        "scripts/heartbeat.sh",
+        "scripts/systemd_failure_alert.py",
+    )
+    for relative in (*runtime_paths, *(f"deploy/{unit}" for unit in ALL_UNITS)):
+        source = ROOT / relative
+        target = repo / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes())
+        target.chmod(source.stat().st_mode & 0o777)
+    python = repo / "venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    python.chmod(0o755)
+    env["PRELUDE_INSTALL_REPO"] = str(repo)
+    return repo
+
+
 def test_all_services_pin_kst_network_and_failure_contracts() -> None:
     services = sorted(DEPLOY.glob("prelude-*.service"))
     operational = [path for path in services if "failure-alert@" not in path.name]
@@ -657,6 +692,44 @@ def test_installer_check_accepts_commented_cron_and_supported_timers(
 
     assert result.returncode == 0, result.stderr
     assert "preflight: OK" in result.stdout
+
+
+def test_installer_contract_lists_backup_runtime_dependencies() -> None:
+    source = INSTALLER.read_text(encoding="utf-8")
+    start = source.index("validate_repo_contract() {")
+    end = source.index("\n}\n\nvalidate_installed_contract()", start)
+    contract = source[start:end]
+
+    assert "/usr/bin/timeout" in contract
+    assert "ops/backup_manifest.py" in contract
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_error"),
+    (
+        ("missing", "required runtime missing: ops/backup_manifest.py"),
+        ("symlink", "required runtime must not be a symlink"),
+        ("directory", "required runtime is not a regular file"),
+    ),
+)
+def test_installer_check_rejects_invalid_backup_manifest_runtime(
+    tmp_path: Path,
+    mutation: str,
+    expected_error: str,
+) -> None:
+    env = _fake_install_env(tmp_path)
+    repo = _fixture_repo_for_installer(tmp_path, env)
+    module = repo / "ops" / "backup_manifest.py"
+    module.unlink()
+    if mutation == "symlink":
+        module.symlink_to(ROOT / "ops" / "backup_manifest.py")
+    elif mutation == "directory":
+        module.mkdir()
+
+    result = _run_installer(env)
+
+    assert result.returncode != 0
+    assert expected_error in result.stderr
 
 
 def test_installer_check_rejects_missing_dashboard_pin(tmp_path: Path) -> None:

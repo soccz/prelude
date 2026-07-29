@@ -257,6 +257,7 @@ validate_repo_contract() {
         /usr/bin/sync \
         /usr/bin/tail \
         /usr/bin/tar \
+        /usr/bin/timeout \
         /usr/bin/touch; do
         [ -x "$required_binary" ] ||
             die "required runtime binary missing: $required_binary"
@@ -265,6 +266,7 @@ validate_repo_contract() {
     for required_script in \
         deploy/lock_exec.py \
         deploy/load_runtime_env.sh \
+        ops/backup_manifest.py \
         ops/runtime_env.py \
         scripts/daily_run_distribution.sh \
         scripts/daily_close_distribution.sh \

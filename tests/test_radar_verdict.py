@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 import notifier.delivery_receipt as receipt_module
+import notifier.telegram as telegram
 import ops.policy_competition as policy_competition
 import ops.radar_verdict as radar_verdict
 import scripts.pump_detector_v2_today as v2_runner
@@ -35,8 +36,14 @@ from scripts.v2_scoreboard import build_scoreboard, run_scoreboard
 def _allow_mocked_sends(monkeypatch):
     # 이 모듈은 발송 경로 자체를 mock 된 requests 로 검증한다 —
     # 전역 kill-switch(tests/conftest.py)를 in-process 한정 해제.
-    # subprocess 를 띄우는 테스트는 이 모듈에 두지 말 것.
+    # 해제 상태에서도 미래 테스트의 mock 누락이 실 API 호출로 이어지지
+    # 않도록 가장 낮은 HTTP 경계를 기본 폭탄으로 봉쇄한다.
     monkeypatch.delenv("PRELUDE_FORBID_TELEGRAM", raising=False)
+
+    def forbid_unmocked_post(*_args, **_kwargs):
+        pytest.fail("unmocked Telegram HTTP transport reached")
+
+    monkeypatch.setattr(telegram.requests, "post", forbid_unmocked_post)
 
 
 def _scorecard(

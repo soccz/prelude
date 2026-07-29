@@ -1925,6 +1925,98 @@ def test_heartbeat_requires_todays_bound_backup_manifest():
     assert "-mtime -2" not in backup_probe
 
 
+@pytest.mark.parametrize(
+    ("probe_mode", "expected_exit", "expected_output"),
+    (
+        ("find-failure", 2, "1"),
+        ("invalid-count", 0, "not-a-number"),
+    ),
+)
+def test_heartbeat_no_decision_probe_never_reports_partial_aggregate_as_ok(
+    tmp_path,
+    probe_mode,
+    expected_exit,
+    expected_output,
+):
+    repo = tmp_path / "repo"
+    scripts = repo / "scripts"
+    output = repo / "output"
+    backup = repo / "backup"
+    fake_bin = tmp_path / "bin"
+    for path in (
+        scripts,
+        output / "close_no_decision",
+        backup,
+        fake_bin,
+    ):
+        path.mkdir(parents=True)
+    shutil.copy2(Path("scripts/heartbeat.sh"), scripts / "heartbeat.sh")
+
+    fake_python = fake_bin / "python"
+    fake_python.write_text(
+        "#!/bin/bash\n"
+        'if [ "${1:-}" = "-" ]; then cat >/dev/null; exit 0; fi\n'
+        'if [ "${1:-}" = "-m" ]; then exit 1; fi\n'
+        'if [ "${1:-}" = "scripts/v2_scoreboard.py" ]; then\n'
+        "  echo 'v2 scoreboard mock ok'; exit 0\n"
+        "fi\n"
+        'if [ "${1:-}" = "-c" ]; then exit 0; fi\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    fake_find = fake_bin / "find"
+    if probe_mode == "find-failure":
+        fake_find.write_text(
+            "#!/bin/bash\n"
+            "echo '/mock/close_no_decision/2026-07-29.json'\n"
+            "exit 2\n",
+            encoding="utf-8",
+        )
+    else:
+        fake_find.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+        fake_wc = fake_bin / "wc"
+        fake_wc.write_text(
+            "#!/bin/bash\n"
+            'if [ "${1:-}" = "-l" ]; then\n'
+            "  cat >/dev/null\n"
+            "  echo not-a-number\n"
+            "  exit 0\n"
+            "fi\n"
+            'exec /usr/bin/wc "$@"\n',
+            encoding="utf-8",
+        )
+        fake_wc.chmod(0o755)
+    fake_df = fake_bin / "df"
+    fake_df.write_text(
+        "#!/bin/bash\n"
+        "printf 'Filesystem 1K-blocks Used Available Use%% Mounted on\\n'\n"
+        "printf '/dev/mock 100 10 90 10%% /mock\\n'\n",
+        encoding="utf-8",
+    )
+    for executable in (fake_python, fake_find, fake_df):
+        executable.chmod(0o755)
+
+    result = subprocess.run(
+        ["bash", str(scripts / "heartbeat.sh")],
+        cwd=repo,
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "PRELUDE_BACKUP_DIR": str(backup),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    log = (output / "cron_heartbeat.log").read_text(encoding="utf-8")
+
+    assert result.returncode == 0
+    assert "close no-decision probe FAIL (date=" in log
+    assert f"exit={expected_exit}; output='{expected_output}')" in log
+    assert "close no-decision (7d):" not in log
+    assert "close no-decision day 감지" not in log
+
+
 def test_heartbeat_rejects_numeric_output_from_failed_grep(tmp_path):
     repo = tmp_path / "repo"
     scripts = repo / "scripts"

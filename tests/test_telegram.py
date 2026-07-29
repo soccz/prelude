@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import logging
+import os
+import runpy
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 import requests
@@ -21,8 +24,29 @@ from notifier.telegram import (
 def _allow_mocked_sends(monkeypatch):
     # 이 모듈은 발송 경로 자체를 mock 된 requests 로 검증한다 —
     # 전역 kill-switch(tests/conftest.py)를 in-process 한정 해제.
-    # subprocess 를 띄우는 테스트는 이 모듈에 두지 말 것.
+    # 해제 상태에서도 mock 누락이 실 API 호출로 이어지지 않게 가장 낮은
+    # HTTP 경계를 기본 폭탄으로 봉쇄하고, 각 HTTP 테스트만 명시 대체한다.
     monkeypatch.delenv("PRELUDE_FORBID_TELEGRAM", raising=False)
+
+    def forbid_unmocked_post(*_args, **_kwargs):
+        pytest.fail("unmocked Telegram HTTP transport reached")
+
+    monkeypatch.setattr(telegram.requests, "post", forbid_unmocked_post)
+
+
+@pytest.mark.parametrize("inherited", ("", "0", "disabled"))
+def test_global_guard_overrides_untrusted_inherited_value(
+    monkeypatch,
+    inherited,
+):
+    monkeypatch.setenv("PRELUDE_FORBID_TELEGRAM", inherited)
+
+    runpy.run_path(
+        str(Path(__file__).resolve().parent / "conftest.py"),
+        run_name="__prelude_conftest_guard_test__",
+    )
+
+    assert os.environ["PRELUDE_FORBID_TELEGRAM"] == "1"
 
 
 class _Response:

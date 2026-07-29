@@ -61,10 +61,6 @@ ROUND_TRIP_COST = 0.0015  # 왕복 0.15% (ledger/config.py와 일치)
 TP_PCT = 0.10             # +10% 익절 (placeholder, ledger 기본)
 SL_PCT = 0.05             # -5% 손절
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
 log = logging.getLogger("regime_split")
 
 REGIMES = ["bull_quiet", "bull_volatile", "bear_quiet", "bear_volatile"]
@@ -394,7 +390,17 @@ def discover_regime_setups(panel: pd.DataFrame, regime: str, label: str,
 # ============================================================================
 # main
 # ============================================================================
+def _configure_cli_logging() -> None:
+    """Configure stdout logging only for direct CLI execution."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+
+
 def main():
+    _configure_cli_logging()
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit-markets", type=int, default=None)
     ap.add_argument("--universe-top", type=int, default=None,

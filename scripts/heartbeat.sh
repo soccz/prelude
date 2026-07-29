@@ -364,11 +364,23 @@ ND_DIR="$PROJ_ROOT/output/close_no_decision"
 ND_FILES=0
 ND_DAYS=0
 ND_FRESH=""
+ND_PROBE_FAILED=0
 if [ -d "$ND_DIR" ]; then
     for day_offset in 0 1 2 3 4 5 6; do
         nd_date=$(date -d "-${day_offset} day" +%F)
-        nd_matches=$(find "$ND_DIR" -maxdepth 2 -name "${nd_date}.json" \
-            2>>"$LOG" | wc -l)
+        nd_matches=""
+        if nd_matches=$(find "$ND_DIR" -maxdepth 2 \
+            -name "${nd_date}.json" 2>>"$LOG" | wc -l); then
+            nd_probe_rc=0
+        else
+            nd_probe_rc=$?
+        fi
+        if [ "$nd_probe_rc" -ne 0 ] || \
+           ! [[ "$nd_matches" =~ ^[0-9]+$ ]]; then
+            WARN "close no-decision probe FAIL (date=$nd_date exit=$nd_probe_rc; output='${nd_matches:-empty}')"
+            ND_PROBE_FAILED=1
+            break
+        fi
         ND_FILES=$((ND_FILES + nd_matches))
         if [ "$nd_matches" -gt 0 ]; then
             # 분모 보정은 "일수" 기준 — 하루에 여러 cohort 가 죽어도 1일.
@@ -378,9 +390,11 @@ if [ -d "$ND_DIR" ]; then
             ND_FRESH="$ND_FRESH ${nd_date}(cohorts=${nd_matches})"
         fi
     done
-    echo "  close no-decision (7d): days=$ND_DAYS cohort-files=$ND_FILES" >> "$LOG"
-    if [ -n "$ND_FRESH" ]; then
-        WARN "close no-decision day 감지:$ND_FRESH — 발송 파이프 사망일(무추천일 아님), 커버리지 분모 보정 필요"
+    if [ "$ND_PROBE_FAILED" -eq 0 ]; then
+        echo "  close no-decision (7d): days=$ND_DAYS cohort-files=$ND_FILES" >> "$LOG"
+        if [ -n "$ND_FRESH" ]; then
+            WARN "close no-decision day 감지:$ND_FRESH — 발송 파이프 사망일(무추천일 아님), 커버리지 분모 보정 필요"
+        fi
     fi
 else
     echo "  close no-decision (7d): days=0 (marker dir 없음)" >> "$LOG"
