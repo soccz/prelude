@@ -57,6 +57,7 @@ KST 10:10 dashboard publish → KST 10:30 heartbeat
 | 시각 (KST) | UTC | task | 스크립트 |
 |---|---|---|---|
 | **04:00 매일** | 19:00 전일 | versioned SQLite·verdict/anchor backup | `scripts/backup_db.sh` |
+| **07:30 매일** | 22:30 전일 | full pytest selftest (Telegram kill-switch) | `venv/bin/python -m pytest` |
 | **08:50 매일** | 23:50 전일 | R1 preopen 발송 + legacy record-only | `scripts/daily_run_preopen.sh` |
 | **09:05 매일** | 00:05 | R1 open·pump v2 발송 + challenger 기록 | `scripts/daily_run_distribution.sh` |
 | **09:30 매일** | 00:30 | distribution paper/shadow ledger 청산 | `scripts/daily_close_distribution.sh` |
@@ -69,7 +70,7 @@ preopen/preopen-close는 최대 30초, 나머지는 최대 60초 뒤 시작할 �
 
 ### 1.2 단일 scheduler 계약
 
-운영 scheduler는 `deploy/prelude-*.service`와 7개 timer뿐이다.
+운영 scheduler는 `deploy/prelude-*.service`와 8개 timer뿐이다.
 `deploy/crontab.txt`는 과거 참고 자료이며 활성화하면 안 된다. 설치기는 전체 사용자
 cron과 설치/등록된 prelude timer를 읽고, 중복 작업이 있으면 자동 수정하지 않고
 fail closed한다.
@@ -81,14 +82,19 @@ sudo bash deploy/install_systemd.sh
 ```
 
 08:50·09:05 signal timer는 늦은 catch-up 발송을 막기 위해 `Persistent=false`,
-나머지는 `Persistent=true`다. 7개 workload service는
+나머지는 `Persistent=true`다. 8개 operational service는
 `OnFailure=prelude-failure-alert@%n.service`로 실패를 알리고, stage wrapper가
 후속 publish를 선행 stage 성공 증거와 연결한다.
 
-**2026-07-26 반영 상태:** 저장소 unit 문법·KST calendar·테스트는 통과했지만
-`/etc/systemd/system`의 15개 설치본은 모두 이전 버전이거나 누락이다. sudo password가
-필요해 이 세션에서는 설치하지 못했다. 위 두 명령을 통과시키기 전에는 저장소 수정이
-내일 timer에 적용됐다고 간주하면 안 된다.
+07:30 selftest는 정상 달력에서는 08:50 전에 끝나며, 지연 부팅으로 두 start job이
+함께 queue되면 `Before=prelude-preopen.service prelude-distribution.service`가
+signal service를 selftest 종료 뒤로 정렬한다. 실패는 먼저 경보하지만 signal
+service를 영구 차단하는 배포 gate는 아니다. 코드 push 자체는 별도 pre-push
+Ruff(변경 Python)+전수 pytest gate가 차단한다.
+
+**2026-07-29 반영 상태:** 8개 timer를 포함한 저장소 unit과
+`/etc/systemd/system` 설치본을 동기화했다. 설치 후에도 위 `--check-only`를
+통과해야 적용 완료로 간주한다.
 
 ### 1.4 R1 snapshot과 forward 평가
 
@@ -140,8 +146,9 @@ service가 nonzero를 반환한다.
 - `distribution`: recommend 조건 + 마지막 closed 4h exact
 - `preopen`: recommend-preopen 조건 + 마지막 closed 15m exact
 - 명시 stablecoin 5종과 insufficient-history/lower-ranked 종목은 감사 가능한 사유로 제외
-- risk/drift state는 strict parse하되 evaluator 미배선 상태는
-  `BOOTSTRAP_UNINITIALIZED`로 명시
+- risk/drift 평가기는 production runner에 미배선인 legacy 코드다. 검증 helper는
+  향후 배선 검토용으로 보존하지만, production health 결과에는 포함하지 않는다
+  (미실행 평가기를 `OK` 감시처럼 표시하지 않음).
 
 ### 2.2 실패 시
 - daily runner가 해당 채널 작업을 skip하고 nonzero를 전파
@@ -285,7 +292,7 @@ legacy CLI 기본값은 ACTIVE가 없으면 발송하지 않으며 현재 daily 
 
 ## 6. retrain pipeline (legacy·미등록)
 
-`scripts/retrain_run.sh`와 `signals/retrain.py`는 남아 있지만 7개 systemd timer나
+`scripts/retrain_run.sh`와 `signals/retrain.py`는 남아 있지만 8개 systemd timer나
 활성 cron에는 등록되지 않았다. 구현 promotion gate도 아래 설계와 완전히 일치하지
 않으므로 사용자 승인과 재검증 전에는 실행·배포하지 않는다.
 
@@ -362,6 +369,9 @@ systemd stdout/stderr는 journal에 남고 runner는 위 날짜별/고정 로그
 - `scripts/health_check.py --channel recommend` — R1 open D1 exact
 - `scripts/health_check.py --channel preopen` — legacy preopen D1 + 15m exact
 - `scripts/health_check.py --channel distribution` — legacy distribution D1 + 4h exact
+- 10:30 heartbeat는 당일 evidence backup manifest가 묶은 archive/checksum
+  SHA-256을 검증한다. 지연 부팅 catch-up에서는 manifest 미생성 상태만 bounded
+  polling하고, 이미 존재하는 manifest/파일 손상·symlink는 즉시 실패한다.
 - 문제 시 텔레그램 alert
 
 ---
