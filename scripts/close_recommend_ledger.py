@@ -85,9 +85,6 @@ FORWARD_EXECUTION_TIME_ACTIVATION_DATE = date(2026, 7, 27)
 HARD_SL = 0.03               # -3% 손절
 TP = 0.05                    # +5% 익절
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)])
 log = logging.getLogger("close_recommend")
 
 
@@ -529,7 +526,23 @@ def _close_recommend_ledger_locked(
             print(f"=== pump20 hit: {hits.mean()*100:.1f}% ({int(hits.sum())}/{len(hits)}) ===")
 
 
+def _configure_cli_logging() -> None:
+    """CLI 실행 전용 로깅 구성 — 반드시 main() 에서만 호출할 것.
+
+    import 시점에 root logger 를 stdout 으로 구성하면, 이 모듈을 import
+    하는 다른 프로세스(close gate NUL 프로토콜, heartbeat 'ok' 프로브)의
+    기계 파싱 stdout 이 오염된다 — 07-28/29 이틀 연속 라이브 장애의
+    근본 원인 클래스라 import 부작용을 금지한다.
+    """
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+
+
 def main():
+    _configure_cli_logging()
     ap = argparse.ArgumentParser(description="SHADOW recommend ledger 청산 (기록만)")
     ap.add_argument("--ledger", type=str, default=SHADOW_RECOMMEND_LEDGER)
     ap.add_argument("--asof", type=str, default=None,

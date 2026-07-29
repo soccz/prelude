@@ -79,10 +79,6 @@ HARD_SL = [None, 0.03, 0.05, 0.08]
 TP_CAP = [None, 0.05, 0.08, 0.10]
 TRAIL = [None, 0.05, 0.08]
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
 log = logging.getLogger("rec_downside")
 
 
@@ -234,7 +230,18 @@ def downside_metrics(trades: pd.DataFrame) -> dict:
 # ============================================================================
 # main
 # ============================================================================
+def _configure_cli_logging() -> None:
+    """CLI 전용 로깅 — import 시 root 구성 금지(07-28/29 stdout 오염 클래스).
+    이 모듈은 라이브 close 경로가 import 하므로 부작용이 곧 장애다."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+
+
 def main():
+    _configure_cli_logging()
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit-markets", type=int, default=None)
     args = ap.parse_args()

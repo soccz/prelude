@@ -63,10 +63,6 @@ ROUND_TRIP_COST = 0.0015
 TP_PCT = 0.10
 SL_PCT = 0.05
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
 log = logging.getLogger("recall_recommender")
 
 # 확립된 OOS-validated precursors (univariate_precursor_lift_v1.csv, oos_lift>=2.1).
@@ -221,7 +217,6 @@ def evaluate(panel: pd.DataFrame, label: str):
     rows_pak = []          # precision@K / recall per (universe, K)
     rows_thr = []          # probability-threshold sweep
     rows_breadth = []      # breadth-aware adaptive K
-    recent_records = []    # 최근 추천 (dynamic, calibrated top-K)
     warmcold = {"warm_hit": 0, "warm_total": 0, "cold_hit": 0, "cold_total": 0}
 
     # 전역 test pool (OOF score 부여)
@@ -424,7 +419,18 @@ def net_pnl_diag(rows: pd.DataFrame):
     return {"net_mean": float(np.mean(trades)), "n": len(trades)}
 
 
+def _configure_cli_logging() -> None:
+    """CLI 전용 로깅 — import 시 root 구성 금지(07-28/29 stdout 오염 클래스).
+    이 모듈은 라이브 close 경로가 import 하므로 부작용이 곧 장애다."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+
+
 def main():
+    _configure_cli_logging()
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit-markets", type=int, default=None)
     ap.add_argument("--recent-days", type=int, default=14)

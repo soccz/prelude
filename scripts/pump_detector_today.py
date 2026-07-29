@@ -121,11 +121,6 @@ KST = timezone(timedelta(hours=9))
 LIVE_RUN_START = datetime.min.time().replace(hour=9)
 LIVE_RUN_END = datetime.min.time().replace(hour=9, minute=31)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
 log = logging.getLogger("pump_detector_today")
 
 
@@ -919,7 +914,23 @@ def _print_rows(df: pd.DataFrame) -> None:
     print(df[cols].to_string(index=False))
 
 
+def _configure_cli_logging() -> None:
+    """CLI 실행 전용 로깅 구성 — 반드시 main() 에서만 호출할 것.
+
+    import 시점에 root logger 를 stdout 으로 구성하면, 이 모듈을 import
+    하는 다른 프로세스(close gate NUL 프로토콜, heartbeat 'ok' 프로브)의
+    기계 파싱 stdout 이 오염된다 — 07-28/29 이틀 연속 라이브 장애의
+    근본 원인 클래스라 import 부작용을 금지한다.
+    """
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+
+
 def main() -> None:
+    _configure_cli_logging()
     ap = argparse.ArgumentParser(description="PUMP hunter daily record-only ledger append")
     ap.add_argument("--asof", type=str, default=None, help="YYYY-MM-DD (default=today KST)")
     ap.add_argument("--ledger", type=str, default=PUMP_HUNTER_LEDGER)

@@ -50,10 +50,6 @@ EPS = 1e-12
 KST = ZoneInfo("Asia/Seoul")
 UPBIT_D1_OPEN_HOUR = 9
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
 log = logging.getLogger("univ_lift")
 
 
@@ -401,7 +397,17 @@ CANDIDATE_FEATURES = [
 LABELS = ["lab_pump20", "lab_pump15", "lab_pumpc20"]
 
 
+def _configure_cli_logging() -> None:
+    """CLI 전용 로깅 — import 시 root 구성 금지(07-28/29 stdout 오염 클래스)."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+
+
 def main():
+    _configure_cli_logging()
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit-markets", type=int, default=None)
     ap.add_argument("--universe-top", type=int, default=None,

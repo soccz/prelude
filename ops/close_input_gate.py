@@ -7,6 +7,9 @@ same-day ledger cohort must be present before a close job can continue.
 """
 from __future__ import annotations
 
+# ruff: noqa: E402
+# Protocol fd sealing intentionally runs before every project import below.
+
 import argparse
 import csv
 import io
@@ -17,6 +20,16 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any, Mapping, cast
+
+# NUL 프로토콜 모드면 여기서 fd1 이 봉인된다.  아래 prelude 모듈들의
+# import 시점 오염까지 막아야 하므로 반드시 이들보다 먼저 import 할 것.
+from ops._stdout_seal import seal_nul_protocol_stdout
+
+PROTOCOL_STDOUT = (
+    seal_nul_protocol_stdout(sys.argv[1:])
+    if __name__ == "__main__"
+    else None
+)
 
 from notifier.delivery_receipt import (
     DeliveryReceiptError,
@@ -1077,6 +1090,7 @@ def _force_stderr_logging() -> None:
 def main() -> int:
     _force_stderr_logging()
     parser = argparse.ArgumentParser(
+        allow_abbrev=False,
         description="Validate immutable daily decision evidence before ledger close"
     )
     date_group = parser.add_mutually_exclusive_group(required=True)
@@ -1128,12 +1142,18 @@ def main() -> int:
                 for item in (decision_date, mode)
             ]
             records.append("__PRELUDE_CLOSE_PLAN_V1_OK__")
-            sys.stdout.buffer.write(
-                b"".join(
-                    record.encode("utf-8") + b"\0"
-                    for record in records
-                )
+            payload = b"".join(
+                record.encode("utf-8") + b"\0" for record in records
             )
+            # 봉인된 프로토콜 fd 가 있으면 그쪽이 유일한 셸 파서 통로다.
+            # (없으면 in-process 호출 — 테스트/라이브러리 — 이라 stdout.)
+            protocol_out = (
+                PROTOCOL_STDOUT
+                if PROTOCOL_STDOUT is not None
+                else sys.stdout.buffer
+            )
+            protocol_out.write(payload)
+            protocol_out.flush()
         else:
             for decision_date, mode in plan:
                 print(f"{decision_date}\t{mode}")
