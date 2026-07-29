@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# push 전 변경 Python lint + 전수 스위트 게이트 — 깨진 상태가
+# origin/공개 repo 에 도달하지 못하게 한다 (2026-07-29 재발방지 라운드).
+#
+# 활성화: git config core.hooksPath deploy/git-hooks
+# 긴급 우회: PRELUDE_SKIP_PREPUSH=1 git push  (사유를 PHASES 에 남길 것)
+set -euo pipefail
+
+if [ "${PRELUDE_SKIP_PREPUSH:-0}" = "1" ]; then
+    echo "[pre-push] PRELUDE_SKIP_PREPUSH=1 — 전수 스위트 생략 (긴급 우회)" >&2
+    exit 0
+fi
+
+cd "$(git rev-parse --show-toplevel)"
+if [ ! -x venv/bin/python ]; then
+    echo "[pre-push] venv 없음 — 게이트를 평가할 수 없어 push 차단" >&2
+    exit 1
+fi
+
+if [ -n "$(git status --porcelain=v1 --untracked-files=normal)" ]; then
+    echo "[pre-push] worktree/index/untracked 변경 존재 — 커밋과 동일한 상태가 아니므로 push 차단" >&2
+    exit 1
+fi
+HEAD_SHA="$(git rev-parse HEAD)"
+
+RUFF_BIN="${PRELUDE_RUFF_BIN:-}"
+if [ -z "$RUFF_BIN" ]; then
+    RUFF_BIN="$(command -v ruff || true)"
+fi
+if [ -z "$RUFF_BIN" ] || [ ! -x "$RUFF_BIN" ]; then
+    echo "[pre-push] ruff 없음 — lint 게이트를 평가할 수 없어 push 차단" >&2
+    exit 1
+fi
+
+LOG_DIR="${TMPDIR:-/home/soccz/22tb/tmp}"
+mkdir -p "$LOG_DIR"
+RUFF_LOG="$LOG_DIR/prelude-prepush-ruff.log"
+LOG_FILE="$LOG_DIR/prelude-prepush-pytest.log"
+ZERO_SHA="0000000000000000000000000000000000000000"
+declare -A PUSHED_PYTHON_FILES=()
+
+# stdin: <local ref> <local sha> <remote ref> <remote sha>, ref마다 한 줄.
+# 삭제된 파일은 제외하고, remote에 실제로 추가되는 Python diff만 lint한다.
+while read -r local_ref local_sha remote_ref remote_sha; do
+    if [ -z "${local_ref:-}" ] || [ "$local_sha" = "$ZERO_SHA" ]; then
+        continue
+    fi
+    if [ "$local_sha" != "$HEAD_SHA" ]; then
+        echo "[pre-push] 현재 HEAD가 아닌 ref push는 검증 대상과 불일치해 차단: $local_ref" >&2
+        exit 1
+    fi
+    if [ "$remote_sha" = "$ZERO_SHA" ]; then
+        base_sha="$(git hash-object -t tree /dev/null)"
+    else
+        base_sha="$remote_sha"
+    fi
+    if ! git cat-file -e "${base_sha}^{tree}" 2>/dev/null; then
+        echo "[pre-push] remote base 객체가 로컬에 없어 diff를 검증할 수 없음: $base_sha" >&2
+        exit 1
+    fi
+    python_diff=""
+    if ! python_diff=$(git diff --name-only --diff-filter=ACMR \
+        "$base_sha" "$local_sha" -- "*.py"); then
+        echo "[pre-push] push 대상 Python diff 계산 실패 — push 차단" >&2
+        exit 1
+    fi
+    while IFS= read -r path; do
+        if [ -n "$path" ] && [ -f "$path" ]; then
+            PUSHED_PYTHON_FILES["$path"]=1
+        fi
+    done <<<"$python_diff"
+done
+
+if [ "${#PUSHED_PYTHON_FILES[@]}" -gt 0 ]; then
+    mapfile -t python_files < <(
+        printf '%s\n' "${!PUSHED_PYTHON_FILES[@]}" | sort
+    )
+    echo "[pre-push] 변경 Python ${#python_files[@]}개 Ruff 검사 중" >&2
+    if "$RUFF_BIN" check "${python_files[@]}" >"$RUFF_LOG" 2>&1; then
+        echo "[pre-push] Ruff 통과" >&2
+    else
+        echo "[pre-push] Ruff 실패 — push 차단" >&2
+        tail -30 "$RUFF_LOG" >&2
+        exit 1
+    fi
+fi
+
+echo "[pre-push] 전수 pytest 게이트 실행 중 (~3분, 로그: $LOG_FILE)" >&2
+if venv/bin/python -m pytest -q -p no:cacheprovider >"$LOG_FILE" 2>&1; then
+    tail -1 "$LOG_FILE" >&2
+    echo "[pre-push] 게이트 통과 — push 진행" >&2
+else
+    echo "[pre-push] 전수 스위트 실패 — push 차단" >&2
+    tail -15 "$LOG_FILE" >&2
+    exit 1
+fi

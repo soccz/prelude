@@ -13,6 +13,6 @@ NoNewPrivileges=true
 WorkingDirectory=/home/soccz/22tb/prelude
 Environment=TZ=Asia/Seoul
 ExecStart=/home/soccz/22tb/prelude/deploy/run_pipeline_stage.sh heartbeat /bin/bash /home/soccz/22tb/prelude/scripts/heartbeat.sh
-TimeoutStartSec=3600
+TimeoutStartSec=3900
 StandardOutput=journal
 StandardError=journal

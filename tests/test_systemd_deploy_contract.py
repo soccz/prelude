@@ -24,6 +24,7 @@ SERVICE_UNITS = (
     "prelude-publish-dashboard.service",
     "prelude-backup.service",
     "prelude-heartbeat.service",
+    "prelude-selftest.service",
     "prelude-failure-alert@.service",
 )
 TIMER_UNITS = (
@@ -34,6 +35,7 @@ TIMER_UNITS = (
     "prelude-publish-dashboard.timer",
     "prelude-backup.timer",
     "prelude-heartbeat.timer",
+    "prelude-selftest.timer",
 )
 ALL_UNITS = SERVICE_UNITS + TIMER_UNITS
 
@@ -154,6 +156,21 @@ def _fake_install_env(tmp_path: Path, *, systemctl_exit: int = 0) -> dict[str, s
         "    fi ;;\n"
         "  is-enabled)\n"
         "    state=${FAKE_SYSTEMCTL_ENABLED_STATE:-enabled}\n"
+        "    if [ \"$state\" = \"track-unit-files\" ]; then\n"
+        "      unit_arg=\n"
+        "      for argument in \"$@\"; do\n"
+        "        case \"$argument\" in\n"
+        "          is-enabled|--quiet) ;;\n"
+        "          *) unit_arg=\"$argument\" ;;\n"
+        "        esac\n"
+        "      done\n"
+        "      if [ ! -e \"$FAKE_SYSTEMCTL_FRAGMENT_ROOT/$unit_arg\" ]; then\n"
+        "        printf 'Failed to get unit file state for %s: "
+        "No such file or directory\\n' \"$unit_arg\"\n"
+        "        exit 1\n"
+        "      fi\n"
+        "      state=enabled\n"
+        "    fi\n"
         "    [ \"${2:-}\" = \"--quiet\" ] || printf '%s\\n' \"$state\"\n"
         "    [ \"$state\" = \"enabled\" ] ;;\n"
         "  is-active)\n"
@@ -230,7 +247,7 @@ def test_all_services_pin_kst_network_and_failure_contracts() -> None:
     services = sorted(DEPLOY.glob("prelude-*.service"))
     operational = [path for path in services if "failure-alert@" not in path.name]
 
-    assert len(operational) == 7
+    assert len(operational) == 8
     for path in services:
         unit = _unit(path)
         assert unit["Service"]["Type"] == "oneshot"
@@ -238,7 +255,7 @@ def test_all_services_pin_kst_network_and_failure_contracts() -> None:
         assert unit["Service"]["UMask"] == "0077"
         assert unit["Service"]["NoNewPrivileges"] == "true"
         assert unit["Service"]["WorkingDirectory"] == "/home/soccz/22tb/prelude"
-        assert unit["Service"]["Environment"] == "TZ=Asia/Seoul"
+        assert "TZ=Asia/Seoul" in unit["Service"]["Environment"].split()
         assert "network-online.target" in unit["Unit"]["After"].split()
         assert "network-online.target" in unit["Unit"]["Wants"].split()
         assert (
@@ -255,6 +272,24 @@ def test_all_services_pin_kst_network_and_failure_contracts() -> None:
         )
         assert unit["Service"]["StandardOutput"] == "journal"
         assert unit["Service"]["StandardError"] == "journal"
+
+
+def test_selftest_unit_runs_full_suite_before_morning_cycle() -> None:
+    """07:30 selftest 계약: 아침 사이클(08:50 preopen) 전에 전수 스위트를
+    돌려 회귀를 라이브 이전에 경보로 승격한다. 테스트가 실 발송을 만들 수
+    없도록 유닛 수준에서도 텔레그램을 봉쇄한다."""
+    unit = _unit(DEPLOY / "prelude-selftest.service")
+    command = unit["Service"]["ExecStart"]
+    assert "/venv/bin/python -m pytest" in command
+    environment = unit["Service"]["Environment"].split()
+    assert "PRELUDE_FORBID_TELEGRAM=1" in environment
+    assert "TMPDIR=/home/soccz/22tb/tmp" in environment
+    assert int(unit["Service"]["TimeoutStartSec"]) >= 1800
+    assert unit["Unit"]["OnFailure"] == "prelude-failure-alert@%n.service"
+    assert {
+        "prelude-preopen.service",
+        "prelude-distribution.service",
+    } <= set(unit["Unit"]["Before"].split())
 
 
 def test_postopen_pipeline_is_serialized_and_ordered() -> None:
@@ -280,6 +315,7 @@ def test_postopen_pipeline_is_serialized_and_ordered() -> None:
         "prelude-preopen-close.service",
     } <= set(publish["Unit"]["After"].split())
     assert "prelude-publish-dashboard.service" in heartbeat["Unit"]["After"].split()
+    assert int(heartbeat["Service"]["TimeoutStartSec"]) >= 3900
 
 
 def test_timer_calendar_and_catchup_contracts_are_explicit_kst() -> None:
@@ -294,6 +330,7 @@ def test_timer_calendar_and_catchup_contracts_are_explicit_kst() -> None:
             "true",
         ),
         "prelude-heartbeat.timer": ("*-*-* 10:30:00 Asia/Seoul", "true"),
+        "prelude-selftest.timer": ("*-*-* 07:30:00 Asia/Seoul", "true"),
     }
 
     timers = sorted(DEPLOY.glob("prelude-*.timer"))
@@ -850,6 +887,51 @@ def test_installer_rolls_back_files_and_runtime_state_on_partial_failure(
     for timer in TIMER_UNITS:
         assert f"enable:{timer}\n" in calls
         assert f"restart:{timer}\n" in calls
+
+
+def test_installer_accepts_first_install_of_brand_new_unit(tmp_path: Path) -> None:
+    """신규 유닛 최초 설치: 실제 systemd 는 is-enabled 에 not-found 토큰이
+    아니라 'Failed to get unit file state ...' 문구를 낸다(07-29 selftest
+    설치에서 실측). 사전 상태 조회는 이를 not-found 로 관용해야 한다."""
+    env = _fake_install_env(tmp_path)
+    unit_dir = Path(env["PRELUDE_INSTALL_UNIT_DIR"])
+    for unit in ("prelude-selftest.service", "prelude-selftest.timer"):
+        (unit_dir / unit).unlink()
+    env["FAKE_SYSTEMCTL_ENABLED_STATE"] = "track-unit-files"
+    expected = {unit: (DEPLOY / unit).read_bytes() for unit in ALL_UNITS}
+
+    result = _run_installer(env, check_only=False)
+
+    assert result.returncode == 0, result.stderr
+    _assert_unit_bytes(env, expected, mode=0o644)
+
+
+def test_first_install_rollback_does_not_stop_nonexistent_timer(
+    tmp_path: Path,
+) -> None:
+    env = _fake_install_env(tmp_path)
+    unit_dir = Path(env["PRELUDE_INSTALL_UNIT_DIR"])
+    missing_units = {
+        "prelude-selftest.service",
+        "prelude-selftest.timer",
+    }
+    for unit in missing_units:
+        (unit_dir / unit).unlink()
+    env["FAKE_SYSTEMCTL_ENABLED_STATE"] = "track-unit-files"
+    env["FAKE_SYSTEMCTL_ACTIVE_STATE"] = "inactive"
+    env["FAKE_SYSTEMCTL_FAIL_MATCH"] = "daemon-reload"
+
+    result = _run_installer(env, check_only=False)
+
+    assert result.returncode != 0
+    assert "Previous systemd configuration restored." in result.stderr
+    for unit in missing_units:
+        assert not (unit_dir / unit).exists()
+    calls = Path(env["FAKE_SYSTEMCTL_LOG"]).read_text(encoding="utf-8")
+    assert "is-active:prelude-selftest.timer\n" not in calls
+    # rollback 시작 시 새로 설치된 timer를 정지하는 1회만 허용한다. 파일을
+    # 제거한 뒤 과거 inactive 상태를 "복원"하려는 두 번째 stop은 없어야 한다.
+    assert calls.count("stop:prelude-selftest.timer\n") == 1
 
 
 def test_installer_success_is_complete_and_idempotent(tmp_path: Path) -> None:

@@ -1,0 +1,10 @@
+[Unit]
+Description=prelude full test-suite selftest daily 07:30 KST timer
+
+[Timer]
+OnCalendar=*-*-* 07:30:00 Asia/Seoul
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

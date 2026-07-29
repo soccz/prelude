@@ -42,7 +42,16 @@ def test_every_operational_service_has_onfailure():
         if "failure-alert@" not in p.name
     ]
 
-    assert len(services) == 7
+    assert {service.name for service in services} == {
+        "prelude-backup.service",
+        "prelude-close.service",
+        "prelude-distribution.service",
+        "prelude-heartbeat.service",
+        "prelude-preopen-close.service",
+        "prelude-preopen.service",
+        "prelude-publish-dashboard.service",
+        "prelude-selftest.service",
+    }
     for service in services:
         text = service.read_text()
         assert "OnFailure=prelude-failure-alert@%n.service" in text, service

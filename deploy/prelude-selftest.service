@@ -1,0 +1,21 @@
+[Unit]
+Description=prelude full test-suite selftest daily 07:30 KST (아침 사이클 전 회귀 검출)
+Wants=network-online.target
+After=network-online.target
+Before=prelude-preopen.service prelude-distribution.service
+RequiresMountsFor=/home/soccz/22tb/prelude
+OnFailure=prelude-failure-alert@%n.service
+
+[Service]
+Type=oneshot
+User=soccz
+UMask=0077
+NoNewPrivileges=true
+Nice=10
+WorkingDirectory=/home/soccz/22tb/prelude
+# PRELUDE_FORBID_TELEGRAM 은 conftest 가 이미 강제하지만 유닛 수준 이중 봉쇄.
+Environment=TZ=Asia/Seoul TMPDIR=/home/soccz/22tb/tmp PRELUDE_FORBID_TELEGRAM=1
+ExecStart=/home/soccz/22tb/prelude/venv/bin/python -m pytest -q -p no:cacheprovider
+TimeoutStartSec=2700
+StandardOutput=journal
+StandardError=journal

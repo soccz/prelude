@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the single supported prelude scheduler: seven systemd timers.
+# Install the single supported prelude scheduler: eight systemd timers.
 #
 # Production:
 #   sudo bash deploy/install_systemd.sh
@@ -88,6 +88,7 @@ SERVICE_UNITS=(
     prelude-publish-dashboard.service
     prelude-backup.service
     prelude-heartbeat.service
+    prelude-selftest.service
     prelude-failure-alert@.service
 )
 TIMER_UNITS=(
@@ -98,6 +99,7 @@ TIMER_UNITS=(
     prelude-publish-dashboard.timer
     prelude-backup.timer
     prelude-heartbeat.timer
+    prelude-selftest.timer
 )
 ALL_UNITS=("${SERVICE_UNITS[@]}" "${TIMER_UNITS[@]}")
 
@@ -586,6 +588,11 @@ snapshot_timer_state() {
     if ! enabled_state=$("$SYSTEMCTL_BIN" is-enabled "$unit" 2>&1); then
         case "$enabled_state" in
             disabled|not-found) ;;
+            "Failed to get unit file state for $unit: No such file or directory")
+                # 신규 유닛 최초 설치: 이 systemd 는 not-found 토큰 대신 이
+                # 문구를 stderr 로 낸다.  정확히 이 유닛의 이 문구만 관용.
+                enabled_state="not-found"
+                ;;
             *)
                 die "cannot determine prior enabled state for $unit: ${enabled_state:-<empty>}"
                 ;;
@@ -602,6 +609,14 @@ snapshot_timer_state() {
             die "unsupported prior enabled state for $unit: ${enabled_state:-<empty>}"
             ;;
     esac
+
+    # 존재하지 않던 신규 timer는 active 상태도 정의되지 않는다. 일부
+    # systemd는 is-active를 "inactive"로 답하지만 이를 기억하면 rollback이
+    # 파일 제거 후 존재하지 않는 unit에 stop을 호출해 복구를 거짓 실패시킨다.
+    if [ "${PREVIOUS_ENABLED_STATE[$unit]}" = "not-found" ]; then
+        PREVIOUS_ACTIVE_STATE["$unit"]="unknown"
+        return
+    fi
 
     if ! active_state=$("$SYSTEMCTL_BIN" is-active "$unit" 2>&1); then
         case "$active_state" in
@@ -682,7 +697,7 @@ done
 "$SYSTEMCTL_BIN" daemon-reload
 "$SYSTEMCTL_BIN" enable "${TIMER_UNITS[@]}"
 # daemon-reload updates definitions, but an already-active timer may retain its
-# old next elapse. Restart re-arms all seven calendars; Persistent=true timers
+# old next elapse. Restart re-arms all eight calendars; Persistent=true timers
 # may then perform their intended missed-run catch-up.
 "$SYSTEMCTL_BIN" restart "${TIMER_UNITS[@]}"
 validate_installed_contract
