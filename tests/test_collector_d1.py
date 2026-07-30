@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -10,6 +10,277 @@ import pytest
 from data import collector_d1
 from data import collector_15m_upbit, collector_4h
 from data.market_universe import STABLECOIN_KRW_MARKETS
+
+
+@pytest.mark.parametrize(
+    ("now", "expected"),
+    [
+        (
+            datetime(2026, 7, 30, 8, 59, 59),
+            datetime(2026, 7, 29, 9),
+        ),
+        (
+            datetime(2026, 7, 30, 9),
+            datetime(2026, 7, 30, 9),
+        ),
+        (
+            datetime(2026, 7, 30, 9, 0, 1),
+            datetime(2026, 7, 30, 9),
+        ),
+        (
+            datetime(2026, 7, 29, 23, 59, 59, tzinfo=timezone.utc),
+            datetime(2026, 7, 29, 9),
+        ),
+        (
+            datetime(2026, 7, 30, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2026, 7, 30, 9),
+        ),
+    ],
+)
+def test_current_d1_boundary_uses_kst_started_candle(now, expected):
+    result = collector_d1.current_d1_boundary(now)
+
+    assert result == expected
+    assert result.tzinfo is None
+
+
+def test_markets_at_d1_boundary_requires_exact_sqlite_timestamp(tmp_path):
+    db_path = tmp_path / "upbit_d1.db"
+
+    def candle(at: datetime) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "open": [100.0],
+                "high": [101.0],
+                "low": [99.0],
+                "close": [100.5],
+                "volume": [1.0],
+                "value": [100.5],
+            },
+            index=pd.DatetimeIndex([at]),
+        )
+
+    boundary = datetime(2026, 7, 30, 9)
+    collector_d1.save_candles(
+        db_path,
+        candle(boundary),
+        "KRW-EXACT",
+    )
+    collector_d1.save_candles(
+        db_path,
+        candle(boundary - timedelta(days=1)),
+        "KRW-PREVIOUS",
+    )
+    collector_d1.save_candles(
+        db_path,
+        candle(boundary + timedelta(seconds=1)),
+        "KRW-AFTER",
+    )
+
+    assert collector_d1._markets_at_d1_boundary_readonly(
+        db_path,
+        boundary,
+    ) == {"KRW-EXACT"}
+
+
+def test_refresh_targets_only_missing_and_rechecks_exact_boundary(
+    monkeypatch,
+    tmp_path,
+):
+    now = datetime(2026, 7, 30, 9, 8)
+    db_path = tmp_path / "upbit_d1.db"
+    exact_reads = iter(
+        [
+            {"KRW-BTC"},
+            {"KRW-BTC", "KRW-AERO"},
+        ]
+    )
+    queries: list[tuple[Path, datetime]] = []
+    calls: list[tuple[list[str], int, Path]] = []
+
+    monkeypatch.setattr(collector_d1, "init_db", lambda _path: None)
+
+    def fake_exact(path, boundary):
+        queries.append((path, boundary))
+        return next(exact_reads)
+
+    def fake_collect(markets, days, db_path):
+        calls.append((list(markets), days, db_path))
+        return {"KRW-AERO": 1, "KRW-LAYER": 0}
+
+    monkeypatch.setattr(
+        collector_d1,
+        "_markets_at_d1_boundary_readonly",
+        fake_exact,
+    )
+    monkeypatch.setattr(collector_d1, "collect_all", fake_collect)
+
+    result = collector_d1.refresh_current_d1_boundary(
+        db_path=db_path,
+        now=now,
+        live_markets=[
+            "KRW-LAYER",
+            "KRW-BTC",
+            "KRW-AERO",
+            "KRW-AERO",
+        ],
+    )
+
+    boundary = datetime(2026, 7, 30, 9)
+    assert calls == [(["KRW-AERO", "KRW-LAYER"], 1, db_path)]
+    assert queries == [(db_path, boundary), (db_path, boundary)]
+    assert result.live_count == 3
+    assert result.missing_before == ("KRW-AERO", "KRW-LAYER")
+    assert result.unresolved_after == ("KRW-LAYER",)
+    assert result.failed_markets == ()
+
+
+def test_refresh_no_missing_never_collects(monkeypatch, tmp_path):
+    monkeypatch.setattr(collector_d1, "init_db", lambda _path: None)
+    monkeypatch.setattr(
+        collector_d1,
+        "_markets_at_d1_boundary_readonly",
+        lambda *_args: {"KRW-BTC"},
+    )
+    monkeypatch.setattr(
+        collector_d1,
+        "collect_all",
+        lambda *_args, **_kwargs: pytest.fail("must not collect"),
+    )
+
+    result = collector_d1.refresh_current_d1_boundary(
+        db_path=tmp_path / "upbit_d1.db",
+        now=datetime(2026, 7, 30, 9, 8),
+        live_markets=["KRW-BTC"],
+    )
+
+    assert result.results == {}
+    assert result.missing_before == ()
+    assert result.unresolved_after == ()
+    assert result.failed_markets == ()
+
+
+def test_refresh_separates_fetch_failure_from_unresolved(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(collector_d1, "init_db", lambda _path: None)
+    monkeypatch.setattr(
+        collector_d1,
+        "_markets_at_d1_boundary_readonly",
+        lambda *_args: {"KRW-BTC"},
+    )
+    monkeypatch.setattr(
+        collector_d1,
+        "collect_all",
+        lambda *_args, **_kwargs: {
+            "KRW-AERO": -1,
+            "KRW-LAYER": 0,
+        },
+    )
+
+    result = collector_d1.refresh_current_d1_boundary(
+        db_path=tmp_path / "upbit_d1.db",
+        now=datetime(2026, 7, 30, 9, 8),
+        live_markets=["KRW-BTC", "KRW-AERO", "KRW-LAYER"],
+    )
+
+    assert result.failed_markets == ("KRW-AERO",)
+    assert result.unresolved_after == ("KRW-AERO", "KRW-LAYER")
+
+
+def test_refresh_defers_broad_gap_to_fail_closed_health_gate(
+    monkeypatch,
+    tmp_path,
+):
+    markets = [
+        f"KRW-X{index:03d}"
+        for index in range(
+            collector_d1.MAX_CURRENT_BOUNDARY_REFRESH_MARKETS + 1
+        )
+    ]
+    monkeypatch.setattr(collector_d1, "init_db", lambda _path: None)
+    monkeypatch.setattr(
+        collector_d1,
+        "_markets_at_d1_boundary_readonly",
+        lambda *_args: set(),
+    )
+    monkeypatch.setattr(
+        collector_d1,
+        "collect_all",
+        lambda *_args, **_kwargs: pytest.fail("broad retry must be deferred"),
+    )
+
+    result = collector_d1.refresh_current_d1_boundary(
+        db_path=tmp_path / "upbit_d1.db",
+        now=datetime(2026, 7, 30, 9, 8),
+        live_markets=markets,
+    )
+
+    assert result.results == {}
+    assert result.failed_markets == ()
+    assert result.unresolved_after == tuple(markets)
+
+
+def test_refresh_cli_reports_unresolved_without_full_stats(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    db_path = tmp_path / "upbit_d1.db"
+    result = collector_d1.CurrentBoundaryRefresh(
+        boundary=datetime(2026, 7, 30, 9),
+        live_count=2,
+        missing_before=("KRW-AERO",),
+        unresolved_after=("KRW-AERO",),
+        results={"KRW-AERO": 0},
+        failed_markets=(),
+    )
+    monkeypatch.setattr(
+        collector_d1,
+        "refresh_current_d1_boundary",
+        lambda **_kwargs: result,
+    )
+    monkeypatch.setattr(
+        collector_d1,
+        "stats",
+        lambda *_args: pytest.fail("refresh must not scan full DB stats"),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "collector_d1.py",
+            "--refresh-current-boundary",
+            "--db",
+            str(db_path),
+        ],
+    )
+
+    assert collector_d1.main() == 0
+    output = capsys.readouterr().out
+    assert "missing_before=1" in output
+    assert "attempted=1" in output
+    assert "failed=0" in output
+    assert "unresolved=1" in output
+    assert "final health gate decides" in output
+
+
+def test_refresh_cli_is_mutually_exclusive_with_update(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "collector_d1.py",
+            "--update",
+            "--refresh-current-boundary",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        collector_d1.main()
+
+    assert exc_info.value.code == 2
 
 
 def test_update_reconciles_new_live_markets_before_existing(monkeypatch, tmp_path):

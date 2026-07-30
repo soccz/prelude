@@ -166,6 +166,7 @@ exit 0
             "FAIL_EXACT": fail_exact,
             "FAIL_RC": str(fail_rc),
             "CLOSE_PLAN_FAULT": close_plan_fault,
+            "PRELUDE_D1_RECONCILE_DELAY_SECONDS": "0",
         }
     )
     result = subprocess.run(
@@ -209,6 +210,7 @@ def _run_auxiliary_shell_with_fake_python(
         {
             "PATH": f"{fake_bin}:/usr/bin:/bin",
             "CALL_LOG": str(call_log),
+            "PRELUDE_D1_RECONCILE_DELAY_SECONDS": "0",
         }
     )
     result = subprocess.run(
@@ -385,6 +387,23 @@ def test_recommend_health_failure_skips_stale_signals_but_runs_maintenance(
     assert "-m data.collector_4h --all --days 2" in calls
     assert "-m data.collector_binance_d1 --all --days 3" in calls
     assert "stale D1" in logs
+    assert (
+        calls.splitlines().count(
+            "scripts/health_check.py --channel recommend --no-telegram"
+        )
+        == 2
+    )
+    assert (
+        calls.splitlines().count(
+            "-m data.collector_d1 --refresh-current-boundary"
+        )
+        == 1
+    )
+    assert (
+        "channel=recommend first_exit=23 refresh_exit=0 final_exit=23"
+        in logs
+    )
+    assert "[critical] recommend D1 health gate failed (exit=23)" in logs
 
 
 def test_distribution_health_failure_skips_only_legacy_distribution(tmp_path):
@@ -401,6 +420,186 @@ def test_distribution_health_failure_skips_only_legacy_distribution(tmp_path):
     assert "scripts/recommend_today.py --ranking R2" in calls
     assert "scripts/pump_detector_v2_today.py --send-telegram" in calls
     assert "distribution record skipped" in logs
+    assert (
+        calls.splitlines().count(
+            "scripts/health_check.py --channel distribution --no-telegram"
+        )
+        == 2
+    )
+    assert (
+        calls.splitlines().count(
+            "-m data.collector_d1 --refresh-current-boundary"
+        )
+        == 1
+    )
+    assert (
+        "channel=distribution first_exit=24 refresh_exit=0 final_exit=24"
+        in logs
+    )
+
+
+@pytest.mark.parametrize(
+    (
+        "health_command",
+        "health_rc",
+        "recovered_command",
+        "critical_label",
+    ),
+    [
+        (
+            "scripts/health_check.py --channel recommend --no-telegram",
+            23,
+            "scripts/recommend_send.py --slot open",
+            "recommend D1 health gate",
+        ),
+        (
+            "scripts/health_check.py --channel distribution --no-telegram",
+            24,
+            (
+                "scripts/predict_today_distribution.py "
+                "--universe top100 --top-k 10"
+            ),
+            "distribution health gate",
+        ),
+    ],
+)
+def test_distribution_health_recovers_after_one_bounded_d1_reconcile(
+    tmp_path,
+    health_command,
+    health_rc,
+    recovered_command,
+    critical_label,
+):
+    result, calls, logs = _run_auxiliary_shell_with_fake_python(
+        tmp_path,
+        "daily_run_distribution.sh",
+        f"""
+if [ "$*" = "{health_command}" ]; then
+    count=$(/usr/bin/grep -Fxc -- "$*" "$CALL_LOG")
+    if [ "$count" -eq 1 ]; then
+        exit {health_rc}
+    fi
+fi
+exit 0
+""",
+    )
+
+    commands = calls.splitlines()
+    assert result.returncode == 0
+    assert commands.count(health_command) == 2
+    assert (
+        commands.count("-m data.collector_d1 --refresh-current-boundary")
+        == 1
+    )
+    assert recovered_command in commands
+    assert (
+        f"first_exit={health_rc} refresh_exit=0" in logs
+    )
+    assert f"[critical] {critical_label}" not in logs
+
+
+def test_distribution_uses_at_most_one_d1_reconcile_across_both_health_gates(
+    tmp_path,
+):
+    result, calls, logs = _run_auxiliary_shell_with_fake_python(
+        tmp_path,
+        "daily_run_distribution.sh",
+        """
+if [ "$*" = "scripts/health_check.py --channel recommend --no-telegram" ]; then
+    exit 23
+fi
+if [ "$*" = "scripts/health_check.py --channel distribution --no-telegram" ]; then
+    exit 24
+fi
+exit 0
+""",
+    )
+
+    commands = calls.splitlines()
+    assert result.returncode == 23
+    assert (
+        commands.count("-m data.collector_d1 --refresh-current-boundary")
+        == 1
+    )
+    assert (
+        commands.count(
+            "scripts/health_check.py --channel recommend --no-telegram"
+        )
+        == 2
+    )
+    assert (
+        commands.count(
+            "scripts/health_check.py --channel distribution --no-telegram"
+        )
+        == 1
+    )
+    assert "scripts/recommend_send.py --slot open" not in commands
+    assert "scripts/predict_today_distribution.py" not in calls
+    assert "pipeline D1 reconcile was already used" in logs
+    assert "channel=distribution exit=24" in logs
+
+
+def test_distribution_refresh_failure_stays_fail_closed_when_health_fails(
+    tmp_path,
+):
+    result, calls, logs = _run_auxiliary_shell_with_fake_python(
+        tmp_path,
+        "daily_run_distribution.sh",
+        """
+if [ "$*" = "scripts/health_check.py --channel recommend --no-telegram" ]; then
+    exit 23
+fi
+if [ "$*" = "-m data.collector_d1 --refresh-current-boundary" ]; then
+    exit 31
+fi
+exit 0
+""",
+    )
+
+    commands = calls.splitlines()
+    assert result.returncode == 23
+    assert (
+        commands.count("-m data.collector_d1 --refresh-current-boundary")
+        == 1
+    )
+    assert "scripts/recommend_send.py --slot open" not in commands
+    assert "current D1 boundary targeted refresh failed (exit=31)" in logs
+    assert (
+        "channel=recommend first_exit=23 refresh_exit=31 final_exit=23"
+        in logs
+    )
+
+
+def test_distribution_final_health_is_authoritative_after_refresh_error(
+    tmp_path,
+):
+    result, calls, logs = _run_auxiliary_shell_with_fake_python(
+        tmp_path,
+        "daily_run_distribution.sh",
+        """
+if [ "$*" = "scripts/health_check.py --channel recommend --no-telegram" ]; then
+    count=$(/usr/bin/grep -Fxc -- "$*" "$CALL_LOG")
+    if [ "$count" -eq 1 ]; then
+        exit 23
+    fi
+fi
+if [ "$*" = "-m data.collector_d1 --refresh-current-boundary" ]; then
+    exit 31
+fi
+exit 0
+""",
+    )
+
+    commands = calls.splitlines()
+    assert result.returncode == 0
+    assert (
+        commands.count("-m data.collector_d1 --refresh-current-boundary")
+        == 1
+    )
+    assert "scripts/recommend_send.py --slot open" in commands
+    assert "current D1 boundary targeted refresh failed (exit=31)" in logs
+    assert "channel=recommend first_exit=23 refresh_exit=31" in logs
+    assert "[critical] recommend D1 health gate" not in logs
 
 
 def test_preopen_r1_send_failure_propagates(tmp_path):

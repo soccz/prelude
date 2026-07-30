@@ -23,6 +23,7 @@ KST 09:05 distribution timer
    ↓
 scripts/daily_run_distribution.sh
    ├─ D1 update + recommend gate: D-1 PIT Top100 + 당일 exact D1
+   │  └─ 첫 실패면 current-boundary 결손만 pipeline당 1회 재수집 후 동일 gate 재검증
    ├─ immutable R1 snapshot → Telegram receipt → 전용 ledger
    ├─ 4h update + exact closed-boundary gate → legacy distribution record-only
    ├─ R2 / A1 / pump v1 record-only
@@ -154,6 +155,9 @@ service가 nonzero를 반환한다.
   (미실행 평가기를 `OK` 감시처럼 표시하지 않음).
 
 ### 2.2 실패 시
+- 09:05 runner의 첫 exact gate 실패는 현재 09:00 경계가 없는 live market만
+  최대 64개(초기값) 1회 재수집하고 동일 gate를 다시 평가한다. pipeline 전체
+  재수집 상한은 1회이며, 광역 결손·재검증 실패는 관용하지 않는다
 - daily runner가 해당 채널 작업을 skip하고 nonzero를 전파
 - systemd `OnFailure`가 운영 실패 알림을 담당
 - `ops/preflight.py`는 `scripts/predict_today_legacy.py`에서만 쓰는 legacy helper
@@ -340,6 +344,8 @@ legacy CLI 기본값은 ACTIVE가 없으면 발송하지 않으며 현재 daily 
 
 ### 7.3 retry / 안정성
 - 업비트 / 바이낸스 API 일시적 fail → collector retry/backoff
+- 09:05 D1 exact 결손은 2초(초기값) 후 결손 identity만 1회 targeted refresh;
+  64개 초과 광역 결손은 refresh하지 않고 즉시 최종 gate로 fail-closed
 - 최종 실패는 runner nonzero와 systemd `OnFailure`로 전파
 
 ---

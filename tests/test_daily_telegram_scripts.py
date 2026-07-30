@@ -13,16 +13,26 @@ def test_distribution_daily_script_keeps_distribution_record_only():
     assert "--send-silence-telegram" not in predict_block
     assert "python scripts/recommend_send.py --slot open" in text
     assert "python scripts/pump_detector_today.py" in text
+    health_helper = text.split("run_health_with_d1_reconcile() {", 1)[1]
+    health_helper = health_helper.split("\n}\n", 1)[0]
+    assert health_helper.count("python scripts/health_check.py") == 2
+    assert '--channel "$channel" --no-telegram' in health_helper
+    assert "-m data.collector_d1 \\\n        --refresh-current-boundary" in (
+        health_helper
+    )
     assert text.index("python -m data.collector_d1 --update") < text.index(
-        "python scripts/health_check.py --channel recommend"
+        "run_health_with_d1_reconcile recommend"
     )
     assert text.index(
-        "python scripts/health_check.py --channel recommend"
+        "run_health_with_d1_reconcile recommend"
     ) < text.index("python scripts/recommend_send.py --slot open")
     assert text.index("python scripts/recommend_send.py --slot open") < text.index(
         "python -m data.collector_4h --all"
     )
     assert text.index("python -m data.collector_4h --all") < text.index(
+        "run_health_with_d1_reconcile distribution"
+    )
+    assert text.index("run_health_with_d1_reconcile distribution") < text.index(
         "python scripts/predict_today_distribution.py"
     )
 

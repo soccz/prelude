@@ -21,6 +21,7 @@ Changes:
     python -m data.collector_d1 --top 100 --days 365          # top 100 코인
     python -m data.collector_d1 --all --days 1095             # 전체 KRW 마켓 3년치
     python -m data.collector_d1 --update                      # 모든 기존 코인 incremental 갱신
+    python -m data.collector_d1 --refresh-current-boundary    # 현재 09:00 결측만 재수집
 """
 from __future__ import annotations
 
@@ -42,6 +43,7 @@ import requests  # type: ignore[import-untyped]
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.database import (  # noqa: E402
+    connect_readonly,
     init_db,
     latest_timestamp,
     market_timestamp_ranges_readonly,
@@ -66,6 +68,10 @@ SLEEP_BETWEEN_PAGES = 0.15  # API rate limit (10/s 안전)
 SLEEP_BETWEEN_MARKETS = 0.3
 SLEEP_BETWEEN_TICKER_FALLBACKS = 0.12
 SLEEP_BETWEEN_TOP_MARKETS = 0.12
+# 초기값 64: 07-30 관측 결손 44개에 여유를 두되, 광역 API/DB 장애 때
+# live universe 전체를 순회해 발송 창을 소진하지 않는다. missing_before와
+# 복구 소요시간을 축적해 조정하며, 초과는 최종 health gate가 fail-closed한다.
+MAX_CURRENT_BOUNDARY_REFRESH_MARKETS = 64
 KST = timezone(timedelta(hours=9))
 
 logger = logging.getLogger("collector_d1")
@@ -109,6 +115,18 @@ class UpdateResults(dict[str, int]):
         self.coverage = coverage
 
 
+@dataclass(frozen=True)
+class CurrentBoundaryRefresh:
+    """현재 KST D1 경계 결측 live market만 재수집한 결과."""
+
+    boundary: datetime
+    live_count: int
+    missing_before: tuple[str, ...]
+    unresolved_after: tuple[str, ...]
+    results: dict[str, int]
+    failed_markets: tuple[str, ...]
+
+
 class FetchPageError(RuntimeError):
     """API 재시도 전패를 정상적인 상장 시작/빈 페이지와 구분한다."""
 
@@ -120,6 +138,33 @@ class _TickerBatchNotFound(RuntimeError):
 def _now_kst_naive() -> datetime:
     """pyupbit의 timezone-naive KST candle timestamp와 같은 wall-clock."""
     return datetime.now(KST).replace(tzinfo=None)
+
+
+def current_d1_boundary(now: datetime | None = None) -> datetime:
+    """현재 시각에 유효한 KST 09:00 D1 candle 시작 경계.
+
+    09:00 정각부터는 당일 09:00, 그 전에는 전일 09:00이다. aware 입력은
+    KST로 변환하고 naive 입력은 기존 수집기 계약대로 KST wall-clock이다.
+    """
+    wall = _wall_clock_kst(now or _now_kst_naive())
+    boundary = wall.replace(hour=9, minute=0, second=0, microsecond=0)
+    if wall < boundary:
+        boundary -= timedelta(days=1)
+    return boundary
+
+
+def _markets_at_d1_boundary_readonly(
+    db_path: Path,
+    boundary: datetime,
+) -> set[str]:
+    """정확한 D1 boundary 행을 가진 market identity를 읽기 전용 조회."""
+    timestamp = boundary.strftime("%Y-%m-%d %H:%M:%S")
+    with connect_readonly(db_path) as conn:
+        rows = conn.execute(
+            "SELECT market FROM candles WHERE timestamp = ?",
+            (timestamp,),
+        ).fetchall()
+    return {str(row[0]) for row in rows}
 
 
 # ============================================================================
@@ -559,6 +604,74 @@ def collect_all(markets: list[str], days: int = 365 * 3, db_path: Path = DB_PATH
     return results
 
 
+def refresh_current_d1_boundary(
+    db_path: Path = DB_PATH,
+    *,
+    now: datetime | None = None,
+    live_markets: list[str] | None = None,
+) -> CurrentBoundaryRefresh:
+    """현재 09:00 경계가 없는 live market만 한 번 bounded 재수집한다.
+
+    재수집 후에도 경계가 없는 market은 여기서 실패로 단정하지 않는다. 얇은
+    종목의 구조적 무거래인지 실제 DB gap인지는 곧이어 실행되는 health gate가
+    업스트림을 재확인해 판정한다. 이 함수의 실패는 fetch 자체의 실패뿐이다.
+    """
+    init_db(db_path)
+    boundary = current_d1_boundary(now)
+    live = sorted(
+        set(get_krw_markets() if live_markets is None else live_markets)
+    )
+    exact = _markets_at_d1_boundary_readonly(db_path, boundary)
+    missing = sorted(set(live) - exact)
+    logger.info(
+        "D1 current-boundary targeted refresh: boundary=%s "
+        "live=%d missing=%d%s",
+        boundary,
+        len(live),
+        len(missing),
+        f" [{', '.join(missing)}]" if missing else "",
+    )
+    targets = missing
+    if len(missing) > MAX_CURRENT_BOUNDARY_REFRESH_MARKETS:
+        logger.warning(
+            "D1 current-boundary gap is too broad for targeted refresh: "
+            "missing=%d cap=%d; defer to fail-closed health gate",
+            len(missing),
+            MAX_CURRENT_BOUNDARY_REFRESH_MARKETS,
+        )
+        targets = []
+    results = (
+        collect_all(targets, days=1, db_path=db_path)
+        if targets
+        else {}
+    )
+    failed = tuple(sorted(
+        market for market, rows in results.items() if rows < 0
+    ))
+    exact_after = (
+        _markets_at_d1_boundary_readonly(db_path, boundary)
+        if missing
+        else exact
+    )
+    unresolved = tuple(sorted(set(live) - exact_after))
+    logger.info(
+        "D1 current-boundary targeted refresh complete: "
+        "attempted=%d failed=%d unresolved=%d%s",
+        len(results),
+        len(failed),
+        len(unresolved),
+        f" [{', '.join(unresolved)}]" if unresolved else "",
+    )
+    return CurrentBoundaryRefresh(
+        boundary=boundary,
+        live_count=len(live),
+        missing_before=tuple(missing),
+        unresolved_after=unresolved,
+        results=results,
+        failed_markets=failed,
+    )
+
+
 def update_existing(
     db_path: Path = DB_PATH,
     new_market_days: int = 365 * 3,
@@ -673,6 +786,11 @@ def main() -> int:
         action="store_true",
         help="라이브 KRW 신규/부분 마켓 백필 + 기존 DB 마켓 incremental update",
     )
+    mode.add_argument(
+        "--refresh-current-boundary",
+        action="store_true",
+        help="현재 KST 09:00 D1 행이 없는 live market만 1회 재수집",
+    )
     parser.add_argument("--days", type=int, default=365 * 3, help="백필 일수 (기본 3년)")
     parser.add_argument("--db", type=str, default=str(DB_PATH), help="DB 경로")
     parser.add_argument("--verbose", "-v", action="store_true")
@@ -727,6 +845,30 @@ def main() -> int:
         if coverage.failed_markets:
             print(f"Failed markets: {', '.join(coverage.failed_markets)}")
         failed = bool(coverage.missing_after or coverage.failed_markets)
+    elif args.refresh_current_boundary:
+        refresh = refresh_current_d1_boundary(db_path=db_path)
+        print(
+            "Current-boundary targeted refresh: "
+            f"boundary={refresh.boundary} "
+            f"live={refresh.live_count} "
+            f"missing_before={len(refresh.missing_before)} "
+            f"attempted={len(refresh.results)} "
+            f"failed={len(refresh.failed_markets)} "
+            f"unresolved={len(refresh.unresolved_after)}"
+        )
+        if refresh.missing_before:
+            print(
+                "Targeted markets: "
+                f"{', '.join(refresh.missing_before)}"
+            )
+        if refresh.failed_markets:
+            print(f"Failed markets: {', '.join(refresh.failed_markets)}")
+        if refresh.unresolved_after:
+            print(
+                "Unresolved markets (final health gate decides): "
+                f"{', '.join(refresh.unresolved_after)}"
+            )
+        return 1 if refresh.failed_markets else 0
     print("\n=== DB stats ===")
     print(stats(db_path).to_string(index=False))
     return 1 if failed else 0

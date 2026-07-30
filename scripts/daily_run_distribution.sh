@@ -49,6 +49,68 @@ record_critical_failure() {
     echo "  [critical] $step failed (exit=$rc) — 가능한 후속 단계는 계속" >> "$LOG"
 }
 
+# Upbit의 새 09:00 D1 candle이 일부 market에서 첫 fetch 직후 잠시 보이지
+# 않는 경우가 있다. health gate 자체는 그대로 fail-closed로 두고, 실패 시
+# 현재 경계가 없는 live market만 파이프라인 전체에서 한 번 재수집한 뒤
+# 같은 gate를 한 번 더 평가한다. 무한 retry나 stale 관용은 금지한다.
+# 지연 2초는 07-30 관측
+# (첫 수집 직후 부재, health 시점 업스트림 존재)의 초기값이며 로그로 조정한다.
+D1_RECONCILE_DELAY_SECONDS="${PRELUDE_D1_RECONCILE_DELAY_SECONDS:-2}"
+if ! [[ "$D1_RECONCILE_DELAY_SECONDS" =~ ^[0-9]+$ ]]; then
+    echo "invalid PRELUDE_D1_RECONCILE_DELAY_SECONDS: $D1_RECONCILE_DELAY_SECONDS" >&2
+    exit 2
+fi
+D1_RECONCILE_ATTEMPTED=0
+
+run_health_with_d1_reconcile() {
+    local channel="$1"
+    local first_rc
+    local refresh_rc=0
+    local final_rc
+
+    if python scripts/health_check.py \
+        --channel "$channel" --no-telegram >> "$LOG" 2>&1; then
+        return 0
+    else
+        first_rc=$?
+    fi
+    if [ "$D1_RECONCILE_ATTEMPTED" -eq 1 ]; then
+        echo "  health gate failed after pipeline D1 reconcile was already used" \
+            "(channel=$channel exit=$first_rc) — 추가 retry 없이 fail-closed" \
+            >> "$LOG"
+        return "$first_rc"
+    fi
+    D1_RECONCILE_ATTEMPTED=1
+    echo "  health gate first attempt failed (channel=$channel exit=$first_rc)" \
+        "— current D1 boundary targeted refresh 후 1회 재검증" >> "$LOG"
+
+    if [ "$D1_RECONCILE_DELAY_SECONDS" -gt 0 ]; then
+        /usr/bin/sleep "$D1_RECONCILE_DELAY_SECONDS"
+    fi
+    if python -m data.collector_d1 \
+        --refresh-current-boundary >> "$LOG" 2>&1; then
+        :
+    else
+        refresh_rc=$?
+        echo "  current D1 boundary targeted refresh failed (exit=$refresh_rc)" \
+            >> "$LOG"
+    fi
+
+    if python scripts/health_check.py \
+        --channel "$channel" --no-telegram >> "$LOG" 2>&1; then
+        echo "  health gate recovered after bounded D1 reconcile" \
+            "(channel=$channel first_exit=$first_rc refresh_exit=$refresh_rc)" \
+            >> "$LOG"
+        return 0
+    else
+        final_rc=$?
+    fi
+    echo "  health gate still failed after bounded D1 reconcile" \
+        "(channel=$channel first_exit=$first_rc refresh_exit=$refresh_rc" \
+        "final_exit=$final_rc)" >> "$LOG"
+    return "$final_rc"
+}
+
 # R1은 D1만 필요하다. 느린 4h 수집/구형 distribution 예측보다 먼저 발송해
 # 09:00 open 이후 불필요한 지연을 줄인다.
 RECOMMEND_HEALTH_OK=0
@@ -68,7 +130,7 @@ fi
 # 유지보수와 후속 감사는 계속하고 최종 nonzero를 전파한다.
 echo "[2/11] health_check gate (recommend: d1 only)" >> "$LOG"
 if [ "$D1_UPDATE_OK" -eq 1 ]; then
-    if python scripts/health_check.py --channel recommend --no-telegram >> "$LOG" 2>&1; then
+    if run_health_with_d1_reconcile recommend; then
         RECOMMEND_HEALTH_OK=1
     else
         record_critical_failure "$?" "recommend D1 health gate"
@@ -104,7 +166,7 @@ fi
 
 echo "[5/11] health_check gate (distribution: d1 + 4h)" >> "$LOG"
 if [ "$D1_UPDATE_OK" -eq 1 ] && [ "$H4_UPDATE_OK" -eq 1 ]; then
-    if python scripts/health_check.py --channel distribution --no-telegram >> "$LOG" 2>&1; then
+    if run_health_with_d1_reconcile distribution; then
         DISTRIBUTION_HEALTH_OK=1
     else
         record_critical_failure "$?" "distribution health gate"
