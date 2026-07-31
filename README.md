@@ -4,7 +4,7 @@
 > KST 08:50·09:05에 알려 주는 개인 트레이딩 보조 레이더.
 > 사용자가 직접 판단·매매하며 **자동 주문은 없다.**
 
-![tests](https://img.shields.io/badge/tests-1355%20passed-brightgreen)
+![tests](https://img.shields.io/badge/tests-1357%20passed-brightgreen)
 ![status](https://img.shields.io/badge/verdict-radar--not--strategy-orange)
 ![evidence](https://img.shields.io/badge/evidence-snapshot%E2%86%92receipt%E2%86%92label-blue)
 ![judgment](https://img.shields.io/badge/v2%20GO%2FKILL-2026--09--01%20(frozen)-red)
@@ -127,7 +127,7 @@ python scripts/recommend_today.py --slot open --dry-run
 sudo bash deploy/install_systemd.sh --check-only      # 설치본-저장소 정합 검사
 
 # 전체 검증
-python -m pytest -q tests/                            # 1276 passed 기대
+python -m pytest -q tests/                            # 1357 passed 기대
 ```
 
 ---
@@ -147,7 +147,7 @@ prelude/
 ├── notifier/          # Telegram + delivery receipt
 ├── scripts/           # 일일 러너·백테스트·챌린저·감사 평가기
 ├── deploy/            # systemd 15유닛 + 트랜잭션 installer (실패 시 롤백)
-├── tests/             # pytest 1276 (warnings=error)
+├── tests/             # pytest 1357 (warnings=error)
 ├── _workspace/        # 연구 노트·설계·독립 재검산 판정서 (negative results 박제)
 └── output/            # 산출물 (증거 아티팩트는 gitignore + versioned backup)
 ```

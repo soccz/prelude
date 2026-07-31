@@ -2554,6 +2554,14 @@ exit 0
     return result, (output / "cron_heartbeat.log").read_text()
 
 
+def _publish_body_larger_than_any_linux_pipe() -> str:
+    body = "".join(
+        f"[asset {index:04d}] {'x' * 1024}\n" for index in range(2048)
+    )
+    assert len(body.encode("utf-8")) > 2 * 1024 * 1024
+    return body
+
+
 def test_heartbeat_after_schedule_fails_closed_when_publish_log_missing(
     tmp_path: Path,
 ) -> None:
@@ -2610,3 +2618,65 @@ def test_heartbeat_accepts_today_latest_publish_success_marker(
 
     assert "publish 오늘 최신 세션 완료 ok" in log
     assert "publish 오늘 최신 세션 성공 완료 marker 없음" not in log
+
+
+def test_heartbeat_accepts_publish_session_larger_than_pipe_buffer(
+    tmp_path: Path,
+) -> None:
+    """Large successful sessions must not become false failures via SIGPIPE."""
+    today = subprocess.run(
+        ["date", "+%F"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    large_body = _publish_body_larger_than_any_linux_pipe()
+    latest_session = (
+        f"=== prelude publish dashboard {today} 10:10:01 ===\n"
+        f"{large_body}"
+        "[done] 10:11:09 committed + pushed\n"
+    )
+
+    result, log = _run_heartbeat_publish_probe(
+        tmp_path,
+        publish_log=(
+            "=== prelude publish dashboard 2026-07-30 10:10:01 ===\n"
+            "[fail] push: old session failure (exit=1)\n"
+            f"{latest_session}"
+        ),
+    )
+
+    assert result.returncode == 0
+    assert "publish 오늘 최신 세션 완료 ok" in log
+    assert "publish 오늘 세션 없음 또는 최신 세션 날짜 불일치" not in log
+    assert "publish 최근 fail" not in log
+    assert "publish 오늘 최신 세션 성공 완료 marker 없음" not in log
+
+
+def test_heartbeat_reports_last_failure_in_large_latest_publish_session(
+    tmp_path: Path,
+) -> None:
+    today = subprocess.run(
+        ["date", "+%F"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    large_body = _publish_body_larger_than_any_linux_pipe()
+    latest_session = (
+        f"=== prelude publish dashboard {today} 10:10:01 ===\n"
+        f"{large_body}"
+        "[fail] push: current session failure (exit=7)\n"
+    )
+
+    result, log = _run_heartbeat_publish_probe(
+        tmp_path,
+        publish_log=latest_session,
+    )
+
+    assert result.returncode == 0
+    assert (
+        "publish 최근 fail: "
+        "[fail] push: current session failure (exit=7)"
+    ) in log
+    assert "publish 오늘 최신 세션 완료 ok" not in log

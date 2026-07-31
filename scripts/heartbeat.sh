@@ -412,20 +412,57 @@ if [[ "$NOW_HHMM" =~ ^[0-9]{4}$ ]] && \
     if [ ! -f "$PUB_LOG" ]; then
         WARN "publish 예정 시각 이후 로그 없음: $PUB_LOG"
     else
-        LAST_SESSION=$(awk \
-            '/=== prelude publish dashboard/{buf=""} {buf=buf $0 "\n"} END{printf "%s", buf}' \
-            "$PUB_LOG")
-        if ! echo "$LAST_SESSION" | grep -Fq \
-            "=== prelude publish dashboard $TODAY_ISO "; then
-            WARN "publish 오늘 세션 없음 또는 최신 세션 날짜 불일치"
-        elif echo "$LAST_SESSION" | grep -q "\[fail\]"; then
-            last_fail=$(echo "$LAST_SESSION" | grep "\[fail\]" | tail -1)
-            WARN "publish 최근 fail: $last_fail"
-        elif ! echo "$LAST_SESSION" | grep -Eq \
-            '^\[done\] [0-9]{2}:[0-9]{2}:[0-9]{2} committed \+ pushed$'; then
-            WARN "publish 오늘 최신 세션 성공 완료 marker 없음"
+        # 로그가 pipe buffer(보통 64 KiB)를 넘으면 `echo | grep -q`의
+        # 조기 종료가 producer SIGPIPE를 만들고, pipefail이 성공 세션을
+        # 실패로 뒤집는다. 전체 로그를 awk가 끝까지 읽고 작은 상태값만
+        # 반환하게 해 로그 크기와 무관하게 판정한다.
+        publish_state=""
+        if publish_state=$(awk -v today="$TODAY_ISO" '
+            /=== prelude publish dashboard/ {
+                seen = 1
+                date_ok = index($0, "=== prelude publish dashboard " today " ") > 0
+                last_fail = ""
+                completed = 0
+                next
+            }
+            seen && index($0, "[fail]") {
+                last_fail = $0
+            }
+            seen && $0 ~ /^\[done\] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] committed \+ pushed$/ {
+                completed = 1
+            }
+            END {
+                if (!seen || !date_ok) {
+                    print "date-mismatch"
+                } else if (last_fail != "") {
+                    printf "fail\t%s\n", last_fail
+                } else if (!completed) {
+                    print "incomplete"
+                } else {
+                    print "ok"
+                }
+            }
+        ' "$PUB_LOG"); then
+            case "$publish_state" in
+                date-mismatch)
+                    WARN "publish 오늘 세션 없음 또는 최신 세션 날짜 불일치"
+                    ;;
+                fail$'\t'*)
+                    WARN "publish 최근 fail: ${publish_state#*$'\t'}"
+                    ;;
+                incomplete)
+                    WARN "publish 오늘 최신 세션 성공 완료 marker 없음"
+                    ;;
+                ok)
+                    echo "  publish 오늘 최신 세션 완료 ok" >> "$LOG"
+                    ;;
+                *)
+                    WARN "publish 최신 세션 판정 비정상: ${publish_state:-empty}"
+                    ;;
+            esac
         else
-            echo "  publish 오늘 최신 세션 완료 ok" >> "$LOG"
+            probe_rc=$?
+            WARN "publish 최신 세션 판정 probe FAIL (exit=$probe_rc)"
         fi
     fi
 elif [[ "$NOW_HHMM" =~ ^[0-9]{4}$ ]]; then
