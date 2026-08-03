@@ -147,12 +147,56 @@ def collect_market(market: str, days: int = 365 * 3, db_path: Path = DB_PATH) ->
     return saved
 
 
-def collect_all(markets: list[str], days: int = 365 * 3, db_path: Path = DB_PATH) -> dict:
+def heal_recent_gaps(
+    market: str,
+    days: int,
+    db_path: Path = DB_PATH,
+) -> int:
+    """최근 N일 구간을 무조건 재페이징해 내부 갭을 치유한다 (UPSERT 멱등).
+
+    ``collect_market`` 의 incremental 경로는 최상단 1페이지(200봉=50h)만
+    갱신하고 바닥만 연장하므로, 다운타임이 만든 '중간 구멍'은 --days 를
+    아무리 줘도 못 메운다 — 2026-08-03 부팅 캐치업에서 07-31 96봉 창이
+    영구 partial 로 고착된 실사고의 봉쇄. 15m 전용 문제다(4h/D1 은 1페이지
+    깊이가 33일/200일이라 이 클래스에 안 걸린다).
+    """
+    if days <= 0:
+        raise ValueError("days must be positive")
+    init_db(db_path)
+    now = _now_kst_naive()
+    target_oldest = now - timedelta(days=days)
+    cur_to = now + timedelta(days=1)
+    saved = 0
+    pages = 0
+    while cur_to > target_oldest:
+        df = _fetch_page(market, cur_to)
+        if df is None or len(df) == 0:
+            break
+        saved += save_candles(db_path, df, market)
+        pages += 1
+        new_oldest = df.index.min().to_pydatetime().replace(tzinfo=None)
+        if new_oldest >= cur_to:
+            break
+        cur_to = new_oldest
+        time.sleep(SLEEP_BETWEEN_PAGES)
+    logger.info(f"{market}: 15m gap-heal {days}d, {saved} rows ({pages} pages)")
+    return saved
+
+
+def collect_all(
+    markets: list[str],
+    days: int = 365 * 3,
+    db_path: Path = DB_PATH,
+    heal_days: int | None = None,
+) -> dict:
     results = {}
     for i, m in enumerate(markets, 1):
         logger.info(f"[{i}/{len(markets)}] 15m {m}")
         try:
-            n = collect_market(m, days=days, db_path=db_path)
+            if heal_days is not None:
+                n = heal_recent_gaps(m, days=heal_days, db_path=db_path)
+            else:
+                n = collect_market(m, days=days, db_path=db_path)
             results[m] = n
         except Exception as e:
             logger.error(f"{m}: 15m FAIL: {e}")
@@ -168,6 +212,15 @@ def main() -> int:
     mode.add_argument("--top", type=int, help="완결 D1 거래대금 top N")
     mode.add_argument("--all", action="store_true", help="KRW 전체 마켓")
     parser.add_argument("--days", type=int, default=365 * 3)
+    parser.add_argument(
+        "--heal-days",
+        type=int,
+        default=None,
+        help=(
+            "최근 N일 구간을 무조건 재페이징해 내부 갭 치유 (UPSERT 멱등). "
+            "--days 백필과 달리 다운타임 구멍을 메운다"
+        ),
+    )
     parser.add_argument("--db", type=str, default=str(DB_PATH))
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
@@ -181,13 +234,21 @@ def main() -> int:
     db_path = Path(args.db)
 
     if args.coin:
-        n = collect_market(args.coin, days=args.days, db_path=db_path)
+        if args.heal_days is not None:
+            n = heal_recent_gaps(args.coin, days=args.heal_days, db_path=db_path)
+        else:
+            n = collect_market(args.coin, days=args.days, db_path=db_path)
         print(f"Saved {n} rows for {args.coin} (15m)")
         failed = n < 0
     elif args.all:
         markets = get_krw_markets()
-        print(f"전체 KRW 15m 백필 {len(markets)}개 시작 (days={args.days})")
-        results = collect_all(markets, days=args.days, db_path=db_path)
+        if args.heal_days is not None:
+            print(f"전체 KRW 15m 갭치유 {len(markets)}개 시작 (heal_days={args.heal_days})")
+        else:
+            print(f"전체 KRW 15m 백필 {len(markets)}개 시작 (days={args.days})")
+        results = collect_all(
+            markets, days=args.days, db_path=db_path, heal_days=args.heal_days
+        )
         ok = sum(1 for v in results.values() if v >= 0)
         fail = sum(1 for v in results.values() if v < 0)
         total = sum(v for v in results.values() if v >= 0)
@@ -195,7 +256,9 @@ def main() -> int:
         failed = fail > 0
     elif args.top is not None:
         markets = get_top_markets(args.top)
-        results = collect_all(markets, days=args.days, db_path=db_path)
+        results = collect_all(
+            markets, days=args.days, db_path=db_path, heal_days=args.heal_days
+        )
         print(f"15m Done: {len(results)} markets")
         failed = any(value < 0 for value in results.values())
 

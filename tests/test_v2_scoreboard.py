@@ -198,7 +198,7 @@ def test_day_equal_metric_is_companion_not_preregistered_replacement():
     assert "diagnostic only" in out["companion_metric_note"]
 
 
-def test_open_and_blank_rows_are_ignored():
+def test_open_no_data_and_blank_rows_are_ignored():
     rows = [
         _row("2026-07-01", 0.2),
         _row("2026-07-02", 0.4),
@@ -208,12 +208,46 @@ def test_open_and_blank_rows_are_ignored():
             "status": "open",
             "realized_pct": "",
         },
+        {
+            "date": "2026-07-04",
+            "coin": "KRW-NO-DATA",
+            "status": "no_data",
+            "realized_pct": "",
+        },
     ]
 
     out = build_scoreboard(rows, today=date(2026, 7, 25))
 
     assert out["closed_n"] == 2
     assert out["mean_net_pct"] == pytest.approx(0.3)
+
+
+def test_verified_no_data_row_is_accepted_and_not_scored(tmp_path):
+    output = tmp_path / "scoreboard.json"
+    ledger, decisions, receipts = _write_verified_inputs(
+        tmp_path,
+        [
+            {
+                "date": "2026-07-27",
+                "coin": "KRW-NODATA",
+                "status": "no_data",
+                "realized_pct": "",
+                "btc_regime": "bear_quiet",
+            }
+        ],
+    )
+
+    code, payload = run_scoreboard(
+        ledger=ledger,
+        output=output,
+        today=date(2026, 7, 28),
+        decision_root=decisions,
+        receipt_root=receipts,
+    )
+
+    assert code == 0
+    assert payload["status"] == "insufficient_verified_evidence"
+    assert payload["closed_n"] == 0
 
 
 def test_single_negative_closed_trade_triggers_immediate_early_kill():

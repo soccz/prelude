@@ -499,6 +499,35 @@ def test_same_day_ledger_rejects_changed_success_timestamp(tmp_path):
     assert ledger.read_bytes() == before
 
 
+def test_same_day_retry_accepts_delivered_no_data_state(tmp_path):
+    ledger = tmp_path / "v2.csv"
+    result = _result()
+    sent_at = "2026-07-26T00:05:00+00:00"
+    runner.append_ledger(
+        result,
+        str(ledger),
+        False,
+        delivery_ok=True,
+        sent_at=sent_at,
+    )
+    rows = pd.read_csv(ledger)
+    rows.loc[0, "status"] = "no_data"
+    rows.to_csv(ledger, index=False)
+
+    runner.append_ledger(
+        result,
+        str(ledger),
+        False,
+        delivery_ok=True,
+        sent_at=sent_at,
+    )
+
+    persisted = pd.read_csv(ledger)
+    assert persisted["status"].tolist() == ["no_data"]
+    assert bool(persisted.loc[0, "delivery_ok"]) is True
+    assert persisted.loc[0, "sent_at"] == sent_at
+
+
 @pytest.mark.parametrize("sent_at", ["2026-07-26T00:05:00", "not-a-time"])
 def test_ledger_rejects_invalid_success_timestamp(tmp_path, sent_at):
     ledger = tmp_path / "v2.csv"

@@ -798,7 +798,7 @@ def test_distribution_close_15m_update_failure_still_runs_strict_path_closes(
     result, calls, logs = _run_with_fake_python(
         tmp_path,
         "daily_close_distribution.sh",
-        fail_exact="-m data.collector_15m_upbit --all --days 1",
+        fail_exact="-m data.collector_15m_upbit --all --heal-days 3",
         fail_rc=27,
     )
 
@@ -911,7 +911,7 @@ def test_preopen_close_15m_update_failure_runs_strict_downstream_and_propagates(
     result, calls, logs = _run_with_fake_python(
         tmp_path,
         "daily_close_preopen.sh",
-        fail_exact="-m data.collector_15m_upbit --all --days 1",
+        fail_exact="-m data.collector_15m_upbit --all --heal-days 3",
         fail_rc=27,
     )
 

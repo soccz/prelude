@@ -39,6 +39,13 @@ from ops.artifact_provenance import (
 from ops.file_lock import FileLockError, file_lock
 
 _ROOT = Path(__file__).resolve().parent.parent
+
+# _data_metadata 가 실측(stat/hash/row-count)하는 대상 파일. manifest 에
+# 기록되는 "path" 문자열은 canonical("data/upbit_d1.db")로 고정이며 이
+# 상수와 분리돼 있다 — 테스트가 이 상수만 tmp 로 재지향해 실 운영 DB
+# 병행 읽기(hermeticity 위반)를 없애기 위한 이음새다. 프로덕션에서
+# 재지향 금지.
+_DATA_DB_PATH = _ROOT / "data" / "upbit_d1.db"
 DEFAULT_SNAPSHOT_ROOT = _ROOT / "output" / "recommend_snapshots"
 LEGACY_SNAPSHOT_SCHEMA_VERSION = "recommend_snapshot.v1"
 SNAPSHOT_SCHEMA_VERSION = "recommend_snapshot.v2"
@@ -689,9 +696,13 @@ def _data_metadata() -> dict:
     detectable.  ``get_or_create_recommend_snapshot`` rejects a run if this
     manifest changes while the scorer is executing.
     """
-    path = _ROOT / "data" / "upbit_d1.db"
+    path = Path(_DATA_DB_PATH)
     manifest: dict[str, Any] = {
-        "path": str(path.relative_to(_ROOT)),
+        # 검증기 계약(canonical 상대경로 고정) — 실측 대상(_DATA_DB_PATH)과
+        # 분리돼 있다. 프로덕션에서는 항상 같은 파일이고, 테스트만 실측
+        # 대상을 tmp 로 재지향해 hermetic 하게 만든다 (2026-08-03 부팅
+        # 폭풍에서 실 DB 병행 읽기가 selftest 실패를 만든 사고의 봉쇄).
+        "path": "data/upbit_d1.db",
         "exists": path.exists(),
     }
     if not path.exists():

@@ -218,7 +218,19 @@ for db in "$DATA_DIR"/*.db; do
     fi
     db_tmp="$BACKUP_DIR/.${name}_${DATE}.$$.db.partial"
     checksum_tmp="$BACKUP_DIR/.${name}_${DATE}.$$.db.sha256.partial"
-    if sqlite3 "$db" ".backup '$db_tmp'" 2>>"$LOG"; then
+    # 부팅 캐치업 등으로 수집기가 병행 쓰기 중이면 .backup 이 'database is
+    # locked' 로 즉사할 수 있다(2026-08-03 실사고) — busy timeout + 재시도.
+    backup_copy_ok=0
+    for backup_attempt in 1 2 3; do
+        if sqlite3 "$db" ".timeout 30000" ".backup '$db_tmp'" 2>>"$LOG"; then
+            backup_copy_ok=1
+            break
+        fi
+        echo "    .backup attempt $backup_attempt/3 fail — 10s 후 재시도" >> "$LOG"
+        rm -f "$db_tmp"
+        sleep 10
+    done
+    if [ "$backup_copy_ok" -eq 1 ]; then
         if sqlite_check_exact_ok "$db_tmp" "integrity_check"; then
             # 같은 날짜의 수동 재실행도 이전 복구점을 절대 덮지 않는다.
             # 완전성 검사와 file sync를 마친 bytes의 전체 SHA-256을 파일명에

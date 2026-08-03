@@ -1074,7 +1074,7 @@ def _assert_ledger_delivery_state(
     cohort_sent_at: set[str] = set()
     for _, row in rows.iterrows():
         status = str(row.get("status", ""))
-        if status not in {"not_delivered", "open", "closed"}:
+        if status not in {"not_delivered", "open", "no_data", "closed"}:
             raise RuntimeError(
                 f"v2 ledger status invalid for asof={asof}: {status!r}"
             )

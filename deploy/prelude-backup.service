@@ -1,7 +1,10 @@
 [Unit]
 Description=prelude daily DB backup (sqlite atomic .backup + integrity)
 Wants=network-online.target
-After=network-online.target
+After=network-online.target prelude-close.service prelude-preopen-close.service
+# ^ close 유닛 After 는 부팅 캐치업(Persistent=true 동시 발화)에서만 의미를
+#   갖는 직렬화다 — 04:00 평시엔 close 가 큐에 없어 무영향. 2026-08-03
+#   부팅 폭풍에서 수집기 병행 쓰기로 .backup 이 lock 사망한 사고의 봉쇄.
 RequiresMountsFor=/home/soccz/22tb/prelude
 OnFailure=prelude-failure-alert@%n.service
 

@@ -104,3 +104,6 @@ secrets/
 
 # Claude Code local settings (machine-local, public push X)
 .claude/settings.local.json
+
+# 사용자 사고 스크린샷 (로컬 증거 — repo 반영 안 함)
+/IMG_*.PNG

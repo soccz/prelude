@@ -66,7 +66,7 @@
 <body>
   <header>
     <h1>Prelude Idea Validation</h1>
-    <div class="muted">asof: 2026-07-29 KST | report cutoff: 2026-07-29 KST | source generated: 2026-07-29T01:59:06+00:00 | html generated UTC: 2026-07-29T01:59:11+00:00 | cost: 0.15%</div>
+    <div class="muted">asof: 2026-08-03 KST | report cutoff: 2026-08-03 KST | source generated: 2026-08-03T05:13:33+00:00 | html generated UTC: 2026-08-03T05:13:37+00:00 | cost: 0.15%</div>
   </header>
   <main>
 
@@ -78,9 +78,9 @@
           <p class="muted">Personal KRW crypto trading recommendations; no automatic real-money orders.</p>
           <dl>
             <div><dt>version</dt><dd>policy-gated-beta-2026-05-25</dd></div>
-            <div><dt>closed evidence</dt><dd>1,235</dd></div>
-            <div><dt>net</dt><dd>65.24%p</dd></div>
-            <div><dt>TP5 hit</dt><dd>36.03%</dd></div>
+            <div><dt>closed evidence</dt><dd>1,261</dd></div>
+            <div><dt>net</dt><dd>96.13%p</dd></div>
+            <div><dt>TP5 hit</dt><dd>35.92%</dd></div>
           </dl>
           <p class="muted"><strong>Trained meta model:</strong> recommendation_quality_meta_label_v1 (LEGACY_UNBOUND) · n=1,202 · reason: time holdout gate passed</p>
         </div>
@@ -141,7 +141,7 @@
     <section class="block">
       <h2>Policy Competition</h2>
       <p class="muted">
-        Model + send-policy audit · asof 2026-07-29
+        Model + send-policy audit · asof 2026-08-03
         · P(+20%) threshold 0.20
         · record-only, no Telegram promotion.
       </p>
@@ -153,22 +153,22 @@
             <th>pump recall</th><th>captured</th>
           </tr>
         </thead>
-        <tbody><tr><td>pump_hunter:top_all</td><td>baseline</td><td>30</td><td>2</td><td>-0.52%p</td><td>0.00%</td><td>10.00%</td><td>60.00%</td><td>3 / 5</td></tr>
-<tr><td>pump_hunter:pump_prob_ge_3pct</td><td>pump_recall</td><td>30</td><td>2</td><td>-0.52%p</td><td>0.00%</td><td>10.00%</td><td>60.00%</td><td>3 / 5</td></tr>
+        <tbody><tr><td>pump_hunter:top_all</td><td>baseline</td><td>45</td><td>3</td><td>-0.19%p</td><td>0.00%</td><td>8.89%</td><td>28.57%</td><td>4 / 14</td></tr>
+<tr><td>pump_hunter:pump_prob_ge_3pct</td><td>pump_recall</td><td>45</td><td>3</td><td>-0.19%p</td><td>0.00%</td><td>8.89%</td><td>28.57%</td><td>4 / 14</td></tr>
 <tr><td>distribution_engine:top_all</td><td>baseline</td><td>164</td><td>32</td><td>-0.99%p</td><td>32.32%</td><td>10.98%</td><td>14.29%</td><td>18 / 126</td></tr>
+<tr><td>pump_hunter_v2:top2_only</td><td>precision_pnl</td><td>2</td><td>1</td><td>4.85%p</td><td>0.00%</td><td>50.00%</td><td>11.11%</td><td>1 / 9</td></tr>
+<tr><td>pump_hunter_v2:top1_only</td><td>precision_pnl</td><td>1</td><td>1</td><td>4.85%p</td><td>0.00%</td><td>100.00%</td><td>11.11%</td><td>1 / 9</td></tr>
+<tr><td>pump_hunter_v2:no_dump_top3</td><td>downside_control</td><td>3</td><td>1</td><td>2.18%p</td><td>0.00%</td><td>33.33%</td><td>11.11%</td><td>1 / 9</td></tr>
+<tr><td>pump_hunter_v2:top_all</td><td>baseline</td><td>4</td><td>1</td><td>1.20%p</td><td>0.00%</td><td>25.00%</td><td>11.11%</td><td>1 / 9</td></tr>
+<tr><td>pump_hunter_v2:pump_prob_ge_3pct</td><td>pump_recall</td><td>4</td><td>1</td><td>1.20%p</td><td>0.00%</td><td>25.00%</td><td>11.11%</td><td>1 / 9</td></tr>
 <tr><td>distribution_engine:top2_only</td><td>precision_pnl</td><td>59</td><td>32</td><td>-1.95%p</td><td>40.68%</td><td>15.25%</td><td>7.14%</td><td>9 / 126</td></tr>
+<tr><td>recommend_r1_preopen:top1_only</td><td>precision_pnl</td><td>4</td><td>4</td><td>-0.26%p</td><td>0.00%</td><td>25.00%</td><td>6.67%</td><td>1 / 15</td></tr>
+<tr><td>recommend_r1_preopen:rr_ge_0_75</td><td>downside_control</td><td>7</td><td>4</td><td>-1.13%p</td><td>0.00%</td><td>14.29%</td><td>6.67%</td><td>1 / 15</td></tr>
+<tr><td>recommend_r1_preopen:top2_only</td><td>precision_pnl</td><td>8</td><td>4</td><td>-1.38%p</td><td>0.00%</td><td>12.50%</td><td>6.67%</td><td>1 / 15</td></tr>
+<tr><td>recommend_r1_preopen:pump_prob_ge_3pct</td><td>pump_recall</td><td>5</td><td>4</td><td>-1.55%p</td><td>0.00%</td><td>20.00%</td><td>6.67%</td><td>1 / 15</td></tr>
+<tr><td>recommend_r1_preopen:top_all</td><td>baseline</td><td>12</td><td>4</td><td>-1.63%p</td><td>0.00%</td><td>8.33%</td><td>6.67%</td><td>1 / 15</td></tr>
 <tr><td>distribution_engine:top1_only</td><td>precision_pnl</td><td>32</td><td>32</td><td>-2.65%p</td><td>46.88%</td><td>18.75%</td><td>4.76%</td><td>6 / 126</td></tr>
-<tr><td>recommend_r1_open:top_all</td><td>baseline</td><td>171</td><td>57</td><td>-0.69%p</td><td>0.00%</td><td>3.51%</td><td>2.01%</td><td>6 / 298</td></tr>
-<tr><td>recommend_r1_open:rr_ge_0_75</td><td>downside_control</td><td>140</td><td>57</td><td>-0.54%p</td><td>0.00%</td><td>3.57%</td><td>1.68%</td><td>5 / 298</td></tr>
-<tr><td>recommend_r1_open:top2_only</td><td>precision_pnl</td><td>114</td><td>57</td><td>-0.79%p</td><td>0.00%</td><td>4.39%</td><td>1.68%</td><td>5 / 298</td></tr>
-<tr><td>consensus_2of3</td><td>consensus_precision</td><td>115</td><td>56</td><td>-0.39%p</td><td>0.00%</td><td>2.61%</td><td>1.03%</td><td>3 / 291</td></tr>
-<tr><td>recommend_r2_open:rr_ge_0_75</td><td>downside_control</td><td>90</td><td>56</td><td>-0.41%p</td><td>0.00%</td><td>3.33%</td><td>1.02%</td><td>3 / 294</td></tr>
-<tr><td>recommend_r2_open:top_all</td><td>baseline</td><td>168</td><td>56</td><td>-0.54%p</td><td>0.00%</td><td>1.79%</td><td>1.02%</td><td>3 / 294</td></tr>
-<tr><td>recommend_r1_open:no_dump_top3</td><td>downside_control</td><td>102</td><td>57</td><td>-0.39%p</td><td>0.00%</td><td>2.94%</td><td>1.01%</td><td>3 / 298</td></tr>
-<tr><td>recommend_r2_open:top2_only</td><td>precision_pnl</td><td>112</td><td>56</td><td>-0.61%p</td><td>0.00%</td><td>1.79%</td><td>0.68%</td><td>2 / 294</td></tr>
-<tr><td>recommend_r1_open:pump_prob_ge_3pct</td><td>pump_recall</td><td>53</td><td>57</td><td>-1.07%p</td><td>0.00%</td><td>3.77%</td><td>0.67%</td><td>2 / 298</td></tr>
-<tr><td>recommend_r2_open:pump_prob_ge_3pct</td><td>pump_recall</td><td>20</td><td>56</td><td>0.25%p</td><td>0.00%</td><td>5.00%</td><td>0.34%</td><td>1 / 294</td></tr>
-<tr><td>recommend_r2_open:no_dump_top3</td><td>downside_control</td><td>110</td><td>56</td><td>-0.59%p</td><td>0.00%</td><td>0.91%</td><td>0.34%</td><td>1 / 294</td></tr></tbody>
+<tr><td>recommend_r1_open:top_all</td><td>baseline</td><td>174</td><td>58</td><td>-0.68%p</td><td>0.00%</td><td>3.45%</td><td>1.95%</td><td>6 / 307</td></tr></tbody>
       </table>
     </section>
 
@@ -210,15 +210,15 @@
       <h2>Recommendation Quality</h2>
       <table>
         <thead><tr><th>channel</th><th>tier</th><th>candidates</th><th>avg conf</th><th>closed</th><th>net</th><th>TP5 hit</th></tr></thead>
-        <tbody><tr><td>distribution</td><td>DOWNRANK</td><td>31</td><td>26.5</td><td>31</td><td>-44.18%p</td><td>51.61%</td></tr>
+        <tbody><tr><td>distribution</td><td>DOWNRANK</td><td>33</td><td>26.5</td><td>33</td><td>-34.48%p</td><td>54.55%</td></tr>
 <tr><td>distribution</td><td>EVIDENCE_OK</td><td>9</td><td>73.8</td><td>9</td><td>-19.06%p</td><td>55.56%</td></tr>
 <tr><td>distribution</td><td>HIGH</td><td>9</td><td>86.7</td><td>9</td><td>-12.28%p</td><td>55.56%</td></tr>
 <tr><td>distribution</td><td>MODEL_DOWNRANK</td><td>2</td><td>32.7</td><td>2</td><td>-7.73%p</td><td>0.00%</td></tr>
 <tr><td>distribution</td><td>MODEL_OK</td><td>12</td><td>68.3</td><td>12</td><td>18.45%p</td><td>58.33%</td></tr>
-<tr><td>distribution</td><td>NOT_ACTIVE</td><td>454</td><td>30.0</td><td>454</td><td>51.27%p</td><td>48.68%</td></tr>
+<tr><td>distribution</td><td>NOT_ACTIVE</td><td>462</td><td>30.0</td><td>462</td><td>65.19%p</td><td>48.70%</td></tr>
 <tr><td>distribution</td><td>UNSET</td><td>132</td><td>—</td><td>132</td><td>-45.03%p</td><td>37.88%</td></tr>
 <tr><td>distribution</td><td>WATCH_EVIDENCE</td><td>2</td><td>60.0</td><td>2</td><td>9.70%p</td><td>100.00%</td></tr>
-<tr><td>preopen</td><td>NOT_ACTIVE</td><td>496</td><td>30.0</td><td>496</td><td>154.94%p</td><td>25.40%</td></tr>
+<tr><td>preopen</td><td>NOT_ACTIVE</td><td>512</td><td>30.0</td><td>512</td><td>162.21%p</td><td>25.00%</td></tr>
 <tr><td>preopen</td><td>UNSET</td><td>88</td><td>—</td><td>88</td><td>-40.84%p</td><td>14.77%</td></tr></tbody>
       </table>
     </section>
@@ -226,8 +226,8 @@
       <h2>Policy Replay</h2>
       <table>
         <thead><tr><th>channel</th><th>observed n</th><th>observed net</th><th>replay n</th><th>replay net</th><th>delta</th></tr></thead>
-        <tbody><tr><td>all</td><td>252</td><td>-89.06%p</td><td>114</td><td>41.71%p</td><td>130.77%p</td></tr>
-<tr><td>distribution</td><td>164</td><td>-48.22%p</td><td>114</td><td>41.71%p</td><td>89.93%p</td></tr>
+        <tbody><tr><td>all</td><td>252</td><td>-89.06%p</td><td>116</td><td>51.41%p</td><td>140.47%p</td></tr>
+<tr><td>distribution</td><td>164</td><td>-48.22%p</td><td>116</td><td>51.41%p</td><td>99.63%p</td></tr>
 <tr><td>preopen</td><td>88</td><td>-40.84%p</td><td>0</td><td>—</td><td>40.84%p</td></tr></tbody>
       </table>
     </section>
@@ -237,17 +237,17 @@
         <thead><tr><th>channel</th><th>idea</th><th>setup</th><th>regime</th><th>n</th><th>TP5 hit</th><th>net</th><th>avg</th><th>tier</th></tr></thead>
         <tbody><tr><td>distribution</td><td>dist_h6_c_primary_bear_volatile_v1</td><td>C_PRIMARY</td><td>bear_volatile</td><td>132</td><td>49.24%</td><td>62.23%p</td><td>0.47%p</td><td>DIAGNOSTIC_ONLY</td></tr>
 <tr><td>distribution</td><td>legacy_distribution_a_triple_bear_quiet_v1</td><td>A_TRIPLE</td><td>bear_quiet</td><td>30</td><td>63.33%</td><td>62.05%p</td><td>2.07%p</td><td>DIAGNOSTIC_ONLY</td></tr>
-<tr><td>distribution</td><td>dist_h6_b_s03_bear_quiet_v1</td><td>B_S03</td><td>bear_quiet</td><td>33</td><td>57.58%</td><td>48.66%p</td><td>1.47%p</td><td>DIAGNOSTIC_ONLY</td></tr>
+<tr><td>distribution</td><td>dist_h6_b_s03_bear_quiet_v1</td><td>B_S03</td><td>bear_quiet</td><td>34</td><td>58.82%</td><td>53.51%p</td><td>1.57%p</td><td>DIAGNOSTIC_ONLY</td></tr>
 <tr><td>distribution</td><td>dist_h6_a_triple_bear_volatile_v1</td><td>A_TRIPLE</td><td>bear_volatile</td><td>76</td><td>65.79%</td><td>19.74%p</td><td>0.26%p</td><td>DIAGNOSTIC_ONLY</td></tr>
 <tr><td>distribution</td><td>legacy_distribution_a_triple_bull_volatile_v1</td><td>A_TRIPLE</td><td>bull_volatile</td><td>2</td><td>100.00%</td><td>9.70%p</td><td>4.85%p</td><td>DIAGNOSTIC_ONLY</td></tr>
 <tr><td>distribution</td><td>dist_h6_a_triple_bear_quiet_v1</td><td>A_TRIPLE</td><td>bear_quiet</td><td>32</td><td>59.38%</td><td>-3.19%p</td><td>-0.10%p</td><td>DIAGNOSTIC_ONLY</td></tr>
 <tr><td>distribution</td><td>legacy_distribution_b_s03_bear_quiet_v1</td><td>B_S03</td><td>bear_quiet</td><td>24</td><td>45.83%</td><td>-12.59%p</td><td>-0.52%p</td><td>DIAGNOSTIC_ONLY</td></tr>
+<tr><td>distribution</td><td>dist_h6_a_triple_bear_quiet_v1</td><td>A_TRIPLE</td><td>bear_quiet</td><td>52</td><td>53.85%</td><td>-17.15%p</td><td>-0.33%p</td><td>DIAGNOSTIC_ONLY</td></tr>
 <tr><td>distribution</td><td>dist_h6_b_s03_bear_volatile_v1</td><td>B_S03</td><td>bear_volatile</td><td>25</td><td>52.00%</td><td>-21.18%p</td><td>-0.85%p</td><td>DIAGNOSTIC_ONLY</td></tr>
 <tr><td>distribution</td><td>legacy_distribution_c_primary_bull_volatile_v1</td><td>C_PRIMARY</td><td>bull_volatile</td><td>6</td><td>33.33%</td><td>-22.48%p</td><td>-3.75%p</td><td>DIAGNOSTIC_ONLY</td></tr>
-<tr><td>distribution</td><td>dist_h6_a_triple_bear_quiet_v1</td><td>A_TRIPLE</td><td>bear_quiet</td><td>50</td><td>52.00%</td><td>-26.85%p</td><td>-0.54%p</td><td>DIAGNOSTIC_ONLY</td></tr>
+<tr><td>distribution</td><td>dist_h6_c_primary_bear_quiet_v1</td><td>C_PRIMARY</td><td>bear_quiet</td><td>178</td><td>37.64%</td><td>-74.18%p</td><td>-0.42%p</td><td>DIAGNOSTIC_ONLY</td></tr>
 <tr><td>distribution</td><td>legacy_distribution_c_primary_bear_quiet_v1</td><td>C_PRIMARY</td><td>bear_quiet</td><td>70</td><td>22.86%</td><td>-81.71%p</td><td>-1.17%p</td><td>DIAGNOSTIC_ONLY</td></tr>
-<tr><td>distribution</td><td>dist_h6_c_primary_bear_quiet_v1</td><td>C_PRIMARY</td><td>bear_quiet</td><td>171</td><td>37.43%</td><td>-83.25%p</td><td>-0.49%p</td><td>DIAGNOSTIC_ONLY</td></tr>
-<tr><td>preopen</td><td>preopen_first1h5_bear_quiet_v1</td><td>PREOPEN</td><td>bear_quiet</td><td>296</td><td>24.32%</td><td>84.84%p</td><td>0.29%p</td><td>DIAGNOSTIC_ONLY</td></tr>
+<tr><td>preopen</td><td>preopen_first1h5_bear_quiet_v1</td><td>PREOPEN</td><td>bear_quiet</td><td>312</td><td>23.72%</td><td>92.11%p</td><td>0.30%p</td><td>DIAGNOSTIC_ONLY</td></tr>
 <tr><td>preopen</td><td>preopen_first1h5_bear_volatile_v1</td><td>PREOPEN</td><td>bear_volatile</td><td>200</td><td>27.00%</td><td>70.10%p</td><td>0.35%p</td><td>DIAGNOSTIC_ONLY</td></tr>
 <tr><td>preopen</td><td>legacy_preopen_bear_quiet_v1</td><td>PREOPEN</td><td>bear_quiet</td><td>88</td><td>14.77%</td><td>-40.84%p</td><td>-0.46%p</td><td>DIAGNOSTIC_ONLY</td></tr></tbody>
       </table>

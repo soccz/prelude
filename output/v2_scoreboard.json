@@ -1,19 +1,22 @@
 {
-  "asof": "2026-07-29",
-  "ci95": null,
-  "closed_n": 0,
+  "asof": "2026-08-03",
+  "ci95": [
+    -2.9621,
+    5.3685
+  ],
+  "closed_n": 4,
   "companion_metric_note": "day_equal fields are diagnostic only; do not replace the frozen 2026-09-01 per-trade decision metric retroactively",
   "cost_already_deducted": true,
   "criteria": {
     "2레짐_or_t>=2": false,
     "CI_0_제외": false,
-    "mean>0": false,
+    "mean>0": true,
     "n>=200": false
   },
-  "criteria_met": 0,
+  "criteria_met": 1,
   "day_cluster_ci95": null,
-  "day_equal_mean_net_pct": null,
-  "days_to_judgment": 34,
+  "day_equal_mean_net_pct": 1.2032,
+  "days_to_judgment": 29,
   "early_kill_breached": false,
   "evidence_scope": "verified_post_contract_closed_positions_only",
   "legacy_diagnostic": {
@@ -39,33 +42,44 @@
     "terminal_eligible": false,
     "trade_days": 45
   },
-  "mean_net_pct": null,
+  "mean_net_pct": 1.2032,
   "per_day_t": null,
   "post_judgment_closed_excluded": 0,
   "preregistered_metric": "per_trade_mean_net_pct",
   "provenance": {
     "delivery_failed_dates": [],
-    "delivery_success_dates": [],
-    "healthy_candidate_dates": [],
-    "healthy_dates": [],
+    "delivery_success_dates": [
+      "2026-07-31"
+    ],
+    "healthy_candidate_dates": [
+      "2026-07-31"
+    ],
+    "healthy_dates": [
+      "2026-07-31"
+    ],
     "healthy_zero_pick_dates": [],
     "legacy_baseline_verified": true,
     "legacy_scorecard_rows": 205,
     "legacy_scorecard_sha256": "ac01dddebbd1e70fe9d6f034292470982ecd237bd684422946b938fc82794451",
-    "verified_closed_positions": 0
+    "verified_closed_positions": 4
   },
-  "regimes": [],
+  "regimes": [
+    "bear_quiet"
+  ],
   "round_trip_cost_pp": 0.15,
-  "scorecard_status": "insufficient_verified_evidence",
-  "status": "insufficient_verified_evidence",
+  "scorecard_status": "active",
+  "status": "active",
   "terminal_evidence_cutoff_exclusive": "2026-09-01",
-  "terminal_evidence_eligible": false,
+  "terminal_evidence_eligible": true,
   "terminal_metric_values": {
-    "ci95": null,
-    "mean_net_pct": null,
+    "ci95": [
+      -2.9621205639500943,
+      5.368470563950094
+    ],
+    "mean_net_pct": 1.2031749999999999,
     "per_day_t": null
   },
-  "terminal_reason": "no_verified_post_contract_closed_positions",
+  "terminal_reason": null,
   "terminal_state": {
     "effective": false,
     "judgment_day": "2026-09-01",
@@ -73,5 +87,5 @@
     "verdict": null
   },
   "terminal_verdict": null,
-  "trade_days": 0
+  "trade_days": 1
 }

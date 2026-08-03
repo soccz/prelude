@@ -1,7 +1,9 @@
 [Unit]
 Description=prelude full test-suite selftest daily 07:30 KST (아침 사이클 전 회귀 검출)
 Wants=network-online.target
-After=network-online.target
+After=network-online.target prelude-close.service prelude-preopen-close.service
+# ^ 부팅 캐치업 직렬화(2026-08-03) — 07:30 평시엔 무영향. 수집기와의 CPU/IO
+#   경합으로 스위트가 느려지거나 충돌하는 것을 피한다.
 Before=prelude-preopen.service prelude-distribution.service
 RequiresMountsFor=/home/soccz/22tb/prelude
 OnFailure=prelude-failure-alert@%n.service

@@ -191,7 +191,10 @@ else
 fi
 # 08:50 수집본의 마지막 08:45 봉은 진행 중일 수 있다. 09:30에 다시
 # 받아야 day-D [09:00,D+1 09:00) 마지막 봉을 최종값으로 청산할 수 있다.
-if python -m data.collector_15m_upbit --all --days 1 >> "$LOG" 2>&1; then
+# --heal-days 3(초기값): 다운타임이 만든 '중간 구멍'은 --days 로 안 메워진다
+# (수집기는 최상단 200봉+바닥 연장만) — 2026-08-03 부팅폭풍에서 07-31 96봉
+# 창이 영구 partial 로 고착된 사고의 봉쇄. 15m 전용(4h/D1 은 페이지가 깊음).
+if python -m data.collector_15m_upbit --all --heal-days 3 >> "$LOG" 2>&1; then
     :
 else
     record_critical_failure "$?" "close 15m universe update"

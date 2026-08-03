@@ -307,7 +307,7 @@ def _validate_ledger_candidate(
         )
 
     status = str(row.get("status", ""))
-    if status not in {"not_delivered", "open", "closed"}:
+    if status not in {"not_delivered", "open", "no_data", "closed"}:
         raise V2ProvenanceError(
             f"v2 ledger status invalid for {day}: {status!r}"
         )

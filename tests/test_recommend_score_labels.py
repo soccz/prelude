@@ -324,6 +324,7 @@ def test_not_mature_does_not_assess_or_write(tmp_path):
     result = label_recommend_snapshot(
         snapshot_file,
         output_root=output_root,
+        db_path=tmp_path / "15m.db",
         receipt_root=tmp_path / "receipts",
         now="2026-07-25 08:59:59",
         assessor=lambda *a, **k: (_ for _ in ()).throw(
@@ -351,6 +352,7 @@ def test_delivered_open_waits_for_full_96_bars_after_execution_start(tmp_path):
     result = label_recommend_snapshot(
         snapshot_file,
         output_root=tmp_path / "labels",
+        db_path=tmp_path / "15m.db",
         receipt_root=receipt_root,
         now="2026-07-25 09:14:59",
         assessor=lambda *a, **k: (_ for _ in ()).throw(
@@ -395,6 +397,7 @@ def test_incomplete_is_partial_then_retried_to_complete(tmp_path):
     partial = label_recommend_snapshot(
         snapshot_file,
         output_root=output_root,
+        db_path=tmp_path / "15m.db",
         receipt_root=tmp_path / "receipts",
         now="2026-07-25 09:16:00",
         assessor=lambda _market, start_at, **_kwargs: _assessment(
@@ -410,6 +413,7 @@ def test_incomplete_is_partial_then_retried_to_complete(tmp_path):
     partial_again = label_recommend_snapshot(
         snapshot_file,
         output_root=output_root,
+        db_path=tmp_path / "15m.db",
         receipt_root=tmp_path / "receipts",
         now="2026-07-25 09:30:00",
         assessor=lambda _market, start_at, **_kwargs: _assessment(
@@ -424,6 +428,7 @@ def test_incomplete_is_partial_then_retried_to_complete(tmp_path):
     complete = label_recommend_snapshot(
         snapshot_file,
         output_root=output_root,
+        db_path=tmp_path / "15m.db",
         receipt_root=tmp_path / "receipts",
         now="2026-07-25 10:00:00",
         assessor=lambda _market, start_at, **_kwargs: _assessment(
@@ -602,6 +607,7 @@ def test_concurrent_partial_cannot_overwrite_complete_artifact(tmp_path):
             results["partial"] = label_recommend_snapshot(
                 snapshot_file,
                 output_root=output_root,
+                db_path=tmp_path / "15m.db",
                 receipt_root=tmp_path / "receipts",
                 now="2026-07-25 10:00:00",
                 assessor=partial_assessor,
@@ -616,6 +622,7 @@ def test_concurrent_partial_cannot_overwrite_complete_artifact(tmp_path):
     results["complete"] = label_recommend_snapshot(
         snapshot_file,
         output_root=output_root,
+        db_path=tmp_path / "15m.db",
         receipt_root=tmp_path / "receipts",
         now="2026-07-25 10:00:00",
         assessor=lambda _market, start_at, **_kwargs: _assessment(
@@ -655,6 +662,7 @@ def test_successful_delivery_uses_next_executable_bar_and_charges_cost_once(tmp_
     result = label_recommend_snapshot(
         snapshot_file,
         output_root=tmp_path / "labels",
+        db_path=tmp_path / "15m.db",
         receipt_root=receipt_root,
         now="2026-07-25 09:16:00",
         assessor=assessor,

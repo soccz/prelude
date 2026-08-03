@@ -1,5 +1,5 @@
 {
-  "asof": "2026-07-29",
+  "asof": "2026-08-03",
   "config": {
     "deep_loss_basis": "complete_no_sl_path_min",
     "deep_loss_pct": -5.0,
@@ -29,7 +29,7 @@
     }
   ],
   "input_manifest": {
-    "asof": "2026-07-29",
+    "asof": "2026-08-03",
     "files": {
       "ledger:distribution_engine": {
         "exists": true,
@@ -40,38 +40,38 @@
       "ledger:pump_hunter": {
         "exists": true,
         "path": "output/shadow_ledger_pump_hunter.csv",
-        "sha256": "c77190d3b3cf8eebdfe3d8bfe96e3dbff79ed93830c236fe99d8e633d3f1a77f",
-        "size": 353870
+        "sha256": "056f48f14500624f851c4cffb2f2ee6bfef32ceb656f7b4138446594aeb16cb4",
+        "size": 363947
       },
       "ledger:pump_hunter_v2": {
         "exists": true,
         "path": "output/shadow_ledger_pump_hunter_v2.csv",
-        "sha256": "3e45cc152780addf0caf8e40114142ada208a9bbb0779e676e5933a18bcc8846",
-        "size": 81970
+        "sha256": "cd8106800867265c158b138efe9de32df2a38ab3bbd4f50744e45cdcfa5bc84e",
+        "size": 85186
       },
       "ledger:recommend_r1_open": {
         "exists": true,
         "path": "output/shadow_ledger_recommend.csv",
-        "sha256": "4d17f9032df483d08dfdf8a508d07ffb91f5d978cb3a6b189f0570e8b18a1410",
-        "size": 42549
+        "sha256": "7738c038b2430b6467b736b021b4fd11426c356f5d4e7501bd2f4dec59efe0ed",
+        "size": 44315
       },
       "ledger:recommend_r1_preopen": {
         "exists": true,
         "path": "output/shadow_ledger_recommend_preopen.csv",
-        "sha256": "77a966a24c1431a1c353d2738ddf0a1d8f30fe57358976e656a429d1ef758f51",
-        "size": 2088
+        "sha256": "fcfe4fb7d1d4e613d333f6a8f9dfd38ea3a64d3d2db3d178134812c85bd08298",
+        "size": 7054
       },
       "ledger:recommend_r1_sustain_open": {
         "exists": true,
         "path": "output/shadow_ledger_recommend_sustain.csv",
-        "sha256": "ac177b615a3de449757a7041d50b86d0ca87839f48982f689de607542b5226d4",
-        "size": 41925
+        "sha256": "a88f1883fab80e2bbfd286d88a3759d2aeee2b581b9f4568f33346f56ab18977",
+        "size": 43614
       },
       "ledger:recommend_r2_open": {
         "exists": true,
         "path": "output/shadow_ledger_recommend_r2.csv",
-        "sha256": "57c2ed35321be908df5fae848728a67e184380a047b4c26c0bc1a835965b5842",
-        "size": 40999
+        "sha256": "4c92ff9a11db78e552baa2f74ddb3e35590c090a11ced973c092938758f39f79",
+        "size": 42678
       },
       "source:champion_selector": {
         "exists": true,
@@ -113,7 +113,7 @@
       ]
     }
   ],
-  "payload_sha256": "df74c528098dadae3e571323c1251e67a91b8eed79af15214654118be830c7e6",
+  "payload_sha256": "9db1ae63d38989174852c73498f58495273158521c6d90deea3d3ab258fa3ea7",
   "schema_version": "champion_state.v1",
   "slots": {
     "open": {
@@ -122,12 +122,12 @@
       "metric": {
         "deep_loss_freq": 0.3333,
         "hit_rate": 0.0,
-        "last_date": "2026-07-28",
+        "last_date": "2026-07-31",
         "n_closed": 90,
         "n_days": 30,
-        "n_downside": 9,
-        "n_downside_days": 3,
-        "net_mean_pct": -0.4606
+        "n_downside": 12,
+        "n_downside_days": 4,
+        "net_mean_pct": -0.6383
       },
       "reason": "게이트 통과 모델 없음 (표본/완결경로 부족, 비용차감 net_mean<=+0.0000%, 또는 challenger_only) → 기본 챔피언=백테스트-최선(recommend_r1_open), SHADOW 발송",
       "since": "2026-06-01"
@@ -136,14 +136,14 @@
       "champion_id": "recommend_r1_preopen",
       "is_fallback": true,
       "metric": {
-        "deep_loss_freq": null,
-        "hit_rate": null,
-        "last_date": null,
-        "n_closed": 0,
-        "n_days": 0,
-        "n_downside": 0,
-        "n_downside_days": 0,
-        "net_mean_pct": null
+        "deep_loss_freq": 0.1111,
+        "hit_rate": 0.1111,
+        "last_date": "2026-07-30",
+        "n_closed": 9,
+        "n_days": 3,
+        "n_downside": 9,
+        "n_downside_days": 3,
+        "net_mean_pct": -1.5809
       },
       "reason": "게이트 통과 모델 없음 (표본/완결경로 부족, 비용차감 net_mean<=+0.0000%, 또는 challenger_only) → 기본 챔피언=백테스트-최선(recommend_r1_preopen), SHADOW 발송",
       "since": "2026-07-26"
@@ -161,5 +161,5 @@
       "last_date": null
     }
   },
-  "updated_at": "2026-07-29T01:53:50+00:00"
+  "updated_at": "2026-08-03T05:03:34+00:00"
 }

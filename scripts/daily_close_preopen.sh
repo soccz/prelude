@@ -160,7 +160,8 @@ close_validated_preopen_r1() {
 }
 
 echo "[1/5] data update — 15m all 1 day" >> "$LOG"
-if python -m data.collector_15m_upbit --all --days 1 >> "$LOG" 2>&1; then
+# --heal-days 3(초기값): 다운타임 '중간 구멍' 치유 — --days 는 못 메운다 (2026-08-03)
+if python -m data.collector_15m_upbit --all --heal-days 3 >> "$LOG" 2>&1; then
     :
 else
     record_critical_failure "$?" "preopen close 15m universe update"

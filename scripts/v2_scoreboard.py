@@ -66,7 +66,7 @@ VALID_REGIMES = {
     "bear_quiet",
     "bear_volatile",
 }
-VALID_STATUSES = {"open", "not_delivered", "closed"}
+VALID_STATUSES = {"open", "no_data", "not_delivered", "closed"}
 KST = ZoneInfo("Asia/Seoul")
 
 
