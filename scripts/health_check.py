@@ -654,7 +654,10 @@ def check_log_age(log_path: str, max_age_hours: int = 26) -> tuple[bool, str]:
 # 간주해 관용 없이 fail. 무거래(구조적)와 수집 갭을 구분하기 위한 장치다:
 # 얇은 코인이 해당 경계에 거래가 없어 봉 자체가 없는 날, 코인 1개가 발송
 # 전체를 죽이던 2026-07-29 가용성 회귀의 수리 (v2 not_listed 와 같은 원칙).
-MAX_MISSING_UPSTREAM_PROBES = 5
+# 5 → 15 (2026-08-05 데이터 갱신): 조용한 아침 15m 경계에서 top100 중
+# 무거래 7개가 실측됨 — 상한 5가 정당한 무거래일을 계통 장애로 오판해
+# preopen 게이트를 죽였다. 15 초과는 여전히 수집 계통 장애로 본다.
+MAX_MISSING_UPSTREAM_PROBES = 15
 _UPSTREAM_INTERVALS = {
     "upbit_d1.db": ("day", timedelta(days=1)),
     "upbit_15m.db": ("minute15", timedelta(minutes=15)),

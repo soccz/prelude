@@ -1130,7 +1130,7 @@ def test_missing_candidate_with_unconfirmable_upstream_fails_closed(
 
 
 def test_mass_missing_skips_probes_and_fails(monkeypatch):
-    # 대량 결측(>5)은 계통 장애 — 업스트림 확인 없이 전량 fail-closed.
+    # 대량 결측(>MAX_MISSING_UPSTREAM_PROBES)은 계통 장애 — 확인 없이 fail-closed.
     def must_not_probe(market, required_at, db_name):
         raise AssertionError("probe must not run for mass missing")
 
@@ -1141,7 +1141,10 @@ def test_mass_missing_skips_probes_and_fails(monkeypatch):
     )
     now = datetime(2026, 7, 26, 9, 5)
     d1 = "data/upbit_d1.db"
-    markets = [f"KRW-M{i}" for i in range(8)]
+    markets = [
+        f"KRW-M{i}"
+        for i in range(health_check.MAX_MISSING_UPSTREAM_PROBES + 3)
+    ]
     _stub_signal_inputs(
         monkeypatch,
         quote_values={m: 300 - i for i, m in enumerate(markets)},
