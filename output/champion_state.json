@@ -1,5 +1,5 @@
 {
-  "asof": "2026-08-03",
+  "asof": "2026-08-05",
   "config": {
     "deep_loss_basis": "complete_no_sl_path_min",
     "deep_loss_pct": -5.0,
@@ -29,49 +29,49 @@
     }
   ],
   "input_manifest": {
-    "asof": "2026-08-03",
+    "asof": "2026-08-05",
     "files": {
       "ledger:distribution_engine": {
         "exists": true,
         "path": "output/paper_ledger.csv",
-        "sha256": "5004b65876a0515199154dc085220b6ebc30637616ccb9a025931723bded8b0a",
-        "size": 82854
+        "sha256": "31b391e1ac7688c4881424cb5866187cda856e7ba277344c5cfcd0357144f273",
+        "size": 84626
       },
       "ledger:pump_hunter": {
         "exists": true,
         "path": "output/shadow_ledger_pump_hunter.csv",
-        "sha256": "056f48f14500624f851c4cffb2f2ee6bfef32ceb656f7b4138446594aeb16cb4",
-        "size": 363947
+        "sha256": "071382f1a4540fed70288388fe75976179906e066befd2c5a753f2ee86c17131",
+        "size": 380277
       },
       "ledger:pump_hunter_v2": {
         "exists": true,
         "path": "output/shadow_ledger_pump_hunter_v2.csv",
-        "sha256": "cd8106800867265c158b138efe9de32df2a38ab3bbd4f50744e45cdcfa5bc84e",
-        "size": 85186
+        "sha256": "88aef6653ce185684b1bd29773a645b12593fbbe7a3d7017f7f8045f5992668c",
+        "size": 89523
       },
       "ledger:recommend_r1_open": {
         "exists": true,
         "path": "output/shadow_ledger_recommend.csv",
-        "sha256": "7738c038b2430b6467b736b021b4fd11426c356f5d4e7501bd2f4dec59efe0ed",
-        "size": 44315
+        "sha256": "a8bc4afe597b0c90052ebce1131a0b6be8ddb2b632938e5780b239c5c37203ef",
+        "size": 47072
       },
       "ledger:recommend_r1_preopen": {
         "exists": true,
         "path": "output/shadow_ledger_recommend_preopen.csv",
-        "sha256": "fcfe4fb7d1d4e613d333f6a8f9dfd38ea3a64d3d2db3d178134812c85bd08298",
-        "size": 7054
+        "sha256": "a18a6331ce0b08786eaa629a0830db72c73c4d39e4d1d92bcf850ae6336bf255",
+        "size": 9690
       },
       "ledger:recommend_r1_sustain_open": {
         "exists": true,
         "path": "output/shadow_ledger_recommend_sustain.csv",
-        "sha256": "a88f1883fab80e2bbfd286d88a3759d2aeee2b581b9f4568f33346f56ab18977",
-        "size": 43614
+        "sha256": "7244d243ea52878a7e4fba5b75a202126d197c4d21d6eae61e63d84d53fbf34b",
+        "size": 46203
       },
       "ledger:recommend_r2_open": {
         "exists": true,
         "path": "output/shadow_ledger_recommend_r2.csv",
-        "sha256": "4c92ff9a11db78e552baa2f74ddb3e35590c090a11ced973c092938758f39f79",
-        "size": 42678
+        "sha256": "e71f079d19a8bbdc25a4bca419f00875cd5c9521722f9b8cc1b8a11ff056d6c4",
+        "size": 44381
       },
       "source:champion_selector": {
         "exists": true,
@@ -113,20 +113,20 @@
       ]
     }
   ],
-  "payload_sha256": "9db1ae63d38989174852c73498f58495273158521c6d90deea3d3ab258fa3ea7",
+  "payload_sha256": "7f20802d2f46223ba8a667d00235eace7ffb968f46f0a01ff09927bec0f3e1f1",
   "schema_version": "champion_state.v1",
   "slots": {
     "open": {
       "champion_id": "recommend_r1_open",
       "is_fallback": true,
       "metric": {
-        "deep_loss_freq": 0.3333,
+        "deep_loss_freq": 0.2667,
         "hit_rate": 0.0,
-        "last_date": "2026-07-31",
+        "last_date": "2026-08-04",
         "n_closed": 90,
         "n_days": 30,
-        "n_downside": 12,
-        "n_downside_days": 4,
+        "n_downside": 15,
+        "n_downside_days": 5,
         "net_mean_pct": -0.6383
       },
       "reason": "게이트 통과 모델 없음 (표본/완결경로 부족, 비용차감 net_mean<=+0.0000%, 또는 challenger_only) → 기본 챔피언=백테스트-최선(recommend_r1_open), SHADOW 발송",
@@ -136,14 +136,14 @@
       "champion_id": "recommend_r1_preopen",
       "is_fallback": true,
       "metric": {
-        "deep_loss_freq": 0.1111,
-        "hit_rate": 0.1111,
-        "last_date": "2026-07-30",
-        "n_closed": 9,
-        "n_days": 3,
-        "n_downside": 9,
-        "n_downside_days": 3,
-        "net_mean_pct": -1.5809
+        "deep_loss_freq": 0.25,
+        "hit_rate": 0.0833,
+        "last_date": "2026-07-31",
+        "n_closed": 12,
+        "n_days": 4,
+        "n_downside": 12,
+        "n_downside_days": 4,
+        "net_mean_pct": -1.6325
       },
       "reason": "게이트 통과 모델 없음 (표본/완결경로 부족, 비용차감 net_mean<=+0.0000%, 또는 challenger_only) → 기본 챔피언=백테스트-최선(recommend_r1_preopen), SHADOW 발송",
       "since": "2026-07-26"
@@ -161,5 +161,5 @@
       "last_date": null
     }
   },
-  "updated_at": "2026-08-03T05:03:34+00:00"
+  "updated_at": "2026-08-05T00:37:34+00:00"
 }

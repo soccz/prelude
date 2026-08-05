@@ -1,8 +1,8 @@
 {
   "artifact_schema": "prelude.recommendation_quality_model.v2",
-  "artifact_sha256": "dc24787d6ee180ea3bea18aee249535dd4c39e504a8ea0d2f6228e7dec704bea",
+  "artifact_sha256": "945a4d7482da83bf281153a3c1f1b8a9792b9e60c946512d9e94dbf6dca0b8b1",
   "artifact_status": "REJECTED",
-  "built_at": "2026-08-03T05:13:28+00:00",
+  "built_at": "2026-08-05T04:15:22+00:00",
   "categorical_features": [
     "channel",
     "setup_quality",
@@ -129,13 +129,13 @@
       }
     },
     "ledger_inputs": {
-      "bundle_sha256": "6bd933c7bbb49fd06bca52b17f0af9a0d6031c1eddfe6f03d4c9af1e0aeb1c03",
+      "bundle_sha256": "7cd97423ec9f00d83271e9f4b694465b169ffed4bf6dd68a86494959b527ecc8",
       "files": {
         "paper_ledger_distribution": {
           "exists": true,
           "path": "output/paper_ledger.csv",
-          "sha256": "5004b65876a0515199154dc085220b6ebc30637616ccb9a025931723bded8b0a",
-          "size": 82854
+          "sha256": "31b391e1ac7688c4881424cb5866187cda856e7ba277344c5cfcd0357144f273",
+          "size": 84626
         },
         "paper_ledger_preopen": {
           "exists": true,
@@ -146,18 +146,18 @@
         "shadow_ledger_distribution": {
           "exists": true,
           "path": "output/shadow_ledger_distribution.csv",
-          "sha256": "39f00a94a1a2743ef4c4f0813945b24a8753f9e6b6cb8d44462d790bbc7a8dae",
-          "size": 430097
+          "sha256": "a13c6575117f70c8e2391ae3677e5d1bb067b6b398f771dcba8d8502099369cc",
+          "size": 440669
         },
         "shadow_ledger_preopen": {
           "exists": true,
           "path": "output/shadow_ledger_preopen.csv",
-          "sha256": "e6ce6c0df3cf860eae04890eb37dae2555c4e4c810dc89882477e03d9e953703",
-          "size": 456662
+          "sha256": "c8c1be737dfabe286b54eac72a1ec115ccd41111059cdc108eeb5a96d8837052",
+          "size": 464276
         }
       }
     },
-    "manifest_sha256": "cac27de80c3cf0a2923a8c46708f548f51591b78a2e0cd5aa30304a22829cd56",
+    "manifest_sha256": "e8f347b361ddfcaf49d58e6366bc1a3466b070b7e5f24c6f020d37d1aa802f13",
     "schema_version": 1,
     "training_rows": {
       "date_end": null,

@@ -1,23 +1,26 @@
 {
-  "asof": "2026-08-03",
+  "asof": "2026-08-05",
   "ci95": [
-    -2.9621,
-    5.3685
+    -2.3316,
+    2.1384
   ],
-  "closed_n": 4,
+  "closed_n": 9,
   "companion_metric_note": "day_equal fields are diagnostic only; do not replace the frozen 2026-09-01 per-trade decision metric retroactively",
   "cost_already_deducted": true,
   "criteria": {
     "2레짐_or_t>=2": false,
     "CI_0_제외": false,
-    "mean>0": true,
+    "mean>0": false,
     "n>=200": false
   },
-  "criteria_met": 1,
-  "day_cluster_ci95": null,
-  "day_equal_mean_net_pct": 1.2032,
-  "days_to_judgment": 29,
-  "early_kill_breached": false,
+  "criteria_met": 0,
+  "day_cluster_ci95": [
+    -2.2594,
+    2.3262
+  ],
+  "day_equal_mean_net_pct": 0.0334,
+  "days_to_judgment": 27,
+  "early_kill_breached": true,
   "evidence_scope": "verified_post_contract_closed_positions_only",
   "legacy_diagnostic": {
     "ci95": [
@@ -42,50 +45,56 @@
     "terminal_eligible": false,
     "trade_days": 45
   },
-  "mean_net_pct": 1.2032,
-  "per_day_t": null,
+  "mean_net_pct": -0.0966,
+  "per_day_t": 0.029,
   "post_judgment_closed_excluded": 0,
   "preregistered_metric": "per_trade_mean_net_pct",
   "provenance": {
     "delivery_failed_dates": [],
     "delivery_success_dates": [
-      "2026-07-31"
+      "2026-07-31",
+      "2026-08-04"
     ],
     "healthy_candidate_dates": [
-      "2026-07-31"
+      "2026-07-31",
+      "2026-08-04"
     ],
     "healthy_dates": [
-      "2026-07-31"
+      "2026-07-31",
+      "2026-08-04"
     ],
     "healthy_zero_pick_dates": [],
     "legacy_baseline_verified": true,
     "legacy_scorecard_rows": 205,
     "legacy_scorecard_sha256": "ac01dddebbd1e70fe9d6f034292470982ecd237bd684422946b938fc82794451",
-    "verified_closed_positions": 4
+    "verified_closed_positions": 9
   },
   "regimes": [
     "bear_quiet"
   ],
   "round_trip_cost_pp": 0.15,
-  "scorecard_status": "active",
-  "status": "active",
+  "scorecard_status": "early_kill",
+  "status": "early_kill",
   "terminal_evidence_cutoff_exclusive": "2026-09-01",
   "terminal_evidence_eligible": true,
   "terminal_metric_values": {
     "ci95": [
-      -2.9621205639500943,
-      5.368470563950094
+      -2.3315745735651023,
+      2.1383967957873247
     ],
-    "mean_net_pct": 1.2031749999999999,
-    "per_day_t": null
+    "mean_net_pct": -0.09658888888888893,
+    "per_day_t": 0.028541508607332546
   },
-  "terminal_reason": null,
+  "terminal_reason": "cumulative_mean_net_below_zero_before_deadline",
   "terminal_state": {
-    "effective": false,
+    "effective": true,
+    "effective_asof": "2026-08-05",
     "judgment_day": "2026-09-01",
-    "status": "pending",
-    "verdict": null
+    "reason": "cumulative_mean_net_below_zero_before_deadline",
+    "status": "early_kill",
+    "verdict": "kill",
+    "verdict_id": "radar-verdict-cae133d0a18f1b030273715f"
   },
-  "terminal_verdict": null,
-  "trade_days": 1
+  "terminal_verdict": "kill",
+  "trade_days": 2
 }

@@ -1019,7 +1019,14 @@ def _load_complete_rows(
     channels: dict[tuple[str, str], list[dict]] = {}
     used: list[dict[str, Any]] = []
     for (slot, ranking, asof), (path, document) in sorted(accepted.items()):
-        rows = document.get("rows") or []
+        all_rows = document.get("rows") or []
+        # 거래정지 구조적 종결(halted_no_observations)은 평가 표본이 아니다 —
+        # 관측 자체가 불가능했던 행이므로 제외하고, 나머지는 전부 labeled 여야 한다.
+        rows = [
+            row
+            for row in all_rows
+            if row.get("label_status") != "halted_no_observations"
+        ]
         if not rows or any(row.get("label_status") != "labeled" for row in rows):
             skipped.append({"path": str(path), "reason": "complete_without_all_labeled_rows"})
             continue

@@ -390,6 +390,136 @@ def test_late_same_day_snapshot_keeps_actual_time_but_is_not_forward_eligible(
     assert execution["forward_eligible"] is False
 
 
+def test_upstream_probe_recognises_only_structural_absence(monkeypatch):
+    """404 Code-not-found(상폐)·빈 배열·전부 창밖 봉만 True — 나머지는 전부
+    fail-closed False."""
+    from signals import recommend_score_labels as module
+
+    class FakeResponse:
+        def __init__(self, status, payload=None, text=""):
+            self.status_code = status
+            self._payload = payload
+            self.text = text
+
+        def json(self):
+            if isinstance(self._payload, Exception):
+                raise self._payload
+            return self._payload
+
+    start, _ = module.path_window("2026-08-04")
+    in_window = [{"candle_date_time_kst": "2026-08-04T12:00:00"}]
+    outside = [{"candle_date_time_kst": "2026-08-01T12:00:00"}]
+    cases = [
+        (FakeResponse(404, text='{"error":{"name":404,"message":"Code not found"}}'), True),
+        (FakeResponse(200, payload=[]), True),
+        (FakeResponse(200, payload=outside), True),
+        (FakeResponse(200, payload=in_window), False),
+        (FakeResponse(200, payload={"weird": 1}), False),
+        (FakeResponse(200, payload=ValueError("bad json")), False),
+        (FakeResponse(404, text="other 404"), False),
+    ]
+    import requests as requests_module
+
+    for response, expected in cases:
+        monkeypatch.setattr(
+            requests_module, "get", lambda *a, _r=response, **k: _r
+        )
+        assert (
+            module._upstream_confirms_no_observations("KRW-TEST", start)
+            is expected
+        ), (response.status_code, response.text)
+
+    def boom(*_a, **_k):
+        raise requests_module.ConnectionError("down")
+
+    monkeypatch.setattr(requests_module, "get", boom)
+    monkeypatch.setattr(module.time, "sleep", lambda *_: None)
+    assert module._upstream_confirms_no_observations("KRW-TEST", start) is False
+
+
+def test_upstream_confirmed_halt_is_structural_and_completes_artifact(tmp_path):
+    """거래정지 종목(창 전체 무봉 + 업스트림 확인)은 halted 구조적 종결 —
+    artifact 를 partial 로 잡아 close·publish 를 무기한 차단하지 않는다
+    (2026-08-05 AERGO·AQT 실사고)."""
+    snapshot_file = _make_snapshot(tmp_path / "snapshots", slot="open")
+    bars = [(100.0, 101.0, 99.0, 100.0) for _ in range(96)]
+    probed: list[str] = []
+
+    def assessor(market, start_at, *, db_path):
+        if market == "KRW-T2":
+            return _assessment(
+                [], quality="target_no_observations", raw_bars=0,
+                complete=False, start=start_at,
+            )
+        return _assessment(bars, start=start_at)
+
+    result = label_recommend_snapshot(
+        snapshot_file,
+        output_root=tmp_path / "labels",
+        db_path=tmp_path / "15m.db",
+        receipt_root=tmp_path / "receipts",
+        now="2026-07-25 10:00:00",
+        assessor=assessor,
+        halt_prober=lambda market: probed.append(market) or True,
+    )
+
+    assert result["artifact_status"] == "complete"
+    assert result["summary"]["halted"] == 1
+    assert result["summary"]["incomplete"] == 0
+    assert probed == ["KRW-T2"]
+    halted_rows = [
+        r for r in result["rows"]
+        if r["label_status"] == "halted_no_observations"
+    ]
+    assert [r["coin"] for r in halted_rows] == ["KRW-T2"]
+    assert halted_rows[0]["path_reason"] == "upstream_confirmed_no_observations"
+    assert halted_rows[0]["mfe"] is None
+    # 완결 artifact 는 검증기를 통과하고 재실행에서 재사용된다.
+    load_label_artifact(Path(result["artifact_path"]))
+    again = label_recommend_snapshot(
+        snapshot_file,
+        output_root=tmp_path / "labels",
+        db_path=tmp_path / "15m.db",
+        receipt_root=tmp_path / "receipts",
+        now="2026-07-25 11:00:00",
+        assessor=assessor,
+        halt_prober=lambda market: (_ for _ in ()).throw(AssertionError),
+    )
+    assert again["artifact_reused"] is True
+
+
+def test_unconfirmed_no_observations_stays_partial_for_retry(tmp_path):
+    """업스트림에 봉이 있거나(수집 갭) 확인이 실패하면 halted 로 종결하지
+    않고 partial 유지 — fail-closed, 다음 실행에서 재시도."""
+    snapshot_file = _make_snapshot(tmp_path / "snapshots", slot="open")
+    bars = [(100.0, 101.0, 99.0, 100.0) for _ in range(96)]
+
+    def assessor(market, start_at, *, db_path):
+        if market == "KRW-T2":
+            return _assessment(
+                [], quality="target_no_observations", raw_bars=0,
+                complete=False, start=start_at,
+            )
+        return _assessment(bars, start=start_at)
+
+    for prober in (
+        lambda market: False,
+        lambda market: (_ for _ in ()).throw(RuntimeError("probe down")),
+    ):
+        result = label_recommend_snapshot(
+            snapshot_file,
+            output_root=tmp_path / "labels",
+            db_path=tmp_path / "15m.db",
+            receipt_root=tmp_path / "receipts",
+            now="2026-07-25 10:00:00",
+            assessor=assessor,
+            halt_prober=prober,
+        )
+        assert result["artifact_status"] == "partial"
+        assert result["summary"]["incomplete"] == 1
+        assert "halted" not in result["summary"]
+
+
 def test_incomplete_is_partial_then_retried_to_complete(tmp_path):
     snapshot_file = _make_snapshot(tmp_path / "snapshots", slot="open")
     output_root = tmp_path / "labels"

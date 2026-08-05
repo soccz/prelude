@@ -28,6 +28,7 @@ import re
 import sqlite3
 import stat
 import tempfile
+import time
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -219,6 +220,10 @@ _LABEL_STATUSES = frozenset({
     "no_executable_path",
     "invalid_complete_path",
     "assessment_error",
+    # 거래정지/상폐로 창 전체 무봉이 업스트림에서 확인된 구조적 종결 상태.
+    # incomplete 와 달리 재시도 대상이 아니며 artifact 완결을 막지 않는다
+    # (2026-08-05 AERGO·AQT 정지가 close·publish 를 무기한 차단한 사고).
+    "halted_no_observations",
 })
 _FIRST_PASSAGE_VALUES = frozenset({
     "tp_first",
@@ -546,6 +551,10 @@ def _validate_summary(
         "incomplete",
         "flat_filled",
     })
+    # "halted" 는 2026-08-05 이후 artifact 에만 존재(정지종목 구조적 종결).
+    # 구형 artifact 와의 호환을 위해 선택 키로 둔다.
+    if "halted" in summary:
+        required = required | {"halted"}
     _exact_keys(summary, required, path, "summary")
     observed = {
         key: _uint(value, path, f"summary.{key}")
@@ -554,19 +563,29 @@ def _validate_summary(
     if legacy:
         labeled = len(rows) if status == "complete" else 0
         flat_filled = 0
+        halted = 0
     else:
         labeled = sum(row["label_status"] == "labeled" for row in rows)
         flat_filled = sum(row["path_quality"] == "flat_filled" for row in rows)
+        halted = sum(
+            row["label_status"] == "halted_no_observations" for row in rows
+        )
     expected = {
         "snapshot_universe_n": len(rows),
         "rows": len(rows),
         "labeled": labeled,
-        "incomplete": len(rows) - labeled,
+        "incomplete": len(rows) - labeled - halted,
         "flat_filled": flat_filled,
     }
+    if "halted" in summary:
+        expected["halted"] = halted
+    else:
+        _expect(halted == 0, path, "summary", "halted rows without halted key")
     _expect(observed == expected, path, "summary", "does not match rows")
     if not legacy:
-        expected_status = "complete" if rows and labeled == len(rows) else "partial"
+        expected_status = (
+            "complete" if rows and labeled + halted == len(rows) else "partial"
+        )
         _expect(status == expected_status, path, "artifact_status", "row mismatch")
 
 
@@ -830,7 +849,12 @@ def _validate_modern_row(
         or (status == "no_executable_path" and complete)
         or (
             status
-            in {"path_incomplete", "invalid_complete_path", "assessment_error"}
+            in {
+                "path_incomplete",
+                "invalid_complete_path",
+                "assessment_error",
+                "halted_no_observations",
+            }
             and not complete
         ),
         path,
@@ -1357,6 +1381,67 @@ def path_window(asof: str) -> tuple[pd.Timestamp, pd.Timestamp]:
     return start, start + pd.Timedelta(days=1)
 
 
+def _upstream_confirms_no_observations(
+    market: str,
+    window_start: pd.Timestamp,
+) -> bool:
+    """창(96×15m) 전체 무봉이 업스트림 사실인지 확인 — 불확실은 False.
+
+    구조적 무봉으로 인정하는 업비트 응답은 정확히 세 가지다:
+    ① HTTP 404 "Code not found" — 상폐(심볼 소멸; 2026-08-05 AERGO·AQT 실측)
+    ② HTTP 200 + [] — 상장 유지이나 창 이전부터 거래 없음
+    ③ HTTP 200 + 봉들이 전부 창 밖 — 창 시작 전에 거래 정지
+    그 외(전송 오류·비정상 응답·창 내 봉 존재)는 전부 False 로 fail-closed —
+    우리 수집 갭이면 다음 실행 재시도가 치유한다.
+    """
+    import requests
+
+    from data.collector_d1 import _kst_wall_to_utc_naive
+
+    start_naive = pd.Timestamp(window_start).tz_localize(None)
+    end_naive = start_naive + pd.Timedelta(days=1)
+    api_to = _kst_wall_to_utc_naive(end_naive.to_pydatetime())
+    start_iso = start_naive.strftime("%Y-%m-%dT%H:%M:%S")
+    end_iso = end_naive.strftime("%Y-%m-%dT%H:%M:%S")
+    for attempt in range(1, 4):
+        try:
+            response = requests.get(
+                "https://api.upbit.com/v1/candles/minutes/15",
+                params={
+                    "market": market,
+                    "count": 96,
+                    "to": api_to.strftime("%Y-%m-%d %H:%M:%S"),
+                },
+                timeout=10,
+                headers={"Accept": "application/json"},
+            )
+        except requests.RequestException:
+            time.sleep(1.5 ** attempt)
+            continue
+        if response.status_code == 404 and "Code not found" in response.text:
+            return True
+        if response.status_code != 200:
+            time.sleep(1.5 ** attempt)
+            continue
+        try:
+            payload = response.json()
+        except ValueError:
+            return False
+        if not isinstance(payload, list):
+            return False
+        if not payload:
+            return True
+        kst_times = [
+            item.get("candle_date_time_kst")
+            for item in payload
+            if isinstance(item, dict)
+        ]
+        if len(kst_times) != len(payload) or any(t is None for t in kst_times):
+            return False
+        return not any(start_iso <= t < end_iso for t in kst_times)
+    return False
+
+
 def _scheduled_execution_at(snapshot: dict, window_start: pd.Timestamp) -> pd.Timestamp:
     """과거 재생 snapshot처럼 생성시각이 목표일 밖일 때만 쓰는 명시적 fallback."""
     if snapshot.get("slot") == "preopen":
@@ -1646,8 +1731,14 @@ def label_recommend_snapshot(
     now: str | datetime | pd.Timestamp | None = None,
     assessor: Callable[..., PathAssessment] = assess_15m_window,
     receipt_root: str | Path | None = DEFAULT_RECEIPT_ROOT,
+    halt_prober: Callable[[str], bool] | None = None,
 ) -> dict:
-    """snapshot 전 유니버스를 실행 가능 경로로 라벨링하고 atomic artifact를 반환한다."""
+    """snapshot 전 유니버스를 실행 가능 경로로 라벨링하고 atomic artifact를 반환한다.
+
+    halt_prober(market) 는 창 전체 무봉(raw_bars=0)인 종목이 업스트림에서도
+    무봉임을 확인하면 True — 그 행만 halted_no_observations 구조적 종결로
+    분류한다. None 이면 실제 업비트 REST 확인기를 쓴다.
+    """
     source = Path(snapshot_file)
     snapshot = load_snapshot(source)
     window_start, window_end = path_window(str(snapshot["asof"]))
@@ -1715,6 +1806,14 @@ def label_recommend_snapshot(
 
     snapshot_id = str(snapshot["snapshot_id"])
     snapshot_hash = str(snapshot["payload_sha256"])
+    if halt_prober is None:
+        def prober(market: str) -> bool:
+            return _upstream_confirms_no_observations(
+                market, label_window_start
+            )
+    else:
+        prober = halt_prober
+    halt_confirmed: dict[str, bool] = {}
     rows = []
     for candidate in snapshot.get("universe") or []:
         market = str(candidate.get("coin", ""))
@@ -1748,10 +1847,32 @@ def label_recommend_snapshot(
                 "path_used_bars": 0,
                 **_empty_outcome(),
             }
+        if (
+            row.get("label_status") == "path_incomplete"
+            and row.get("path_reason") == "target_no_observations"
+        ):
+            # 창 전체 무봉 — 거래정지/상폐면 업스트림에도 봉이 없다.
+            # 업스트림 확인이 될 때만 구조적 종결(halted)로 재분류하고,
+            # 아니면 incomplete 유지(수집 갭 — 다음 실행 재시도).
+            if market not in halt_confirmed:
+                try:
+                    halt_confirmed[market] = bool(prober(market))
+                except Exception:
+                    halt_confirmed[market] = False
+            if halt_confirmed[market]:
+                row = {
+                    **row,
+                    "label_status": "halted_no_observations",
+                    "path_quality": "halted_no_observations",
+                    "path_reason": "upstream_confirmed_no_observations",
+                }
         rows.append(_normalise(row))
 
     n_labeled = sum(r.get("label_status") == "labeled" for r in rows)
-    n_incomplete = len(rows) - n_labeled
+    n_halted = sum(
+        r.get("label_status") == "halted_no_observations" for r in rows
+    )
+    n_incomplete = len(rows) - n_labeled - n_halted
     status = "complete" if rows and n_incomplete == 0 else "partial"
     path_input_after = _path_input_manifest(
         db_path,
@@ -1798,6 +1919,7 @@ def label_recommend_snapshot(
             "flat_filled": sum(
                 r.get("path_quality") == "flat_filled" for r in rows
             ),
+            **({"halted": n_halted} if n_halted else {}),
         },
         "rows": rows,
     }
