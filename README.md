@@ -4,10 +4,10 @@
 > KST 08:50·09:05에 알려 주는 개인 트레이딩 보조 레이더.
 > 사용자가 직접 판단·매매하며 **자동 주문은 없다.**
 
-![tests](https://img.shields.io/badge/tests-1357%20passed-brightgreen)
+![tests](https://img.shields.io/badge/tests-1362%20passed-brightgreen)
 ![status](https://img.shields.io/badge/verdict-radar--not--strategy-orange)
 ![evidence](https://img.shields.io/badge/evidence-snapshot%E2%86%92receipt%E2%86%92label-blue)
-![judgment](https://img.shields.io/badge/v2%20GO%2FKILL-2026--09--01%20(frozen)-red)
+![judgment](https://img.shields.io/badge/v2%20verdict-KILL%20(early%2C%202026--08--05)-red)
 
 **전체 여정(실패 포함) 공개 보고서** → [soccz.github.io/projects/prelude](https://soccz.github.io/projects/prelude/) ·
 **일일 대시보드** → [/dashboard](https://soccz.github.io/projects/prelude/dashboard/) (매일 KST 10:10, PIN 암호화)
@@ -25,8 +25,10 @@
    96봉 라벨 → 감사 평가기`를 통과한 forward 표본에서만 나온다. 09:10 알림이 09:00 봉을
    소급 적중하는 류의 왜곡은 구조적으로 불가능하다.
 3. **자기 자신도 못 믿는다는 전제** — 모든 산출물은 content-addressed(SHA-256) + 코드 계보 해시로
-   봉인되고, pump v2의 생사는 **2026-09-01 사전등록 동결 판정**(GO/KILL, 불변 터미널 상태,
-   코드로도 뒤집기 불가)이 결정한다. 판정에 불리해도 기준은 안 바꾼다.
+   봉인되고, pump v2의 생사는 사전등록 동결 판정(GO/KILL, 불변 터미널, 코드로도 뒤집기 불가)이
+   결정하게 했다. 그리고 실제로 그렇게 됐다: **2026-08-05, 조기 사망 조항(누적 mean net < 0)이
+   n=9 · mean −0.097%에서 자동 발동해 KILL을 집행하고 판정문을 해시로 박제했다.**
+   판정에 불리해도 기준은 안 바꾼다 — 는 원칙이 말이 아니라 실행 기록으로 남았다.
 4. **정직한 자기 강등** — 신형 forward 측정에서 상방 head AUC 0.477(무작위 이하)이 나오자
    시스템 스스로 주장을 "우수 추천기"에서 **radar-not-strategy**로 낮췄다. 살아있는 것은
    진입 농축(base 대비 ~6배)과 하방 head(AUC 0.721)뿐이라고 문서 전체가 말한다.
@@ -61,7 +63,7 @@ active KRW − stablecoin 5종 + D1 PIT 거래대금
 
 ---
 
-## 정직한 성적표 (2026-07-28)
+## 정직한 성적표 (2026-08-05)
 
 | 주장 | 증거 | 판정 |
 |---|---|---|
@@ -70,6 +72,7 @@ active KRW − stablecoin 5종 + D1 PIT 거래대금
 | 상방 랭킹이 우수하다 | p_up10 AUC **0.477**, 실측 −0.624%/픽 (몽키 −0.424%) | ❌ 주장 철회 |
 | 자동 청산 net 흑자 | 12실험 + 챌린저 7후보 전부 net ≤ 0 | ❌ 구조적 미달 |
 | 확률은 calibrated | 독립 head 포함관계 위반 36/100, RR 낙관 편향 | ❌ 정렬용 score일 뿐 |
+| v2 급등 레이더는 forward에서 살아남는다 | verified closed 9건 · 누적 mean net **−0.097%** → 동결 조기사망 조항 자동 발동 | ❌ **KILL (2026-08-05 집행)** |
 
 그래서 결론은 하나다: **이 시스템은 자동 수익기가 아니라 하방-규율 추천 레이더이며,
 수익은 사용자의 진입·청산 판단이 결정한다.** 이 문장을 부정하는 지표가 나오면 문서가 먼저 바뀐다.
@@ -102,9 +105,10 @@ active KRW − stablecoin 5종 + D1 PIT 거래대금
   ("조용한 fail-closed는 조용한 fail-open과 같은 얼굴을 하고 있다" — 07-27 장애의 교훈)
 - **provenance 봉인**: champion 상태·정책 비교·메타 모델 전부 payload SHA-256 + 입력 manifest.
   입력이 한 바이트 바뀌면 아티팩트가 무효화된다. pickle은 승인 digest 일치 시에만 실행.
-- **시한부 판정 박제**: v2의 GO/KILL(2026-09-01)은 불변 터미널 상태 + 독립 anchor.
-  KILL이면 전송 API 직전에서 차단된다. 참고로 현재 산술은 KILL 확정 경로다(상한 175 < 필요 200) —
-  그래도 기준은 동결 그대로 간다. **무증거로 죽는 실험과 데이터로 판정받는 실험은 다르다.**
+- **시한부 판정 박제 → 집행 완료**: v2의 GO/KILL은 불변 터미널 상태 + 독립 anchor로 봉인돼 있었고,
+  동결 조기사망 조항이 **2026-08-05 자동 발동해 KILL로 종결**됐다(n=9 · mean −0.097% ·
+  `radar_terminal_verdict.json` integrity hash). KILL 이후 v2 발사는 전송 API 직전에서 차단된다.
+  **무증거로 죽는 실험과 데이터로 판정받는 실험은 다르다** — 이 실험은 후자로 죽었다.
 - **위생 4원칙 (유일한 비타협)**: look-ahead 차단 · 유니버스 시간정합 · 거래비용 상시 차감 · 자동주문 금지.
 
 ---
@@ -127,7 +131,7 @@ python scripts/recommend_today.py --slot open --dry-run
 sudo bash deploy/install_systemd.sh --check-only      # 설치본-저장소 정합 검사
 
 # 전체 검증
-python -m pytest -q tests/                            # 1357 passed 기대
+python -m pytest -q tests/                            # 1362 passed 기대
 ```
 
 ---
@@ -146,8 +150,8 @@ prelude/
 ├── ops/               # 승격 게이트·챔피언·provenance·radar verdict·file lock
 ├── notifier/          # Telegram + delivery receipt
 ├── scripts/           # 일일 러너·백테스트·챌린저·감사 평가기
-├── deploy/            # systemd 15유닛 + 트랜잭션 installer (실패 시 롤백)
-├── tests/             # pytest 1357 (warnings=error)
+├── deploy/            # systemd 17유닛(8타이머, 07:30 전수 selftest 포함) + 트랜잭션 installer
+├── tests/             # pytest 1362 (warnings=error)
 ├── _workspace/        # 연구 노트·설계·독립 재검산 판정서 (negative results 박제)
 └── output/            # 산출물 (증거 아티팩트는 gitignore + versioned backup)
 ```
@@ -167,14 +171,16 @@ prelude/
 
 ---
 
-## 현재 작업 경계 (2026-07-28)
+## 현재 작업 경계 (2026-08-05)
 
 - [x] Track 1 측정 무결성 + 적대 감사·보강
 - [x] 챌린저 5축 종결 (전원 REJECT) — historical 탐색 공식 종료
 - [x] 07-27 3중 장애 수리 + v2 후보 생산 회귀 수리 (적대 리뷰 "신뢰 가능")
-- [x] systemd 15유닛 재설치 + failure-alert 가동 (2026-07-28)
+- [x] systemd 재설치 + failure-alert 가동 (2026-07-28) → 8타이머 체제(07:30 전수 selftest 포함)
+- [x] 실전 8일 하드닝 (07-28→08-05): stdout 오염 클래스 fd 봉인 · 테스트 hermeticity 가드 ·
+      부팅폭풍 캐치업 직렬화 · 15m 갭치유(--heal-days) · 상폐 종목 구조적 종결(halted)
 - [ ] forward 표본 축적 (새 계약 하 매일 자동)
-- [ ] **2026-09-01 v2 동결 판정** (기준 불변)
+- [x] **v2 동결 판정 — 2026-08-05 조기 KILL 자동 집행** (조기사망 조항 · 기준 무수정 · 판정문 해시 박제)
 - [ ] 사용자 승인 대기: OOF calibration 재구축 → 상방 head 재건 → paired downside veto
 
 ---
