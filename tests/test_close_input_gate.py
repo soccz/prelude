@@ -13,6 +13,45 @@ import ops.close_input_gate as gate
 import scripts.pump_detector_today as pump_v1
 import scripts.pump_detector_v2_today as pump_v2
 from notifier.telegram import TelegramSendResult, TelegramServerMessage
+from ops.radar_verdict import record_terminal_verdict, terminal_candidate
+
+
+def _write_terminal_kill(
+    output: Path,
+) -> dict:
+    scorecard = {
+        "status": "early_kill",
+        "closed_n": 9,
+        "mean_net_pct": -0.09658888888888893,
+        "ci95": [-2.3315745735651023, 2.1383967957873247],
+        "per_day_t": 0.028541508607332546,
+        "regimes": ["bear_quiet"],
+        "criteria": {
+            "n>=200": False,
+            "mean>0": False,
+            "CI_0_제외": False,
+            "2레짐_or_t>=2": False,
+        },
+        "criteria_met": 0,
+        "early_kill_breached": True,
+        "terminal_metric_values": {
+            "mean_net_pct": -0.09658888888888893,
+            "ci95": [-2.3315745735651023, 2.1383967957873247],
+            "per_day_t": 0.028541508607332546,
+        },
+    }
+    candidate = terminal_candidate(
+        scorecard,
+        asof=date(2026, 8, 5),
+        recorded_at=datetime.fromisoformat(
+            "2026-08-05T01:30:43.423095+00:00"
+        ),
+    )
+    assert candidate is not None
+    return record_terminal_verdict(
+        candidate,
+        path=output / "radar_terminal_verdict.json",
+    )
 
 
 def _telegram_result(message: str, server_date: str) -> TelegramSendResult:
@@ -842,6 +881,422 @@ def test_close_plan_records_evidence_free_target_day_as_no_decision(
         cohort="r1-open",
         output_root=output,
     ) == (("2026-07-27", "skip-no-decision"),)
+
+
+def test_post_kill_pump_v2_absence_is_terminal_noop(tmp_path: Path) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+    _write_terminal_kill(output)
+
+    assert gate.validate_close_input(
+        asof="2026-08-07",
+        cohort="pump-v2",
+        output_root=output,
+    ) == "skip-terminal-kill"
+    assert gate.validate_close_plan(
+        through_asof="2026-08-07",
+        cohort="pump-v2",
+        output_root=output,
+    ) == (
+        ("2026-08-06", "skip-terminal-kill"),
+        ("2026-08-07", "skip-terminal-kill"),
+    )
+    assert not gate.is_no_decision_day(
+        asof="2026-08-07",
+        cohort="pump-v2",
+        output_root=output,
+    )
+
+
+def test_close_plan_does_not_repeat_valid_policy_noop_marker(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+    _write_terminal_kill(output)
+    mode, state = gate.validate_policy_noop(
+        asof="2026-08-06",
+        cohort="pump-v2",
+        output_root=output,
+    )
+    marker = gate.policy_noop_marker_path(
+        output_root=output,
+        cohort="pump-v2",
+        asof="2026-08-06",
+        mode=mode,
+    )
+    marker.parent.mkdir(parents=True)
+    marker.write_text(
+        json.dumps(
+            {
+                **gate.policy_noop_marker_identity(
+                    cohort="pump-v2",
+                    asof="2026-08-06",
+                    mode=mode,
+                    terminal_state=state,
+                ),
+                "recorded_at": "2026-08-08T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert gate.validate_close_plan(
+        through_asof="2026-08-07",
+        cohort="pump-v2",
+        output_root=output,
+    ) == (("2026-08-07", "skip-terminal-kill"),)
+
+
+def test_post_retirement_missing_terminal_pair_fails_closed(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+
+    with pytest.raises(gate.CloseInputError, match="pair missing"):
+        gate.validate_close_input(
+            asof="2026-08-07",
+            cohort="pump-v2",
+            output_root=output,
+        )
+
+
+@pytest.mark.parametrize(
+    "artifact",
+    ("decision", "receipt", "ledger"),
+)
+def test_post_kill_pump_v2_rejects_lingering_artifacts(
+    tmp_path: Path,
+    artifact: str,
+) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+    _write_terminal_kill(output)
+    if artifact == "decision":
+        path = output / "pump_v2_decisions/2026-08-07.json"
+        path.parent.mkdir(parents=True)
+        path.write_text("{}", encoding="utf-8")
+    elif artifact == "receipt":
+        path = output / "pump_v2_receipts/2026-08-07.json"
+        path.parent.mkdir(parents=True)
+        path.write_text("{}", encoding="utf-8")
+    else:
+        path = output / "shadow_ledger_pump_hunter_v2.csv"
+        path.write_text(
+            "date,status\n2026-08-07,open\n",
+            encoding="utf-8",
+        )
+
+    with pytest.raises(gate.CloseInputError, match="after terminal KILL"):
+        gate.validate_close_input(
+            asof="2026-08-07",
+            cohort="pump-v2",
+            output_root=output,
+        )
+
+
+def test_terminal_noop_rejects_tampered_anchor(tmp_path: Path) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+    _write_terminal_kill(output)
+    anchor = output / "radar_terminal_verdict.json.anchor"
+    anchor.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(
+        gate.CloseInputError,
+        match="state/anchor validation failed",
+    ):
+        gate.validate_close_input(
+            asof="2026-08-07",
+            cohort="pump-v2",
+            output_root=output,
+        )
+
+
+@pytest.mark.parametrize("cohort", ("r1-open", "r1-preopen"))
+def test_r1_shared_kill_gap_is_bounded_policy_noop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cohort: str,
+) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+    _write_terminal_kill(output)
+    spec = gate.COHORTS[cohort]
+    evidence = output / spec.evidence_name.format(asof="2026-08-07")
+    evidence.parent.mkdir(parents=True)
+    evidence.write_text("{}", encoding="utf-8")
+
+    def expected_without_delivery(**kwargs):
+        assert kwargs["require_successful_delivery"] is False
+        return gate.ExpectedCohort(
+            asof="2026-08-07",
+            evidence_id="snapshot-id",
+            evidence_path=evidence,
+            candidates=(("KRW-TEST", 1),),
+        )
+
+    monkeypatch.setattr(gate, "_load_expected", expected_without_delivery)
+
+    assert gate.validate_close_input(
+        asof="2026-08-07",
+        cohort=cohort,
+        output_root=output,
+    ) == "skip-policy-blocked"
+
+
+def test_r1_resume_restores_strict_receipt_requirement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+    _write_terminal_kill(output)
+
+    def require_receipt(**kwargs):
+        assert kwargs.get("require_successful_delivery") is None
+        raise gate.CloseInputError("requires a successful canonical receipt")
+
+    monkeypatch.setattr(gate, "_load_expected", require_receipt)
+
+    with pytest.raises(
+        gate.CloseInputError,
+        match="requires a successful canonical receipt",
+    ):
+        gate.validate_close_input(
+            asof=gate.R1_RESUME_ASOF.isoformat(),
+            cohort="r1-open",
+            output_root=output,
+        )
+
+
+@pytest.mark.parametrize("cohort", ("r1-open", "r2", "a1", "pump-v1"))
+def test_non_v2_close_is_independent_of_corrupt_v2_terminal_after_resume(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cohort: str,
+) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+    (output / "radar_terminal_verdict.json").write_text(
+        "{",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        gate,
+        "_load_expected",
+        lambda **_kwargs: gate.ExpectedCohort(
+            asof=gate.R1_RESUME_ASOF.isoformat(),
+            evidence_id="evidence-id",
+            evidence_path=output / "evidence.json",
+            candidates=(),
+        ),
+    )
+
+    assert gate.validate_close_input(
+        asof=gate.R1_RESUME_ASOF.isoformat(),
+        cohort=cohort,
+        output_root=output,
+    ) == "skip-zero-pick"
+
+
+@pytest.mark.parametrize("cohort", ("r1-open", "pump-v2"))
+def test_pre_retirement_close_does_not_read_later_terminal_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cohort: str,
+) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+    (output / "radar_terminal_verdict.json").write_text("{", encoding="utf-8")
+    monkeypatch.setattr(
+        gate,
+        "_load_expected",
+        lambda **_kwargs: gate.ExpectedCohort(
+            asof="2026-07-30",
+            evidence_id="evidence-id",
+            evidence_path=output / "evidence.json",
+            candidates=(),
+        ),
+    )
+
+    assert gate.validate_close_input(
+        asof="2026-07-30",
+        cohort=cohort,
+        output_root=output,
+    ) == "skip-zero-pick"
+
+
+@pytest.mark.parametrize("cohort", ("r1-open", "r1-preopen"))
+def test_resumed_r1_plan_uses_recorded_seam_markers_without_v2_pair(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cohort: str,
+) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+    (output / "radar_terminal_verdict.json").write_text("{", encoding="utf-8")
+    terminal_identity = {
+        "verdict_id": gate.PUMP_V2_TERMINAL_VERDICT_ID,
+        "effective_asof": gate.PUMP_V2_TERMINAL_EFFECTIVE_ASOF.isoformat(),
+    }
+    for day in ("2026-08-06", "2026-08-07", "2026-08-08"):
+        marker = gate.policy_noop_marker_path(
+            output_root=output,
+            cohort=cohort,
+            asof=day,
+            mode="skip-policy-blocked",
+        )
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(
+            json.dumps(
+                {
+                    **gate.policy_noop_marker_identity(
+                        cohort=cohort,
+                        asof=day,
+                        mode="skip-policy-blocked",
+                        terminal_state=terminal_identity,
+                    ),
+                    "recorded_at": "2026-08-08T00:00:00+00:00",
+                }
+            ),
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(
+        gate,
+        "_load_expected",
+        lambda **_kwargs: gate.ExpectedCohort(
+            asof="2026-08-09",
+            evidence_id="evidence-id",
+            evidence_path=output / "evidence.json",
+            candidates=(),
+        ),
+    )
+
+    assert gate.validate_close_plan(
+        through_asof="2026-08-09",
+        cohort=cohort,
+        output_root=output,
+    ) == (("2026-08-09", "skip-zero-pick"),)
+
+
+@pytest.mark.parametrize("cohort", ("r1-open", "r1-preopen"))
+@pytest.mark.parametrize(
+    ("artifact", "error"),
+    (("ledger", "ledger rows"), ("receipt", "delivery receipt")),
+)
+def test_recorded_r1_policy_seam_rejects_retroactive_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cohort: str,
+    artifact: str,
+    error: str,
+) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+    # Completed R1 seam markers deliberately remain usable if the retired-v2
+    # pair later becomes unavailable, but they must not hide retroactive PnL
+    # or a fabricated delivery receipt.
+    (output / "radar_terminal_verdict.json").write_text(
+        "{",
+        encoding="utf-8",
+    )
+    terminal_identity = {
+        "verdict_id": gate.PUMP_V2_TERMINAL_VERDICT_ID,
+        "effective_asof": gate.PUMP_V2_TERMINAL_EFFECTIVE_ASOF.isoformat(),
+    }
+    for day in ("2026-08-06", "2026-08-07", "2026-08-08"):
+        marker = gate.policy_noop_marker_path(
+            output_root=output,
+            cohort=cohort,
+            asof=day,
+            mode="skip-policy-blocked",
+        )
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(
+            json.dumps(
+                {
+                    **gate.policy_noop_marker_identity(
+                        cohort=cohort,
+                        asof=day,
+                        mode="skip-policy-blocked",
+                        terminal_state=terminal_identity,
+                    ),
+                    "recorded_at": "2026-08-08T00:00:00+00:00",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    spec = gate.COHORTS[cohort]
+    if artifact == "ledger":
+        (output / spec.ledger_name).write_text(
+            "date,status\n2026-08-06,closed\n",
+            encoding="utf-8",
+        )
+    else:
+        evidence = output / spec.evidence_name.format(asof="2026-08-06")
+        receipt = output / "recommend_receipts/2026-08-06" / evidence.name
+        receipt.parent.mkdir(parents=True)
+        receipt.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        gate,
+        "_load_expected",
+        lambda **_kwargs: gate.ExpectedCohort(
+            asof="2026-08-09",
+            evidence_id="evidence-id",
+            evidence_path=output / "evidence.json",
+            candidates=(),
+        ),
+    )
+
+    with pytest.raises(gate.CloseInputError, match=error):
+        gate.validate_close_plan(
+            through_asof="2026-08-09",
+            cohort=cohort,
+            output_root=output,
+        )
+
+
+def test_recorded_terminal_skip_rejects_later_pump_v2_decision(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+    state = _write_terminal_kill(output)
+    marker = gate.policy_noop_marker_path(
+        output_root=output,
+        cohort="pump-v2",
+        asof="2026-08-06",
+        mode="skip-terminal-kill",
+    )
+    marker.parent.mkdir(parents=True)
+    marker.write_text(
+        json.dumps(
+            {
+                **gate.policy_noop_marker_identity(
+                    cohort="pump-v2",
+                    asof="2026-08-06",
+                    mode="skip-terminal-kill",
+                    terminal_state=state,
+                ),
+                "recorded_at": "2026-08-08T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    decision = output / "pump_v2_decisions/2026-08-06.json"
+    decision.parent.mkdir(parents=True)
+    decision.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(gate.CloseInputError, match="canonical artifacts"):
+        gate.validate_close_plan(
+            through_asof="2026-08-06",
+            cohort="pump-v2",
+            output_root=output,
+        )
 
 
 def test_close_plan_pending_rows_without_evidence_still_fail_closed(

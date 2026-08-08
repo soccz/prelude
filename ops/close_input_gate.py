@@ -17,7 +17,7 @@ import logging
 import math
 import sys
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Mapping, cast
 
@@ -41,6 +41,12 @@ from ops.artifact_provenance import (
     file_identity,
     sha256_bytes,
     strict_json_object,
+)
+from ops.radar_verdict import (
+    PUMP_V2_RETIRED_AT,
+    PUMP_V2_TERMINAL_EFFECTIVE_ASOF,
+    PUMP_V2_TERMINAL_VERDICT_ID,
+    load_terminal_verdict,
 )
 from scripts.pump_detector_today import (
     _validate_decision_document as _validate_v1_decision,
@@ -66,6 +72,14 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # completed.  2026-07-27 is therefore the first decision date on which every
 # runner is required to emit canonical evidence.
 CLOSE_EVIDENCE_ACTIVATION_DATE = date(2026, 7, 27)
+# The user explicitly narrowed the 2026-08-05 terminal verdict to pump-v2
+# and resumed R1 from this date.  The bounded gap before this date remains
+# forward-invalid history; receipts or PnL must never be fabricated for it.
+R1_RESUME_ASOF = date(2026, 8, 9)
+POLICY_NOOP_MARKER_DIRS = {
+    "skip-terminal-kill": "close_terminal_skip",
+    "skip-policy-blocked": "close_policy_blocked",
+}
 ALLOWED_LEDGER_STATUSES = frozenset(
     {"open", "no_data", "not_delivered", "closed"}
 )
@@ -371,6 +385,7 @@ def _load_expected(
     asof: str,
     cohort: str,
     output_root: Path,
+    require_successful_delivery: bool | None = None,
 ) -> ExpectedCohort:
     try:
         spec = COHORTS[cohort]
@@ -422,7 +437,12 @@ def _load_expected(
         if receipt is not None:
             delivery_ok = receipt["delivery_ok"]
             sent_at = receipt.get("sent_at")
-        if spec.requires_successful_delivery and (
+        delivery_required = (
+            spec.requires_successful_delivery
+            if require_successful_delivery is None
+            else require_successful_delivery
+        )
+        if delivery_required and (
             delivery_ok is not True or sent_at is None
         ):
             raise CloseInputError(
@@ -706,8 +726,17 @@ def validate_close_plan(
     # authentication so a missing candidate-bearing ledger cannot pass silently.
     dates = set(pending)
     dates.add(through_asof)
+    policy_noops = _unrecorded_policy_noops(
+        through=parsed,
+        cohort=cohort,
+        output_root=root,
+    )
+    dates.update(policy_noops)
     plan: list[tuple[str, str]] = []
     for decision_date in sorted(dates):
+        if decision_date in policy_noops:
+            plan.append((decision_date, policy_noops[decision_date]))
+            continue
         try:
             mode = validate_close_input(
                 asof=decision_date,
@@ -803,6 +832,275 @@ def _ledger_has_rows_for(ledger_path: Path, asof: str) -> bool:
     return False
 
 
+def _effective_terminal_kill(
+    *,
+    asof: str,
+    output_root: Path,
+) -> Mapping[str, object] | None:
+    """Return a validated KILL only for dates strictly after it took effect."""
+    try:
+        decision_day = date.fromisoformat(asof)
+    except ValueError as exc:
+        raise CloseInputError(
+            "pump-v2 terminal comparison date is invalid"
+        ) from exc
+    if decision_day <= PUMP_V2_TERMINAL_EFFECTIVE_ASOF:
+        return None
+    try:
+        state = load_terminal_verdict(
+            output_root / "radar_terminal_verdict.json"
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise CloseInputError(
+            "pump-v2 terminal verdict state/anchor validation failed"
+        ) from exc
+    if state is None:
+        raise CloseInputError(
+            "pump-v2 terminal KILL pair missing after retirement"
+        )
+    expected_identity = {
+        "verdict": "kill",
+        "status": "early_kill",
+        "verdict_id": PUMP_V2_TERMINAL_VERDICT_ID,
+        "effective_asof": PUMP_V2_TERMINAL_EFFECTIVE_ASOF.isoformat(),
+        "recorded_at": PUMP_V2_RETIRED_AT.isoformat(),
+    }
+    if any(
+        state.get(key) != value for key, value in expected_identity.items()
+    ):
+        raise CloseInputError(
+            "pump-v2 terminal KILL identity mismatch after retirement"
+        )
+    return state
+
+
+def validate_policy_noop(
+    *,
+    asof: str,
+    cohort: str,
+    output_root: str | Path = PROJECT_ROOT / "output",
+) -> tuple[str, Mapping[str, object]] | None:
+    """Validate an intentional no-op caused by the v2-only KILL transition.
+
+    ``skip-terminal-kill`` is exclusive to pump-v2 after the immutable KILL.
+    ``skip-policy-blocked`` is the bounded R1 gap created when the old shared
+    guard blocked 2026-08-06..08 alerts before the user resumed R1.  Both
+    modes require absence of receipt and ledger rows; R1 additionally keeps
+    and validates its immutable snapshot as forward-invalid audit evidence.
+    """
+    spec = COHORTS.get(cohort)
+    if spec is None:
+        raise CloseInputError(f"unsupported close cohort: {cohort}")
+    root = Path(output_root)
+    if cohort in {"r1-open", "r1-preopen"}:
+        if date.fromisoformat(asof) >= R1_RESUME_ASOF:
+            return None
+    elif cohort != "pump-v2":
+        # R2/A1/pump-v1 are wholly independent of the retired v2 state.
+        return None
+    state = _effective_terminal_kill(asof=asof, output_root=root)
+    if state is None:
+        return None
+    _validate_policy_noop_artifacts(
+        asof=asof,
+        cohort=cohort,
+        output_root=root,
+    )
+    return (
+        "skip-terminal-kill" if cohort == "pump-v2"
+        else "skip-policy-blocked",
+        state,
+    )
+
+
+def _validate_policy_noop_artifacts(
+    *,
+    asof: str,
+    cohort: str,
+    output_root: Path,
+) -> None:
+    """Revalidate the no-artifact seam without reading terminal state.
+
+    Completed markers let active R1 remain independent from the retired v2
+    pair, but they must never hide a receipt, decision or all-status ledger
+    row added later.
+    """
+    spec = COHORTS[cohort]
+    ledger_path = output_root / spec.ledger_name
+
+    if cohort == "pump-v2":
+        if _ledger_has_rows_for(ledger_path, asof):
+            raise CloseInputError(
+                f"pump-v2 has ledger rows after terminal KILL for {asof}"
+            )
+        lingering = [
+            path
+            for path in _no_decision_artifacts(asof, spec, output_root)
+            if _directory_entry_exists(path)
+        ]
+        if lingering:
+            raise CloseInputError(
+                "pump-v2 has canonical artifacts after terminal KILL for "
+                f"{asof}: {lingering}"
+            )
+        return
+
+    evidence_path = output_root / spec.evidence_name.format(asof=asof)
+    receipt_path = (
+        output_root / "recommend_receipts" / asof / evidence_path.name
+    )
+    if _directory_entry_exists(receipt_path):
+        raise CloseInputError(
+            f"{cohort} policy-blocked day has a delivery receipt for {asof}"
+        )
+    if _ledger_has_rows_for(ledger_path, asof):
+        raise CloseInputError(
+            f"{cohort} policy-blocked day has ledger rows for {asof}"
+        )
+    # Preserve and authenticate the snapshot, but deliberately waive only
+    # the successful-delivery requirement for this exact historical seam.
+    _load_expected(
+        asof=asof,
+        cohort=cohort,
+        output_root=output_root,
+        require_successful_delivery=False,
+    )
+
+
+def policy_noop_marker_path(
+    *,
+    output_root: Path,
+    cohort: str,
+    asof: str,
+    mode: str,
+) -> Path:
+    """Return the canonical audit-marker path for a policy no-op."""
+    directory = POLICY_NOOP_MARKER_DIRS.get(mode)
+    if directory is None:
+        raise CloseInputError(f"unsupported policy no-op mode: {mode}")
+    return output_root / directory / cohort / f"{asof}.json"
+
+
+def policy_noop_marker_identity(
+    *,
+    cohort: str,
+    asof: str,
+    mode: str,
+    terminal_state: Mapping[str, object],
+) -> dict[str, object]:
+    """Build the immutable identity shared by planner and closer."""
+    if mode not in POLICY_NOOP_MARKER_DIRS:
+        raise CloseInputError(f"unsupported policy no-op mode: {mode}")
+    return {
+        "schema": "close_policy_noop.v1",
+        "asof": asof,
+        "cohort": cohort,
+        "mode": mode,
+        "forward_valid": False,
+        "terminal_verdict_id": terminal_state.get("verdict_id"),
+        "terminal_effective_asof": terminal_state.get("effective_asof"),
+    }
+
+
+def _policy_noop_marker_recorded(
+    *,
+    output_root: Path,
+    cohort: str,
+    asof: str,
+    mode: str,
+    terminal_state: Mapping[str, object],
+) -> bool:
+    marker = policy_noop_marker_path(
+        output_root=output_root,
+        cohort=cohort,
+        asof=asof,
+        mode=mode,
+    )
+    if not _directory_entry_exists(marker):
+        return False
+    payload = _strict_json(marker)
+    identity = policy_noop_marker_identity(
+        cohort=cohort,
+        asof=asof,
+        mode=mode,
+        terminal_state=terminal_state,
+    )
+    if any(payload.get(key) != value for key, value in identity.items()):
+        raise CloseInputError(
+            f"policy no-op marker identity mismatch: {marker}"
+        )
+    return True
+
+
+def _unrecorded_policy_noops(
+    *,
+    through: date,
+    cohort: str,
+    output_root: Path,
+) -> dict[str, str]:
+    """Enumerate bounded transition dates that have no audit marker yet."""
+    if cohort not in {"r1-open", "r1-preopen", "pump-v2"}:
+        return {}
+    first = PUMP_V2_TERMINAL_EFFECTIVE_ASOF + timedelta(days=1)
+    last = through
+    if cohort in {"r1-open", "r1-preopen"}:
+        last = min(last, R1_RESUME_ASOF - timedelta(days=1))
+    if last < first:
+        return {}
+    missing: dict[str, str] = {}
+    mode = (
+        "skip-terminal-kill"
+        if cohort == "pump-v2"
+        else "skip-policy-blocked"
+    )
+    terminal_identity = {
+        "verdict_id": PUMP_V2_TERMINAL_VERDICT_ID,
+        "effective_asof": PUMP_V2_TERMINAL_EFFECTIVE_ASOF.isoformat(),
+    }
+    current = first
+    while current <= last:
+        asof = current.isoformat()
+        # A completed marker is the durable result of the under-lock
+        # validation. Validate it from fixed retirement identity first so
+        # active R1 no longer depends on the live v2 pair after migration.
+        if _policy_noop_marker_recorded(
+            output_root=output_root,
+            cohort=cohort,
+            asof=asof,
+            mode=mode,
+            terminal_state=terminal_identity,
+        ):
+            # The marker severs resumed R1 from the live pump-v2 verdict pair,
+            # but it is not permission to add evidence or PnL retroactively.
+            # Recheck the date-local artifacts on every plan evaluation so a
+            # later receipt/decision/ledger row cannot be hidden by the marker.
+            _validate_policy_noop_artifacts(
+                asof=asof,
+                cohort=cohort,
+                output_root=output_root,
+            )
+            current += timedelta(days=1)
+            continue
+        policy_noop = validate_policy_noop(
+            asof=asof,
+            cohort=cohort,
+            output_root=output_root,
+        )
+        if policy_noop is None:
+            raise CloseInputError(
+                f"expected policy no-op is unavailable for {cohort} {asof}"
+            )
+        actual_mode, _terminal_state = policy_noop
+        if actual_mode != mode:
+            raise CloseInputError(
+                f"unexpected policy no-op mode for {cohort} {asof}: "
+                f"{actual_mode}"
+            )
+        missing[asof] = mode
+        current += timedelta(days=1)
+    return missing
+
+
 def is_no_decision_day(
     *,
     asof: str,
@@ -821,6 +1119,11 @@ def is_no_decision_day(
     if spec is None:
         raise CloseInputError(f"unsupported close cohort: {cohort}")
     root = Path(output_root)
+    if cohort == "pump-v2" and _effective_terminal_kill(
+        asof=asof,
+        output_root=root,
+    ) is not None:
+        return False
     if _ledger_has_rows_for(root / spec.ledger_name, asof):
         return False
     return not any(
@@ -944,7 +1247,7 @@ def validate_close_input(
     cohort: str,
     output_root: str | Path = PROJECT_ROOT / "output",
 ) -> str:
-    """Return a close/zero-pick/legacy-unverifiable mode after validation."""
+    """Return a validated close or explicit no-op mode."""
     try:
         parsed_asof = str(date.fromisoformat(asof))
     except ValueError as exc:
@@ -957,6 +1260,13 @@ def validate_close_input(
     if spec is None:
         raise CloseInputError(f"unsupported close cohort: {cohort}")
     ledger_path = root / spec.ledger_name
+    policy_noop = validate_policy_noop(
+        asof=asof,
+        cohort=cohort,
+        output_root=root,
+    )
+    if policy_noop is not None:
+        return policy_noop[0]
     try:
         expected = _load_expected(
             asof=asof,

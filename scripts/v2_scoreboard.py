@@ -681,7 +681,7 @@ def run_scoreboard(
         status = payload["status"]
         print(
             f"[v2-scoreboard] n={payload['closed_n']} "
-            f"mean_net={mean_text} ⛔ {status} — radar 전체 KILL"
+            f"mean_net={mean_text} ⛔ {status} — pump-v2 KILL"
         )
         return 21, payload
     if code == 2:

@@ -37,6 +37,7 @@ import os
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
+from typing import Mapping
 
 import numpy as np
 import pandas as pd
@@ -57,12 +58,19 @@ from ledger.path_quality import (  # noqa: E402
     assess_15m_window,
     next_bar_boundary,
 )
+from ops.artifact_provenance import (  # noqa: E402
+    ArtifactValidationError,
+    strict_json_object,
+)
 from ops.close_input_gate import (  # noqa: E402
     COHORTS,
     CloseInputError,
     MissingCloseEvidenceError,
     is_no_decision_day,
+    policy_noop_marker_identity,
+    policy_noop_marker_path,
     validate_close_input,
+    validate_policy_noop,
 )
 from scripts.recommend_today import (  # noqa: E402
     RECOMMEND_LEDGER_COLS,
@@ -166,20 +174,40 @@ def _record_no_decision_marker(
     Without the marker the day would be indistinguishable from a healthy
     zero-pick day in every downstream coverage denominator (MNAR loss).
     """
+    identity = {
+        "schema": "close_no_decision.v1",
+        "asof": asof,
+        "cohort": cohort,
+        "reason": (
+            "no canonical decision evidence, no receipt and no ledger "
+            "rows — send-day pipeline failure"
+        ),
+    }
     marker_dir = output_root / "close_no_decision" / cohort
     marker_dir.mkdir(parents=True, exist_ok=True)
     marker = marker_dir / f"{asof}.json"
-    if marker.exists():
+    if marker.exists() or marker.is_symlink():
+        if marker.is_symlink() or not marker.is_file():
+            raise CloseInputError(
+                f"no-decision marker must be a regular non-symlink file: {marker}"
+            )
+        try:
+            existing = strict_json_object(marker)
+        except (OSError, ArtifactValidationError) as exc:
+            raise CloseInputError(
+                f"no-decision marker is unreadable: {marker}"
+            ) from exc
+        if any(
+            existing.get(key) != value for key, value in identity.items()
+        ):
+            raise CloseInputError(
+                f"no-decision marker identity mismatch: {marker}"
+            )
         return
     payload = json.dumps(
         {
-            "asof": asof,
-            "cohort": cohort,
+            **identity,
             "recorded_at": datetime.now(timezone.utc).isoformat(),
-            "reason": (
-                "no canonical decision evidence, no receipt and no ledger "
-                "rows — send-day pipeline failure"
-            ),
         },
         ensure_ascii=False,
         indent=2,
@@ -187,6 +215,60 @@ def _record_no_decision_marker(
     )
     tmp = marker.with_suffix(".json.tmp")
     tmp.write_text(payload + "\n", encoding="utf-8")
+    os.replace(tmp, marker)
+
+
+def _record_policy_noop_marker(
+    *,
+    output_root: Path,
+    cohort: str,
+    asof: str,
+    mode: str,
+    terminal_state: Mapping[str, object],
+) -> None:
+    """Persist an auditable non-PnL marker for the v2-only transition."""
+    marker = policy_noop_marker_path(
+        output_root=output_root,
+        cohort=cohort,
+        asof=asof,
+        mode=mode,
+    )
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    identity = policy_noop_marker_identity(
+        cohort=cohort,
+        asof=asof,
+        mode=mode,
+        terminal_state=terminal_state,
+    )
+    if marker.exists():
+        try:
+            existing = strict_json_object(marker)
+        except (OSError, ArtifactValidationError) as exc:
+            raise CloseInputError(
+                f"policy no-op marker is unreadable: {marker}"
+            ) from exc
+        if any(
+            existing.get(key) != value for key, value in identity.items()
+        ):
+            raise CloseInputError(
+                f"policy no-op marker identity mismatch: {marker}"
+            )
+        return
+    payload = {
+        **identity,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "reason": (
+            "pump-v2 retired by immutable KILL"
+            if mode == "skip-terminal-kill"
+            else "R1 was blocked by the superseded shared-KILL policy"
+        ),
+    }
+    tmp = marker.with_suffix(".json.tmp")
+    tmp.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+        + "\n",
+        encoding="utf-8",
+    )
     os.replace(tmp, marker)
 
 
@@ -214,6 +296,8 @@ def close_recommend_ledger(
                 "skip-zero-pick",
                 "skip-legacy-unverifiable",
                 "skip-no-decision",
+                "skip-terminal-kill",
+                "skip-policy-blocked",
             }:
                 raise CloseInputError(
                     f"invalid expected close mode: {expected_mode!r}"
@@ -249,6 +333,26 @@ def close_recommend_ledger(
                 raise CloseInputError(
                     f"{cohort} close mode changed under ledger lock: "
                     f"{expected_mode!r} -> {actual_mode!r}"
+                )
+            if actual_mode in {
+                "skip-terminal-kill",
+                "skip-policy-blocked",
+            }:
+                policy_noop = validate_policy_noop(
+                    asof=str(decision_date.date()),
+                    cohort=cohort,
+                    output_root=root,
+                )
+                if policy_noop is None or policy_noop[0] != actual_mode:
+                    raise CloseInputError(
+                        f"{cohort} policy no-op changed under ledger lock"
+                    )
+                _record_policy_noop_marker(
+                    output_root=root,
+                    cohort=cohort,
+                    asof=str(decision_date.date()),
+                    mode=actual_mode,
+                    terminal_state=policy_noop[1],
                 )
             if actual_mode != "close":
                 log.info(
@@ -564,6 +668,8 @@ def main():
             "skip-zero-pick",
             "skip-legacy-unverifiable",
             "skip-no-decision",
+            "skip-terminal-kill",
+            "skip-policy-blocked",
         ),
         help="mode emitted by the outer plan; must still match under lock",
     )

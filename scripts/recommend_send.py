@@ -71,11 +71,6 @@ from ops.champion_selector import (  # noqa: E402
     load_champion_state_artifact,
 )
 from ops.file_lock import file_lock  # noqa: E402
-from ops.radar_verdict import (  # noqa: E402
-    RADAR_TERMINAL_STATE,
-    assert_radar_send_allowed,
-    radar_send_guard,
-)
 from signals.model_registry import ModelSpec, get_model  # noqa: E402
 from signals.recommend_snapshot import get_or_create_recommend_snapshot  # noqa: E402
 from signals.recommend_snapshot import SNAPSHOT_SCHEMA_VERSION  # noqa: E402
@@ -96,8 +91,6 @@ APPROVED_LIVE_R1_RULE_VERSION = "r1_riskreward_v1"
 CHAMPION_STATE_PATH = (
     Path(__file__).resolve().parent.parent / "output" / "champion_state.json"
 )
-RADAR_VERDICT_PATH = RADAR_TERMINAL_STATE
-
 _BEAR = {"bear", "bear_quiet", "bear_volatile"}
 
 
@@ -481,7 +474,6 @@ def maybe_notify_champion_change(
     dry_run: bool = False,
     receipt_root: str | Path | None = None,
     live_asof: str | None = None,
-    radar_verdict_path: str | Path | None = None,
 ) -> bool | None:
     """champion_state.json history 의 *마지막 교체 이벤트* 가 이 slot 에서 from!=to(실제 교체)
     면 1줄 통보 발송. 부팅(from=None)·교체 없음·이미 통보됨 케이스는 발송 안 함.
@@ -492,11 +484,6 @@ def maybe_notify_champion_change(
     발송 여부만 반환.
     ★ 통보는 알림일 뿐 — 발송을 막지 않는다(레이더는 별도로 나간다)."""
     state_path = CHAMPION_STATE_PATH
-    verdict_path = (
-        RADAR_VERDICT_PATH
-        if radar_verdict_path is None
-        else radar_verdict_path
-    )
     try:
         artifact = load_champion_state_artifact(
             state_path,
@@ -585,33 +572,24 @@ def maybe_notify_champion_change(
                 "champion notice receipt records partial/ambiguous delivery; "
                 "automatic retry would duplicate delivered chunks"
             )
-        with radar_send_guard(
-            path=verdict_path,
-            clock=_now_kst,
-            boundary_check=(
-                (
-                    lambda observed: _assert_live_send_window(
-                        cast(str, live_asof),
-                        slot,
-                        now=observed,
-                    )
-                )
-                if live_asof is not None
-                else None
-            ),
-        ):
-            attempted_at = datetime.now(timezone.utc).isoformat()
-            try:
-                ok, error, sent_at, transport = _send_live_transport(
-                    msg,
-                    asof=live_asof or asof,
-                    slot=slot,
-                )
-            except Exception as exc:  # noqa: BLE001
-                ok = False
-                error = f"{type(exc).__name__}: {exc}"
-                sent_at = None
-                transport = None
+        if live_asof is not None:
+            _assert_live_send_window(
+                cast(str, live_asof),
+                slot,
+                now=_now_kst(),
+            )
+        attempted_at = datetime.now(timezone.utc).isoformat()
+        try:
+            ok, error, sent_at, transport = _send_live_transport(
+                msg,
+                asof=live_asof or asof,
+                slot=slot,
+            )
+        except Exception as exc:  # noqa: BLE001
+            ok = False
+            error = f"{type(exc).__name__}: {exc}"
+            sent_at = None
+            transport = None
         if (
             date.fromisoformat(live_asof or asof)
             >= RECEIPT_INTEGRITY_ACTIVATION_DATE
@@ -656,14 +634,8 @@ def _send_and_record(
     *,
     slot: str,
     receipt_root: str | Path | None,
-    radar_verdict_path: str | Path | None = None,
 ) -> bool:
     """성공 receipt가 없는 snapshot만 발송하고 결과를 동일 lock 안에서 기록."""
-    verdict_path = (
-        RADAR_VERDICT_PATH
-        if radar_verdict_path is None
-        else radar_verdict_path
-    )
     _assert_live_snapshot_boundary(snapshot, slot, _now_kst())
     with _exclusive_snapshot_send_lock(snapshot, receipt_root=receipt_root):
         existing = read_delivery_receipt(snapshot, root=receipt_root)
@@ -678,7 +650,6 @@ def _send_and_record(
                     dry_run=False,
                     receipt_root=receipt_root,
                     live_asof=str(snapshot.get("asof", "")),
-                    radar_verdict_path=verdict_path,
                 )
             except Exception as exc:  # noqa: BLE001
                 log.error("champion change notification failed: %s", exc)
@@ -696,36 +667,28 @@ def _send_and_record(
         # primary recommendation API call. The auxiliary champion notice is
         # deliberately attempted only after this primary result is durably
         # recorded, so it can never consume the remaining slot window first.
-        with radar_send_guard(
-            path=verdict_path,
-            clock=_now_kst,
-            boundary_check=lambda observed: _assert_live_snapshot_boundary(
-                snapshot,
-                slot,
-                observed,
-            ),
-        ):
-            attempted_at = datetime.now(timezone.utc).isoformat()
-            try:
-                ok, error, sent_at, transport = _send_live_transport(
-                    message,
-                    asof=str(snapshot.get("asof", "")),
-                    slot=slot,
+        _assert_live_snapshot_boundary(snapshot, slot, _now_kst())
+        attempted_at = datetime.now(timezone.utc).isoformat()
+        try:
+            ok, error, sent_at, transport = _send_live_transport(
+                message,
+                asof=str(snapshot.get("asof", "")),
+                slot=slot,
+            )
+        except Exception as exc:
+            if (
+                date.fromisoformat(str(snapshot.get("asof", "")))
+                < RECEIPT_INTEGRITY_ACTIVATION_DATE
+            ):
+                write_delivery_receipt(
+                    snapshot,
+                    delivery_ok=False,
+                    attempted_at=attempted_at,
+                    sent_at=None,
+                    error=type(exc).__name__,
+                    root=receipt_root,
                 )
-            except Exception as exc:
-                if (
-                    date.fromisoformat(str(snapshot.get("asof", "")))
-                    < RECEIPT_INTEGRITY_ACTIVATION_DATE
-                ):
-                    write_delivery_receipt(
-                        snapshot,
-                        delivery_ok=False,
-                        attempted_at=attempted_at,
-                        sent_at=None,
-                        error=type(exc).__name__,
-                        root=receipt_root,
-                    )
-                raise
+            raise
 
         # Telegram Bot API에는 client idempotency key가 없다. API가 메시지를
         # 수락한 직후 receipt fsync 전에 SIGKILL/전원 장애가 나면 다음 실행이
@@ -750,7 +713,6 @@ def _send_and_record(
                     dry_run=False,
                     receipt_root=receipt_root,
                     live_asof=str(snapshot.get("asof", "")),
-                    radar_verdict_path=verdict_path,
                 )
             except Exception as exc:  # noqa: BLE001
                 # Champion notice is auxiliary; its evidence or transport
@@ -762,24 +724,13 @@ def _send_and_record(
 def send_recommendation(asof: str, slot: str, *, dry_run: bool = False,
                         limit_markets: int | None = None,
                         snapshot_root: str | Path | None = None,
-                        receipt_root: str | Path | None = None,
-                        radar_verdict_path: str | Path | None = None) -> bool:
-    verdict_path = (
-        RADAR_VERDICT_PATH
-        if radar_verdict_path is None
-        else radar_verdict_path
-    )
+                        receipt_root: str | Path | None = None) -> bool:
     if not dry_run:
         if limit_markets is not None:
             raise RuntimeError(
                 "--limit-markets is dry-run-only and cannot enter live radar"
             )
-        observed = _now_kst()
-        _assert_live_send_window(asof, slot, now=observed)
-        assert_radar_send_allowed(
-            path=verdict_path,
-            now=observed,
-        )
+        _assert_live_send_window(asof, slot, now=_now_kst())
     spec, is_fallback, reason = resolve_champion(
         slot,
         expected_asof=asof,
@@ -829,7 +780,6 @@ def send_recommendation(asof: str, slot: str, *, dry_run: bool = False,
         msg,
         slot=slot,
         receipt_root=receipt_root,
-        radar_verdict_path=verdict_path,
     )
 
 

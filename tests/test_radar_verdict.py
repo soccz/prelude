@@ -21,7 +21,10 @@ import scripts.v2_scoreboard as scoreboard
 from notifier.telegram import TelegramSendResult, TelegramServerMessage
 from ops.radar_verdict import (
     JUDGMENT_DAY,
+    PUMP_V2_RETIRED_AT,
+    RadarTerminalKill,
     RadarVerdictError,
+    assert_pump_v2_runtime_allowed,
     assert_radar_send_allowed,
     load_terminal_verdict,
     record_terminal_verdict,
@@ -132,6 +135,24 @@ def _candidate(
             asof.day,
             tzinfo=timezone.utc,
         ),
+    )
+    assert candidate is not None
+    return candidate
+
+
+def _actual_pump_v2_kill_candidate() -> dict:
+    candidate = terminal_candidate(
+        _scorecard(
+            status="early_kill",
+            closed_n=9,
+            mean=-0.09658888888888893,
+            ci95=[-2.3315745735651023, 2.1383967957873247],
+            per_day_t=0.028541508607332546,
+            regimes=["bear_quiet"],
+            early_kill=True,
+        ),
+        asof=date(2026, 8, 5),
+        recorded_at=PUMP_V2_RETIRED_AT,
     )
     assert candidate is not None
     return candidate
@@ -985,6 +1006,46 @@ def test_send_gate_requires_terminal_state_at_deadline(tmp_path):
         )
 
 
+def test_pump_v2_retirement_cannot_reopen_when_pair_is_deleted(
+    tmp_path,
+):
+    with pytest.raises(RadarVerdictError, match="pair missing after retirement"):
+        assert_pump_v2_runtime_allowed(
+            path=tmp_path / "missing.json",
+            now=PUMP_V2_RETIRED_AT,
+        )
+
+
+def test_pump_v2_retirement_rejects_another_valid_kill_identity(
+    tmp_path,
+):
+    path = tmp_path / "terminal.json"
+    other_kill = terminal_candidate(
+        _scorecard(
+            status="early_kill",
+            closed_n=1,
+            mean=-0.5,
+            ci95=None,
+            per_day_t=None,
+            regimes=["bear_quiet"],
+            early_kill=True,
+        ),
+        asof=date(2026, 8, 5),
+        recorded_at=PUMP_V2_RETIRED_AT,
+    )
+    assert other_kill is not None
+    record_terminal_verdict(
+        other_kill,
+        path=path,
+    )
+
+    with pytest.raises(RadarVerdictError, match="identity mismatch"):
+        assert_pump_v2_runtime_allowed(
+            path=path,
+            now=PUMP_V2_RETIRED_AT,
+        )
+
+
 def test_go_state_allows_send_gate_and_policy_status(tmp_path):
     path = tmp_path / "terminal.json"
     recorded = record_terminal_verdict(
@@ -1032,9 +1093,15 @@ def test_policy_competition_persists_shared_terminal_status(
     assert persisted["radar_terminal"] == payload["radar_terminal"]
 
 
-def test_r1_kill_gate_blocks_before_scoring(tmp_path, monkeypatch):
+def test_r1_scoring_and_send_ignore_pump_v2_kill(tmp_path, monkeypatch):
     path = tmp_path / "terminal.json"
     record_terminal_verdict(_candidate(verdict="early_kill"), path=path)
+    snapshot = _r1_snapshot(tmp_path)
+    spec = SimpleNamespace(
+        id="recommend_r1_open",
+        predict_ref="signals.recommend:score_candidates",
+    )
+    calls: list[str] = []
     monkeypatch.setattr(
         recommend_send,
         "_now_kst",
@@ -1050,15 +1117,23 @@ def test_r1_kill_gate_blocks_before_scoring(tmp_path, monkeypatch):
     monkeypatch.setattr(
         recommend_send,
         "resolve_champion",
-        lambda _slot: pytest.fail("scoring dispatch must not start"),
+        lambda _slot, **_kwargs: (
+            calls.append("resolve") or (spec, False, "test")
+        ),
+    )
+    monkeypatch.setattr(
+        recommend_send,
+        "call_predict",
+        lambda *_args, **_kwargs: calls.append("score") or snapshot,
+    )
+    monkeypatch.setattr(
+        recommend_send,
+        "_send_and_record",
+        lambda *_args, **_kwargs: calls.append("send") or True,
     )
 
-    with pytest.raises(RadarVerdictError, match="KILL"):
-        recommend_send.send_recommendation(
-            "2026-07-25",
-            "open",
-            radar_verdict_path=path,
-        )
+    assert recommend_send.send_recommendation("2026-07-25", "open")
+    assert calls == ["resolve", "score", "send"]
 
 
 @pytest.mark.parametrize(
@@ -1109,7 +1184,7 @@ def test_scoreboard_cli_rejects_noncanonical_evidence_paths(
     assert exc_info.value.code == 2
 
 
-def test_r1_kill_gate_blocks_immediately_before_api(tmp_path, monkeypatch):
+def test_r1_api_boundary_ignores_pump_v2_kill(tmp_path, monkeypatch):
     path = tmp_path / "terminal.json"
     record_terminal_verdict(_candidate(verdict="early_kill"), path=path)
     snapshot = _r1_snapshot(tmp_path)
@@ -1132,19 +1207,17 @@ def test_r1_kill_gate_blocks_immediately_before_api(tmp_path, monkeypatch):
         lambda message, **_kwargs: calls.append(message) or True,
     )
 
-    with pytest.raises(RadarVerdictError, match="KILL"):
-        recommend_send._send_and_record(
-            snapshot,
-            "radar",
-            slot="open",
-            receipt_root=tmp_path / "receipts",
-            radar_verdict_path=path,
-        )
-    assert calls == []
+    assert recommend_send._send_and_record(
+        snapshot,
+        "radar",
+        slot="open",
+        receipt_root=tmp_path / "receipts",
+    )
+    assert calls == ["radar"]
 
 
 @pytest.mark.parametrize("state_kind", ["missing", "malformed"])
-def test_r1_deadline_state_failure_blocks_actual_api_boundary(
+def test_r1_api_boundary_is_independent_of_v2_terminal_state(
     tmp_path,
     monkeypatch,
     state_kind,
@@ -1157,6 +1230,23 @@ def test_r1_deadline_state_failure_blocks_actual_api_boundary(
         asof=JUDGMENT_DAY.isoformat(),
     )
     calls: list[str] = []
+
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = datetime(
+                2026,
+                9,
+                1,
+                0,
+                5,
+                2,
+                tzinfo=timezone.utc,
+            )
+            return value if tz is None else value.astimezone(tz)
+
+    monkeypatch.setattr(recommend_send, "datetime", FixedDatetime)
+    monkeypatch.setattr(receipt_module, "datetime", FixedDatetime)
     monkeypatch.setattr(
         recommend_send,
         "_now_kst",
@@ -1169,24 +1259,40 @@ def test_r1_deadline_state_failure_blocks_actual_api_boundary(
             tzinfo=recommend_send.KST,
         ),
     )
+    def mocked_transport(message, **_kwargs):
+        calls.append(message)
+        digest = hashlib.sha256(message.encode()).hexdigest()
+        return TelegramSendResult(
+            delivery_ok=True,
+            message_sha256=digest,
+            chunk_count=1,
+            chat_id_sha256=hashlib.sha256(b"456").hexdigest(),
+            telegram_messages=(
+                TelegramServerMessage(
+                    message_id=101,
+                    server_date="2026-09-01T00:05:02+00:00",
+                    text_sha256=digest,
+                ),
+            ),
+            error=None,
+        )
+
     monkeypatch.setattr(
         recommend_send,
-        "send_telegram",
-        lambda message, **_kwargs: calls.append(message) or True,
+        "send_telegram_with_receipt",
+        mocked_transport,
     )
 
-    with pytest.raises(RadarVerdictError):
-        recommend_send._send_and_record(
-            snapshot,
-            "radar",
-            slot="open",
-            receipt_root=tmp_path / "receipts",
-            radar_verdict_path=path,
-        )
-    assert calls == []
+    assert recommend_send._send_and_record(
+        snapshot,
+        "radar",
+        slot="open",
+        receipt_root=tmp_path / "receipts",
+    )
+    assert calls == ["radar"]
 
 
-def test_go_verdict_allows_r1_and_v2_mock_api_boundaries(
+def test_r1_ignores_go_verdict_but_pump_v2_cannot_be_revived(
     tmp_path,
     monkeypatch,
 ):
@@ -1273,7 +1379,6 @@ def test_go_verdict_allows_r1_and_v2_mock_api_boundaries(
         "r1-radar",
         slot="open",
         receipt_root=tmp_path / "r1-receipts",
-        radar_verdict_path=path,
     )
 
     v2_observed = observed.replace(minute=15)
@@ -1296,17 +1401,17 @@ def test_go_verdict_allows_r1_and_v2_mock_api_boundaries(
     result["feature_date"] = "2026-08-31T09:00:00"
     result = v2_runner._with_forward_provenance(result)
 
-    receipt = v2_runner.deliver_once(
-        result,
-        "v2-radar",
-        receipt_root=tmp_path / "v2-receipts",
-        live_asof=JUDGMENT_DAY.isoformat(),
-        radar_verdict_path=path,
-    )
+    with pytest.raises(RadarVerdictError, match="identity mismatch"):
+        v2_runner.deliver_once(
+            result,
+            "v2-radar",
+            receipt_root=tmp_path / "v2-receipts",
+            live_asof=JUDGMENT_DAY.isoformat(),
+            radar_verdict_path=path,
+        )
 
-    assert receipt["delivery_ok"] is True
     assert r1_calls == ["r1-radar"]
-    assert v2_calls == ["v2-radar"]
+    assert v2_calls == []
 
 
 def test_r1_dry_run_remains_diagnostic_after_kill(tmp_path, monkeypatch):
@@ -1342,14 +1447,115 @@ def test_r1_dry_run_remains_diagnostic_after_kill(tmp_path, monkeypatch):
         snapshot["asof"],
         snapshot["slot"],
         dry_run=True,
-        radar_verdict_path=path,
     )
 
 
 def test_v2_kill_gate_blocks_before_scoring(tmp_path, monkeypatch):
     path = tmp_path / "terminal.json"
-    record_terminal_verdict(_candidate(verdict="early_kill"), path=path)
+    record_terminal_verdict(_actual_pump_v2_kill_candidate(), path=path)
     calls: list[str] = []
+    monkeypatch.setattr(
+        v2_runner,
+        "_now_kst",
+        lambda: datetime(
+            2026,
+            8,
+            8,
+            9,
+            15,
+            tzinfo=v2_runner.KST,
+        ),
+    )
+    monkeypatch.setattr(
+        v2_runner,
+        "score_pump_v2_candidates",
+        lambda *_args, **_kwargs: calls.append("score") or _v2_result(),
+    )
+    monkeypatch.setattr(v2_runner, "RADAR_VERDICT_PATH", path)
+    ledger = tmp_path / "ledger.csv"
+    decision_root = tmp_path / "decisions"
+    receipt_root = tmp_path / "receipts"
+    monkeypatch.setattr(v2_runner, "PUMP_V2_LEDGER", str(ledger))
+    monkeypatch.setattr(
+        v2_runner,
+        "PUMP_V2_DECISION_ROOT",
+        str(decision_root),
+    )
+    monkeypatch.setattr(
+        v2_runner,
+        "PUMP_V2_RECEIPT_ROOT",
+        str(receipt_root),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pump_detector_v2_today.py",
+            "--asof",
+            "2026-08-08",
+        ],
+    )
+
+    assert v2_runner.main() == 0
+    assert calls == []
+    assert not ledger.exists()
+    assert not decision_root.exists()
+    assert not receipt_root.exists()
+
+
+def test_v2_missing_terminal_pair_after_retirement_blocks_before_scoring(
+    tmp_path,
+    monkeypatch,
+):
+    ledger = tmp_path / "ledger.csv"
+    decision_root = tmp_path / "decisions"
+    receipt_root = tmp_path / "receipts"
+    monkeypatch.setattr(v2_runner, "RADAR_VERDICT_PATH", tmp_path / "missing.json")
+    monkeypatch.setattr(v2_runner, "PUMP_V2_LEDGER", str(ledger))
+    monkeypatch.setattr(v2_runner, "PUMP_V2_DECISION_ROOT", str(decision_root))
+    monkeypatch.setattr(v2_runner, "PUMP_V2_RECEIPT_ROOT", str(receipt_root))
+    monkeypatch.setattr(
+        v2_runner,
+        "_now_kst",
+        lambda: datetime(2026, 8, 8, 9, 15, tzinfo=v2_runner.KST),
+    )
+    monkeypatch.setattr(
+        v2_runner,
+        "score_pump_v2_candidates",
+        lambda *_args, **_kwargs: pytest.fail(
+            "retired pump-v2 must not score without its terminal pair"
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["pump_detector_v2_today.py", "--asof", "2026-08-08"],
+    )
+
+    assert v2_runner.main() == 1
+    assert not ledger.exists()
+    assert not decision_root.exists()
+    assert not receipt_root.exists()
+
+
+def test_v2_kill_settled_during_scoring_stops_before_persistence(
+    tmp_path,
+    monkeypatch,
+):
+    ledger = tmp_path / "ledger.csv"
+    decision_root = tmp_path / "decisions"
+    receipt_root = tmp_path / "receipts"
+    monkeypatch.setattr(v2_runner, "PUMP_V2_LEDGER", str(ledger))
+    monkeypatch.setattr(
+        v2_runner,
+        "PUMP_V2_DECISION_ROOT",
+        str(decision_root),
+    )
+    monkeypatch.setattr(
+        v2_runner,
+        "PUMP_V2_RECEIPT_ROOT",
+        str(receipt_root),
+    )
     monkeypatch.setattr(
         v2_runner,
         "_now_kst",
@@ -1362,26 +1568,73 @@ def test_v2_kill_gate_blocks_before_scoring(tmp_path, monkeypatch):
             tzinfo=v2_runner.KST,
         ),
     )
+    initial_guard_calls: list[str] = []
+    persistence_guard_calls: list[str] = []
+
+    def initial_guard(**_kwargs):
+        initial_guard_calls.append("guard")
+        return None
+
+    @contextmanager
+    def terminal_persistence_guard(**_kwargs):
+        persistence_guard_calls.append("guard")
+        raise RadarTerminalKill("KILL settled during scoring")
+        yield  # pragma: no cover
+
+    score_calls: list[str] = []
+    monkeypatch.setattr(
+        v2_runner,
+        "assert_pump_v2_runtime_allowed",
+        initial_guard,
+    )
+    monkeypatch.setattr(
+        v2_runner,
+        "radar_send_guard",
+        terminal_persistence_guard,
+    )
     monkeypatch.setattr(
         v2_runner,
         "score_pump_v2_candidates",
-        lambda *_args, **_kwargs: calls.append("score") or _v2_result(),
+        lambda *_args, **_kwargs: score_calls.append("score") or _v2_result(),
     )
-    monkeypatch.setattr(v2_runner, "RADAR_VERDICT_PATH", path)
+    monkeypatch.setattr(
+        v2_runner,
+        "_current_forward_inputs",
+        lambda: {"sources": {}, "data": {}},
+    )
+    monkeypatch.setattr(
+        v2_runner,
+        "_with_forward_provenance",
+        lambda result: {
+            **result,
+            "execution_provenance": {"sources": {}, "data": {}},
+        },
+    )
+    monkeypatch.setattr(
+        v2_runner,
+        "_validate_decision_result",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        v2_runner,
+        "persist_decision",
+        lambda *_args, **_kwargs: pytest.fail(
+            "post-KILL decision must not be persisted"
+        ),
+    )
     monkeypatch.setattr(
         sys,
         "argv",
-        [
-            "pump_detector_v2_today.py",
-            "--asof",
-            "2026-07-26",
-            "--ledger",
-            str(tmp_path / "ledger.csv"),
-        ],
+        ["pump_detector_v2_today.py", "--asof", "2026-07-26"],
     )
 
-    assert v2_runner.main() == 1
-    assert calls == []
+    assert v2_runner.main() == 0
+    assert initial_guard_calls == ["guard"]
+    assert persistence_guard_calls == ["guard"]
+    assert score_calls == ["score"]
+    assert not ledger.exists()
+    assert not decision_root.exists()
+    assert not receipt_root.exists()
 
 
 def test_v2_kill_gate_blocks_immediately_before_api(tmp_path, monkeypatch):
@@ -1406,7 +1659,7 @@ def test_v2_kill_gate_blocks_immediately_before_api(tmp_path, monkeypatch):
         lambda message: calls.append(message) or True,
     )
 
-    with pytest.raises(RadarVerdictError, match="KILL"):
+    with pytest.raises(RadarTerminalKill, match="KILL"):
         v2_runner.deliver_once(
             _v2_result(),
             "radar",

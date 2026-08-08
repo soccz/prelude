@@ -83,6 +83,8 @@ def test_nul_stdout_survives_hostile_logging_and_prints(tmp_path):
             "skip-zero-pick",
             "skip-legacy-unverifiable",
             "skip-no-decision",
+            "skip-terminal-kill",
+            "skip-policy-blocked",
         }, records
 
     # 오염은 전부 stderr 로 밀려나야 한다.

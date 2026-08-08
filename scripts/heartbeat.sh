@@ -220,6 +220,7 @@ from zoneinfo import ZoneInfo
 
 from notifier.delivery_receipt import read_delivery_receipt
 from ops.artifact_provenance import strict_json_object
+from ops.close_input_gate import validate_policy_noop
 from scripts.evaluate_recommend_score_labels import _report_digest
 from scripts.pump_detector_v2_today import _validate_decision_document
 from signals.recommend_score_labels import load_label_artifact
@@ -232,12 +233,26 @@ yesterday = (now.date() - timedelta(days=1)).isoformat()
 bad = []
 
 today_dir = root / "recommend_snapshots" / today
-for name in ("preopen_r1.json", "open_r1.json"):
+for name, cohort in (
+    ("preopen_r1.json", "r1-preopen"),
+    ("open_r1.json", "r1-open"),
+):
     path = today_dir / name
     if not path.exists():
         bad.append(f"{name}: today's snapshot missing")
         continue
     try:
+        policy_noop = validate_policy_noop(
+            asof=today,
+            cohort=cohort,
+            output_root=root,
+        )
+        if policy_noop is not None:
+            print(
+                f"{name}: {policy_noop[0]} "
+                "(forward-invalid historical seam)"
+            )
+            continue
         snapshot = load_snapshot(path)
         receipt = read_delivery_receipt(snapshot)
         if receipt is None:
@@ -248,10 +263,17 @@ for name in ("preopen_r1.json", "open_r1.json"):
         bad.append(f"{name}: snapshot/receipt invalid ({type(exc).__name__})")
 
 v2_decision_path = root / "pump_v2_decisions" / f"{today}.json"
-if not v2_decision_path.exists():
-    bad.append("pump_v2: today's decision manifest missing")
-else:
-    try:
+try:
+    v2_policy_noop = validate_policy_noop(
+        asof=today,
+        cohort="pump-v2",
+        output_root=root,
+    )
+    if v2_policy_noop is not None:
+        print("pump_v2: terminal KILL active (expected no-op)")
+    elif not v2_decision_path.exists():
+        bad.append("pump_v2: today's decision manifest missing")
+    else:
         v2_payload = strict_json_object(v2_decision_path)
         v2_decision = v2_payload.get("decision")
         if not isinstance(v2_decision, dict):
@@ -261,8 +283,10 @@ else:
             v2_decision,
             v2_decision_path,
         )
-    except Exception as exc:
-        bad.append(f"pump_v2: decision manifest invalid ({type(exc).__name__})")
+except Exception as exc:
+    bad.append(
+        f"pump_v2: decision/terminal state invalid ({type(exc).__name__})"
+    )
 
 yesterday_dir = root / "recommend_snapshots" / yesterday
 yesterday_snapshots = sorted(
@@ -369,8 +393,38 @@ if [ -d "$ND_DIR" ]; then
     for day_offset in 0 1 2 3 4 5 6; do
         nd_date=$(date -d "-${day_offset} day" +%F)
         nd_matches=""
-        if nd_matches=$(find "$ND_DIR" -maxdepth 2 \
-            -name "${nd_date}.json" 2>>"$LOG" | wc -l); then
+        if nd_matches=$(PRELUDE_ND_DATE="$nd_date" python - 2>>"$LOG" <<'PYEOF'
+import os
+from pathlib import Path
+
+from ops.artifact_provenance import strict_json_object
+from ops.close_input_gate import validate_policy_noop
+
+root = Path("output")
+marker_root = root / "close_no_decision"
+asof = os.environ["PRELUDE_ND_DATE"]
+count = 0
+for marker in marker_root.glob(f"*/{asof}.json"):
+    if marker.is_symlink() or not marker.is_file():
+        raise RuntimeError(f"unsafe no-decision marker: {marker}")
+    cohort = marker.parent.name
+    payload = strict_json_object(marker)
+    if payload.get("asof") != asof or payload.get("cohort") != cohort:
+        raise RuntimeError(f"no-decision marker identity mismatch: {marker}")
+    if cohort == "pump-v2":
+        policy_noop = validate_policy_noop(
+            asof=asof,
+            cohort=cohort,
+            output_root=root,
+        )
+        if policy_noop is not None and policy_noop[0] == "skip-terminal-kill":
+            # Preserve the historical marker, but do not count a validated
+            # terminal retirement as a send-pipeline death.
+            continue
+    count += 1
+print(count)
+PYEOF
+        ); then
             nd_probe_rc=0
         else
             nd_probe_rc=$?
@@ -471,13 +525,13 @@ else
     WARN "publish schedule 검사 시각 비정상: ${NOW_HHMM:-empty}"
 fi
 
-# 4.5) v2 시한부 판정 일일 채점 (2026-07-12 신설 — 사전등록 09-01 판정·조기킬 무인 감시).
-#      exit 21 = 조기킬(누적 mean<0) 발동 → 경고 합류. 그 외엔 로그에 한 줄만 (silent 원칙 유지).
+# 4.5) v2 시한부 판정 일일 채점. exit 21은 이미 봉인된 terminal KILL의
+#      안정 상태이므로 로그만 남긴다. 새 실행/증거 오류만 WARN한다.
 V2_LINE=$(python scripts/v2_scoreboard.py 2>>"$LOG")
 V2_RC=$?
 echo "$V2_LINE" >> "$LOG"
 if [ "$V2_RC" -eq 21 ]; then
-    WARN "v2 조기 KILL 조건 발동: $V2_LINE"
+    echo "  v2 terminal KILL active (expected): $V2_LINE" >> "$LOG"
 elif [ "$V2_RC" -ne 0 ]; then
     WARN "v2 scoreboard 실행 실패 (exit=$V2_RC): $V2_LINE"
 fi

@@ -1083,7 +1083,6 @@ def test_real_send_writes_delivery_receipt_for_snapshot(tmp_path, monkeypatch):
         "open",
         snapshot_root=snapshot_root,
         receipt_root=receipt_root,
-        radar_verdict_path=tmp_path / "radar-terminal.json",
     )
 
     receipt_file = receipt_root / "2026-07-25" / "open_r1.json"

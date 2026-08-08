@@ -688,10 +688,131 @@ def test_no_decision_revalidated_under_lock_writes_marker(
 
     marker = tmp_path / "close_no_decision" / "r1-open" / "2026-07-27.json"
     assert marker.exists()
+    original = marker.read_bytes()
     payload = json.loads(marker.read_text(encoding="utf-8"))
+    assert payload["schema"] == "close_no_decision.v1"
     assert payload["asof"] == "2026-07-27"
     assert payload["cohort"] == "r1-open"
+    assert payload["reason"] == (
+        "no canonical decision evidence, no receipt and no ledger rows "
+        "— send-day pipeline failure"
+    )
     assert not ledger_path.exists()
+
+    # A valid existing marker is an idempotent durable result, not rewritten.
+    closer.close_recommend_ledger(
+        str(ledger_path),
+        pd.Timestamp("2026-07-28"),
+        False,
+        logging.getLogger("test"),
+        decision_date=pd.Timestamp("2026-07-27"),
+        cohort="r1-open",
+        expected_mode="skip-no-decision",
+        output_root=tmp_path,
+    )
+    assert marker.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    ("invalid-json", "wrong-identity", "symlink"),
+)
+def test_no_decision_existing_marker_must_be_validated(
+    monkeypatch,
+    tmp_path,
+    corruption,
+) -> None:
+    ledger_path = tmp_path / "shadow_ledger_recommend.csv"
+
+    def validate(**_kwargs):
+        raise closer.MissingCloseEvidenceError("no evidence")
+
+    monkeypatch.setattr(closer, "validate_close_input", validate)
+    closer.close_recommend_ledger(
+        str(ledger_path),
+        pd.Timestamp("2026-07-28"),
+        False,
+        logging.getLogger("test"),
+        decision_date=pd.Timestamp("2026-07-27"),
+        cohort="r1-open",
+        expected_mode="skip-no-decision",
+        output_root=tmp_path,
+    )
+    marker = tmp_path / "close_no_decision" / "r1-open" / "2026-07-27.json"
+    if corruption == "invalid-json":
+        marker.write_text("{", encoding="utf-8")
+    elif corruption == "wrong-identity":
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+        payload["cohort"] = "pump-v2"
+        marker.write_text(json.dumps(payload), encoding="utf-8")
+    else:
+        target = tmp_path / "outside-marker.json"
+        target.write_bytes(marker.read_bytes())
+        marker.unlink()
+        marker.symlink_to(target)
+
+    with pytest.raises(closer.CloseInputError, match="no-decision marker"):
+        closer.close_recommend_ledger(
+            str(ledger_path),
+            pd.Timestamp("2026-07-28"),
+            False,
+            logging.getLogger("test"),
+            decision_date=pd.Timestamp("2026-07-27"),
+            cohort="r1-open",
+            expected_mode="skip-no-decision",
+            output_root=tmp_path,
+        )
+
+
+@pytest.mark.parametrize(
+    ("cohort", "mode", "directory"),
+    (
+        ("pump-v2", "skip-terminal-kill", "close_terminal_skip"),
+        ("r1-open", "skip-policy-blocked", "close_policy_blocked"),
+    ),
+)
+def test_policy_noop_revalidated_under_lock_writes_forward_invalid_marker(
+    monkeypatch,
+    tmp_path,
+    cohort,
+    mode,
+    directory,
+) -> None:
+    spec = closer.COHORTS[cohort]
+    ledger_path = tmp_path / spec.ledger_name
+    terminal = {
+        "verdict": "kill",
+        "verdict_id": "radar-verdict-test",
+        "effective_asof": "2026-08-05",
+    }
+    monkeypatch.setattr(
+        closer,
+        "validate_close_input",
+        lambda **_kwargs: mode,
+    )
+    monkeypatch.setattr(
+        closer,
+        "validate_policy_noop",
+        lambda **_kwargs: (mode, terminal),
+    )
+
+    closer.close_recommend_ledger(
+        str(ledger_path),
+        pd.Timestamp("2026-08-08"),
+        False,
+        logging.getLogger("test"),
+        decision_date=pd.Timestamp("2026-08-07"),
+        cohort=cohort,
+        expected_mode=mode,
+        output_root=tmp_path,
+    )
+
+    marker = tmp_path / directory / cohort / "2026-08-07.json"
+    payload = json.loads(marker.read_text(encoding="utf-8"))
+    assert payload["mode"] == mode
+    assert payload["forward_valid"] is False
+    assert payload["terminal_verdict_id"] == "radar-verdict-test"
+    assert not (tmp_path / "close_no_decision").exists()
 
 
 def test_no_decision_under_lock_rejects_lingering_ledger_row(

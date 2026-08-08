@@ -406,6 +406,8 @@ for item in \
     output/pump_v2_decisions \
     output/recommend_score_labels \
     output/close_no_decision \
+    output/close_terminal_skip \
+    output/close_policy_blocked \
     data/microstructure/upbit; do
     [ -e "$PROJ_ROOT/$item" ] && BACKUP_ITEMS+=("$item")
 done

@@ -52,7 +52,8 @@ from ops.artifact_provenance import (  # noqa: E402
 from ops.file_lock import file_lock  # noqa: E402
 from ops.radar_verdict import (  # noqa: E402
     RADAR_TERMINAL_STATE,
-    assert_radar_send_allowed,
+    RadarTerminalKill,
+    assert_pump_v2_runtime_allowed,
     radar_send_guard,
 )
 from scripts.recommend_today import RECOMMEND_LEDGER_COLS  # noqa: E402
@@ -909,6 +910,7 @@ def deliver_once(
                 if live_asof is not None
                 else None
             ),
+            enforce_pump_v2_retirement=True,
         ):
             attempted_at = datetime.now(timezone.utc).isoformat()
             transport: TelegramSendResult | None = None
@@ -1292,11 +1294,17 @@ def main() -> int:
                 max_candidates=args.max_candidates,
             )
             observed = _now_kst()
-            _assert_live_run_window(asof, now=observed)
-            assert_radar_send_allowed(
+            assert_pump_v2_runtime_allowed(
                 path=RADAR_VERDICT_PATH,
                 now=observed,
             )
+            _assert_live_run_window(asof, now=observed)
+        except RadarTerminalKill as exc:
+            # The immutable verdict retires pump-v2 only.  A settled KILL is
+            # an expected terminal no-op, not a daily pipeline failure: stop
+            # before scoring or writing decision/receipt/ledger artifacts.
+            log.info("pump-v2 terminal KILL active — expected no-op: %s", exc)
+            return 0
         except (RuntimeError, ValueError) as exc:
             log.error("v2 live run rejected: %s", exc)
             return 1
@@ -1346,19 +1354,35 @@ def main() -> int:
     decision_completed_at = None
     if not args.dry_run:
         try:
-            decision_path = persist_decision(
-                res,
-                decision_root=args.decision_root,
-            )
-            decision_manifest = strict_json_object(decision_path)
-            _validate_decision_document(
-                decision_manifest,
-                res,
-                decision_path,
-            )
-            decision_completed_at = str(
-                decision_manifest["recorded_at"]
-            )
+            # Hold the terminal lock across validation and the first durable
+            # side effect. A concurrent KILL is therefore ordered wholly
+            # before the decision (and blocks it) or wholly after it; there is
+            # no check→persist TOCTOU window.
+            with radar_send_guard(
+                path=RADAR_VERDICT_PATH,
+                clock=_now_kst,
+                boundary_check=lambda observed: _assert_live_run_window(
+                    asof,
+                    now=observed,
+                ),
+                enforce_pump_v2_retirement=True,
+            ):
+                decision_path = persist_decision(
+                    res,
+                    decision_root=args.decision_root,
+                )
+                decision_manifest = strict_json_object(decision_path)
+                _validate_decision_document(
+                    decision_manifest,
+                    res,
+                    decision_path,
+                )
+                decision_completed_at = str(
+                    decision_manifest["recorded_at"]
+                )
+        except RadarTerminalKill as exc:
+            log.info("pump-v2 terminal KILL settled during scoring: %s", exc)
+            return 0
         except Exception as exc:  # noqa: BLE001
             log.error("decision persistence failed: %s", exc)
             return 1

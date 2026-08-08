@@ -4,9 +4,9 @@
 
 ---
 
-## 현재 상태 (요약, 2026-07-26)
+## 현재 상태 (요약, 2026-08-08)
 
-- **현재 운영 알림**: R1 preopen/open 발송과 pump v2 radar. 사용자가 직접 최종 매매하며 자동 주문은 없음
+- **현재 운영 알림**: R1 preopen/open 발송. pump-v2는 2026-08-05 조기 KILL로 종료·동결. 사용자가 직접 최종 매매하며 자동 주문은 없음
 - **현재 판정**: radar-not-strategy. 새 snapshot 계약 이전 historical forward에서 R1 상방 head AUC 0.477, 비용 차감 성과도 음수라 우수 추천기로 주장할 수 없음
 - **검증 방향**: 알림 이후 경로의 저하방·고상방 추천 품질과 비용 차감 결과를 전 유니버스 forward로 함께 측정
 - **Track 1 + 적대 감사 완료**: 단일 snapshot·receipt·실행시각 경로·원자적 ledger·PIT universe·exact freshness·source provenance·terminal verdict·versioned backup 구현. 현재 signal-eligible 266개(명시 stablecoin 5종 제외), open PIT Top100 D1/4h `100/100`
@@ -524,3 +524,4 @@ Distribution head (multiple binary XGBoost):
 | 2026-08-04 | **첫 완전 무인 하루** — 8개 타이머 전 단계 성공, 수동 개입 0: 04:00 backup(manifest ok) → 07:30 selftest(전수 1,359 passed) → 08:50 예고·09:05 확정 발송(delivery_ok, R1 open 2건 기록) → 09:30/10:05 close 2종(marker 2종) → 10:10 대시보드 발행 → 10:30 heartbeat. distribution 채널도 8후보 중 ACTIVE 1건(KRW-ELSA) 기록 | 07-28~08-03 하드닝 라운드(클래스 봉쇄 3종 + 부팅폭풍 내성) 이후 첫 실증. heartbeat 경고 2건은 지난 공백의 정직한 회계(다운타임 무결정일·7일 무신호)로 익일 자동 소멸 |
 | 2026-08-05 | **셋째 실전 아침 — 상폐 종목이 close·publish 를 무기한 차단하는 클래스 봉쇄**: AERGO·AQT 상폐(업비트 404 Code not found 실측)로 08-04 preopen 라벨 2행이 창 전체 무봉 → `path_incomplete` 영구 고착 → 라벨 partial(rc 2) → marker 부재 → publish fail-closed 연쇄. **`halted_no_observations` 구조적 종결 상태 신설**: 무봉 행은 업스트림 확인(404 상폐 / 200+빈배열 / 봉 전부 창밖 — 이 셋만 인정, 그 외 fail-closed)이 될 때만 종결로 재분류되고 forward 평가 표본에서 명시 제외(summary.halted). 검증기·평가기 계약 동반 갱신(legacy artifact 호환 유지), 라이브 재실행으로 08-04 preopen complete(labeled 98·halted 2) + close·publish·heartbeat 전부 rc 0 복구. **v2 조기 KILL 은 장애 아님** — 동결 룰(`누적 mean_net<0 → early kill`) 그대로의 자동 집행(n=9, mean −0.097%), 판정문 integrity hash 박제(`radar_terminal_verdict.json`). distribution 아침 실패는 FLUID·TRUMP D1 당일봉 수집 race(첫 거래가 09:06 수집 이후 발생) — 업스트림 확인 게이트가 정확히 fail-closed 로 잡은 것, 자연 치유됨 | 후속: coverage gate 의 "업스트림 존재" 판정 시 타깃 재수집 1회 후 재검(race 클래스 자동 치유), R2 record-only 실패 원인 확인. halted 는 라벨 X/Y 정의 변경이 아니라 평가 가능성 회계이나, 사후 승인 요청 항목으로 보고 |
 | 2026-08-05 | (추가) preopen 08:50 게이트 실패 원인 확정·수리: 조용한 아침 15m 경계(08:30봉)에서 top100 중 무거래 7개 실측(DKA·WAVES·POKT 등 — 업스트림에도 봉 부재 확인) — 업스트림 확인 프로브 상한 초기값 5가 정당한 무거래일을 계통 장애로 오판. §2.5 대로 데이터 갱신: `MAX_MISSING_UPSTREAM_PROBES` 5→15 (15 초과는 여전히 fail-closed) | R1 발송 자체는 이날도 정상(legacy 기록 채널만 skip). failed 유닛 잔재 2종은 익일 성공 런이 자연 해소 |
+| 2026-08-08 | **사용자 운영 결정 — Prelude/R1은 계속, KILL은 pump-v2에만 적용.** 08-05 불변 KILL 자체는 유지하되 과거 공용 guard가 R1까지 막아 08-06~08에 receipt·ledger가 사라지고 close→publish→heartbeat 경보가 연쇄된 집행 결함을 수정. R1에서 v2 verdict 의존성을 제거하고 기존 live-window/ranking/snapshot/receipt gate는 그대로 유지. pump-v2는 유효 KILL 시 scoring·decision·receipt·ledger·Telegram 전에 rc0 정상 no-op, 손상·불완전 terminal pair와 KILL 뒤 산출물은 계속 fail-closed. close는 `skip-terminal-kill` 및 08-06~08 한정 `skip-policy-blocked(forward_valid=false)`로 분리하고, 기존 v2 no-decision 흔적은 삭제하지 않고 heartbeat 분모에서 terminal retirement로 재분류. v2 scoreboard rc21은 안정 상태로 로그만 남김 | 동결 사전등록 판정문은 수정하지 않음. 이는 08-08 사용자의 명시적 집행 범위 변경이며 R1 정렬·모델·라벨·TP/SL·알림 포맷은 무변경. 08-06~08 누락 알림/receipt/PnL은 소급 생성·재발송하지 않음. 적대 리뷰 후 전수 `1,399 passed`; 운영 네트워크에서 distribution-close·preopen-close·publish 모두 rc0, heartbeat 실동작도 `[ok] all checks pass — silent`로 복구 검증 |

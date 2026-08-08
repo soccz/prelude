@@ -5,14 +5,11 @@
 # 활성화: git config core.hooksPath deploy/git-hooks
 set -euo pipefail
 
-cd "$(git rev-parse --show-toplevel)"
-if [ ! -x venv/bin/python ]; then
+REPO="$(git rev-parse --show-toplevel)"
+cd "$REPO"
+PYTHON_BIN="$REPO/venv/bin/python"
+if [ ! -x "$PYTHON_BIN" ]; then
     echo "[pre-push] venv 없음 — 게이트를 평가할 수 없어 push 차단" >&2
-    exit 1
-fi
-
-if [ -n "$(git status --porcelain=v1 --untracked-files=normal)" ]; then
-    echo "[pre-push] worktree/index/untracked 변경 존재 — 커밋과 동일한 상태가 아니므로 push 차단" >&2
     exit 1
 fi
 HEAD_SHA="$(git rev-parse HEAD)"
@@ -30,6 +27,37 @@ LOG_DIR="${TMPDIR:-/home/soccz/22tb/tmp}"
 mkdir -p "$LOG_DIR"
 RUFF_LOG="$LOG_DIR/prelude-prepush-ruff.log"
 LOG_FILE="$LOG_DIR/prelude-prepush-pytest.log"
+CHECKOUT_ROOT="$(mktemp -d "$LOG_DIR/prelude-prepush-worktree.XXXXXX")"
+CHECKOUT="$CHECKOUT_ROOT/tree"
+cleanup() {
+    git worktree remove --force "$CHECKOUT" >/dev/null 2>&1 || true
+    rmdir "$CHECKOUT_ROOT" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+if ! git worktree add --detach --quiet "$CHECKOUT" "$HEAD_SHA"; then
+    echo "[pre-push] push HEAD 임시 worktree 생성 실패 — push 차단" >&2
+    exit 1
+fi
+
+# The repository intentionally ignores the local virtualenv and live candle
+# databases.  A detached worktree therefore needs an executable-environment
+# link plus inert, non-SQLite provenance sentinels.  Tests may hash these two
+# canonical paths, but any attempt to query them as production databases must
+# still fail (tests that need rows create their own tmp_path SQLite files).
+if [ ! -e "$CHECKOUT/venv" ]; then
+    if ! ln -s "$REPO/venv" "$CHECKOUT/venv"; then
+        echo "[pre-push] 임시 worktree venv 연결 실패 — push 차단" >&2
+        exit 1
+    fi
+fi
+mkdir -p "$CHECKOUT/data"
+for provenance_db in upbit_d1.db binance_d1.db; do
+    if [ ! -e "$CHECKOUT/data/$provenance_db" ]; then
+        printf 'pre-push hermetic provenance sentinel\n' \
+            > "$CHECKOUT/data/$provenance_db"
+    fi
+done
 ZERO_SHA="0000000000000000000000000000000000000000"
 declare -A PUSHED_PYTHON_FILES=()
 
@@ -59,7 +87,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         exit 1
     fi
     while IFS= read -r path; do
-        if [ -n "$path" ] && [ -f "$path" ]; then
+        if [ -n "$path" ] && [ -f "$CHECKOUT/$path" ]; then
             PUSHED_PYTHON_FILES["$path"]=1
         fi
     done <<<"$python_diff"
@@ -70,7 +98,10 @@ if [ "${#PUSHED_PYTHON_FILES[@]}" -gt 0 ]; then
         printf '%s\n' "${!PUSHED_PYTHON_FILES[@]}" | sort
     )
     echo "[pre-push] 변경 Python ${#python_files[@]}개 Ruff 검사 중" >&2
-    if "$RUFF_BIN" check "${python_files[@]}" >"$RUFF_LOG" 2>&1; then
+    if (
+        cd "$CHECKOUT"
+        "$RUFF_BIN" check "${python_files[@]}"
+    ) >"$RUFF_LOG" 2>&1; then
         echo "[pre-push] Ruff 통과" >&2
     else
         echo "[pre-push] Ruff 실패 — push 차단" >&2
@@ -80,9 +111,11 @@ if [ "${#PUSHED_PYTHON_FILES[@]}" -gt 0 ]; then
 fi
 
 echo "[pre-push] 전수 pytest 게이트 실행 중 (~3분, 로그: $LOG_FILE)" >&2
-if PRELUDE_FORBID_TELEGRAM=1 \
-    venv/bin/python -m pytest -q -p no:cacheprovider \
-    >"$LOG_FILE" 2>&1; then
+if (
+    cd "$CHECKOUT"
+    PRELUDE_FORBID_TELEGRAM=1 \
+        "$PYTHON_BIN" -m pytest -q -p no:cacheprovider
+) >"$LOG_FILE" 2>&1; then
     tail -1 "$LOG_FILE" >&2
     echo "[pre-push] 게이트 통과 — push 진행" >&2
 else

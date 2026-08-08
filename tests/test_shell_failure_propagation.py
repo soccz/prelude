@@ -9,8 +9,9 @@ import subprocess
 import sys
 import tarfile
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -42,10 +43,10 @@ def _valid_terminal_verdict_bytes() -> bytes:
 
     scorecard = {
         "status": "early_kill",
-        "closed_n": 1,
-        "mean_net_pct": -0.5,
-        "ci95": None,
-        "per_day_t": None,
+        "closed_n": 9,
+        "mean_net_pct": -0.09658888888888893,
+        "ci95": [-2.3315745735651023, 2.1383967957873247],
+        "per_day_t": 0.028541508607332546,
         "regimes": ["bear_quiet"],
         "criteria": {
             "n>=200": False,
@@ -56,15 +57,17 @@ def _valid_terminal_verdict_bytes() -> bytes:
         "criteria_met": 0,
         "early_kill_breached": True,
         "terminal_metric_values": {
-            "mean_net_pct": -0.5,
-            "ci95": None,
-            "per_day_t": None,
+            "mean_net_pct": -0.09658888888888893,
+            "ci95": [-2.3315745735651023, 2.1383967957873247],
+            "per_day_t": 0.028541508607332546,
         },
     }
     candidate = terminal_candidate(
         scorecard,
-        asof=date(2026, 7, 1),
-        recorded_at=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        asof=date(2026, 8, 5),
+        recorded_at=datetime.fromisoformat(
+            "2026-08-05T01:30:43.423095+00:00"
+        ),
     )
     assert candidate is not None
     return (
@@ -86,6 +89,8 @@ def _run_with_fake_python(
     fail_exact: str,
     fail_rc: int,
     close_plan_fault: str = "",
+    close_plan_mode: str = "close",
+    close_plan_modes: dict[str, str] | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], str, str]:
     """운영 shell 을 격리 복사하고 모든 Python command 를 빠른 fake 로 대체."""
     repo = tmp_path / "repo"
@@ -143,7 +148,17 @@ if [[ "$*" == "-m ops.close_input_gate --through-asof $(date -d yesterday +%F) -
             exit 7
             ;;
     esac
-    printf '%s\\0close\\0__PRELUDE_CLOSE_PLAN_V1_OK__\\0' "$target"
+    mode="$CLOSE_PLAN_MODE"
+    case "$*" in
+        *" --cohort r1-open "*) mode="${CLOSE_PLAN_R1_OPEN:-$mode}" ;;
+        *" --cohort r1-preopen "*) mode="${CLOSE_PLAN_R1_PREOPEN:-$mode}" ;;
+        *" --cohort r2 "*) mode="${CLOSE_PLAN_R2:-$mode}" ;;
+        *" --cohort a1 "*) mode="${CLOSE_PLAN_A1:-$mode}" ;;
+        *" --cohort pump-v1 "*) mode="${CLOSE_PLAN_PUMP_V1:-$mode}" ;;
+        *" --cohort pump-v2 "*) mode="${CLOSE_PLAN_PUMP_V2:-$mode}" ;;
+    esac
+    printf '%s\\0%s\\0__PRELUDE_CLOSE_PLAN_V1_OK__\\0' \
+        "$target" "$mode"
     exit 0
 fi
 ARGS="$*"
@@ -159,6 +174,7 @@ exit 0
 
     call_log = tmp_path / "calls.log"
     env = os.environ.copy()
+    modes = close_plan_modes or {}
     env.update(
         {
             "PATH": f"{fake_bin}:/usr/bin:/bin",
@@ -166,6 +182,13 @@ exit 0
             "FAIL_EXACT": fail_exact,
             "FAIL_RC": str(fail_rc),
             "CLOSE_PLAN_FAULT": close_plan_fault,
+            "CLOSE_PLAN_MODE": close_plan_mode,
+            "CLOSE_PLAN_R1_OPEN": modes.get("r1-open", ""),
+            "CLOSE_PLAN_R1_PREOPEN": modes.get("r1-preopen", ""),
+            "CLOSE_PLAN_R2": modes.get("r2", ""),
+            "CLOSE_PLAN_A1": modes.get("a1", ""),
+            "CLOSE_PLAN_PUMP_V1": modes.get("pump-v1", ""),
+            "CLOSE_PLAN_PUMP_V2": modes.get("pump-v2", ""),
             "PRELUDE_D1_RECONCILE_DELAY_SECONDS": "0",
         }
     )
@@ -315,7 +338,6 @@ def test_distribution_critical_failure_propagates_after_followups(
         ("scripts/recommend_today.py --ranking R2", 17, "R2 record-only ledger"),
         ("scripts/recommend_today.py --ranking A1", 18, "A1 record-only ledger"),
         ("scripts/pump_detector_today.py", 19, "PUMP hunter record-only ledger"),
-        ("-m data.collector_binance_d1 --all --days 3", 20, "Binance D1 refresh"),
     ],
 )
 def test_distribution_auxiliary_failure_is_visible_and_propagates(
@@ -368,6 +390,10 @@ def test_distribution_runs_r1_before_4h_and_legacy_distribution(tmp_path):
     assert commands.index("-m data.collector_4h --all --days 2") < commands.index(
         "scripts/predict_today_distribution.py --universe top100 --top-k 10"
     )
+    assert "-m data.collector_binance_d1 --all --days 3" not in commands
+    assert commands.count(
+        "scripts/pump_detector_v2_today.py --send-telegram"
+    ) == 1
 
 
 def test_recommend_health_failure_skips_stale_signals_but_runs_maintenance(
@@ -383,9 +409,9 @@ def test_recommend_health_failure_skips_stale_signals_but_runs_maintenance(
     assert result.returncode == 23
     assert "scripts/recommend_send.py --slot open" not in calls
     assert "scripts/recommend_today.py --ranking R2" not in calls
-    assert "scripts/pump_detector_v2_today.py --send-telegram" not in calls
+    assert "scripts/pump_detector_v2_today.py --send-telegram" in calls
     assert "-m data.collector_4h --all --days 2" in calls
-    assert "-m data.collector_binance_d1 --all --days 3" in calls
+    assert "-m data.collector_binance_d1 --all --days 3" not in calls
     assert "stale D1" in logs
     assert (
         calls.splitlines().count(
@@ -819,6 +845,38 @@ def test_close_shells_skip_precontract_cohorts_without_marking_forward_valid():
         assert "never forward-valid" in source
 
 
+@pytest.mark.parametrize(
+    ("script_name", "cohort", "mode"),
+    (
+        ("daily_close_distribution.sh", "pump-v2", "skip-terminal-kill"),
+        ("daily_close_distribution.sh", "r1-open", "skip-policy-blocked"),
+        ("daily_close_preopen.sh", "r1-preopen", "skip-policy-blocked"),
+    ),
+)
+def test_close_shells_accept_validated_terminal_transition_modes(
+    tmp_path,
+    script_name,
+    cohort,
+    mode,
+):
+    result, calls, logs = _run_with_fake_python(
+        tmp_path,
+        script_name,
+        fail_exact="never",
+        fail_rc=99,
+        close_plan_modes={cohort: mode},
+    )
+
+    assert result.returncode == 0
+    matching = [
+        line for line in calls.splitlines()
+        if f"--expected-mode {mode}" in line
+    ]
+    assert len(matching) == 1
+    assert f"--cohort {cohort}" in matching[0]
+    assert "forward-invalid" in logs or "expected terminal no-op" in logs
+
+
 def test_close_shells_bind_each_closer_to_a_validated_decision_date(tmp_path):
     result, calls, _logs = _run_with_fake_python(
         tmp_path,
@@ -1008,6 +1066,8 @@ def test_backup_and_heartbeat_finish_nonzero_on_detected_failures():
     assert "--busy-exit 75" in backup
     assert "--wait" in backup
     assert "/usr/bin/timeout --signal=TERM --kill-after=30s 3000s" in backup
+    assert "output/close_terminal_skip" in backup
+    assert "output/close_policy_blocked" in backup
     assert 'EXIT=1' in heartbeat
     assert 'exit "$EXIT"' in heartbeat
     assert "send_telegram(os.environ['HEARTBEAT_MESSAGE']) else 1" in heartbeat
@@ -2127,7 +2187,7 @@ def test_heartbeat_requires_todays_bound_backup_manifest():
 @pytest.mark.parametrize(
     ("probe_mode", "expected_exit", "expected_output"),
     (
-        ("find-failure", 2, "1"),
+        ("python-failure", 2, "1"),
         ("invalid-count", 0, "not-a-number"),
     ),
 )
@@ -2152,9 +2212,20 @@ def test_heartbeat_no_decision_probe_never_reports_partial_aggregate_as_ok(
     shutil.copy2(Path("scripts/heartbeat.sh"), scripts / "heartbeat.sh")
 
     fake_python = fake_bin / "python"
+    marker_probe = (
+        "echo 1; exit 2"
+        if probe_mode == "python-failure"
+        else "echo not-a-number; exit 0"
+    )
     fake_python.write_text(
         "#!/bin/bash\n"
-        'if [ "${1:-}" = "-" ]; then cat >/dev/null; exit 0; fi\n'
+        'if [ "${1:-}" = "-" ]; then\n'
+        "  content=$(cat)\n"
+        '  if [[ "$content" == *"marker_root = root / \\"close_no_decision\\""* ]]; then\n'
+        f"    {marker_probe}\n"
+        "  fi\n"
+        "  exit 0\n"
+        "fi\n"
         'if [ "${1:-}" = "-m" ]; then exit 1; fi\n'
         'if [ "${1:-}" = "scripts/v2_scoreboard.py" ]; then\n'
         "  echo 'v2 scoreboard mock ok'; exit 0\n"
@@ -2163,28 +2234,6 @@ def test_heartbeat_no_decision_probe_never_reports_partial_aggregate_as_ok(
         "exit 0\n",
         encoding="utf-8",
     )
-    fake_find = fake_bin / "find"
-    if probe_mode == "find-failure":
-        fake_find.write_text(
-            "#!/bin/bash\n"
-            "echo '/mock/close_no_decision/2026-07-29.json'\n"
-            "exit 2\n",
-            encoding="utf-8",
-        )
-    else:
-        fake_find.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
-        fake_wc = fake_bin / "wc"
-        fake_wc.write_text(
-            "#!/bin/bash\n"
-            'if [ "${1:-}" = "-l" ]; then\n'
-            "  cat >/dev/null\n"
-            "  echo not-a-number\n"
-            "  exit 0\n"
-            "fi\n"
-            'exec /usr/bin/wc "$@"\n',
-            encoding="utf-8",
-        )
-        fake_wc.chmod(0o755)
     fake_df = fake_bin / "df"
     fake_df.write_text(
         "#!/bin/bash\n"
@@ -2192,7 +2241,7 @@ def test_heartbeat_no_decision_probe_never_reports_partial_aggregate_as_ok(
         "printf '/dev/mock 100 10 90 10%% /mock\\n'\n",
         encoding="utf-8",
     )
-    for executable in (fake_python, fake_find, fake_df):
+    for executable in (fake_python, fake_df):
         executable.chmod(0o755)
 
     result = subprocess.run(
@@ -2310,6 +2359,119 @@ def test_heartbeat_policy_and_snapshot_probes_use_exit_code_contracts():
 
     assert "raise SystemExit(1)" in policy_probe
     assert "raise SystemExit(1)" in snapshot_probe
+
+
+def test_heartbeat_v2_terminal_contract_is_noop_not_daily_alert():
+    heartbeat = Path("scripts/heartbeat.sh").read_text()
+    snapshot_probe = heartbeat.split(
+        "# 2d) 단일 snapshot",
+        1,
+    )[1].split("# 3) disk", 1)[0]
+    no_decision_probe = heartbeat.split(
+        "# 3b) close no-decision",
+        1,
+    )[1].split("# 4) publish.log", 1)[0]
+    scoreboard_probe = heartbeat.split(
+        "# 4.5) v2 시한부 판정",
+        1,
+    )[1].split("# 5) 결과", 1)[0]
+
+    assert "validate_policy_noop" in snapshot_probe
+    assert "pump_v2: terminal KILL active (expected no-op)" in snapshot_probe
+    assert "validate_policy_noop" in no_decision_probe
+    assert 'policy_noop[0] == "skip-terminal-kill"' in no_decision_probe
+    assert "v2 terminal KILL active (expected)" in scoreboard_probe
+    assert 'WARN "v2 조기 KILL 조건 발동' not in scoreboard_probe
+
+
+@pytest.mark.parametrize("corrupt_pair", (False, True))
+def test_heartbeat_classifies_preserved_v2_no_decision_marker_by_real_terminal_pair(
+    tmp_path,
+    corrupt_pair,
+):
+    repo = tmp_path / "repo"
+    scripts = repo / "scripts"
+    output = repo / "output"
+    fake_bin = tmp_path / "bin"
+    backup = tmp_path / "backup"
+    for path in (scripts, output, fake_bin, backup):
+        path.mkdir(parents=True)
+    source = Path("scripts/heartbeat.sh").read_text().replace(
+        "PUBLISH_SCHEDULE_HHMM=1010",
+        "PUBLISH_SCHEDULE_HHMM=9999",
+    )
+    (scripts / "heartbeat.sh").write_text(source, encoding="utf-8")
+    (output / "policy_competition_summary.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+    terminal = _valid_terminal_verdict_bytes()
+    if corrupt_pair:
+        terminal = b"{}\n"
+    (output / "radar_terminal_verdict.json").write_bytes(terminal)
+    (output / "radar_terminal_verdict.json.anchor").write_bytes(terminal)
+    marker_day = (
+        datetime.now(ZoneInfo("Asia/Seoul")).date() - timedelta(days=1)
+    ).isoformat()
+    marker = output / "close_no_decision" / "pump-v2" / f"{marker_day}.json"
+    marker.parent.mkdir(parents=True)
+    marker.write_text(
+        json.dumps({"asof": marker_day, "cohort": "pump-v2"}) + "\n",
+        encoding="utf-8",
+    )
+
+    fake_python = fake_bin / "python"
+    fake_python.write_text(
+        """#!/usr/bin/env bash
+if [ "${1:-}" = "-" ]; then
+    content=$(cat)
+    if [[ "$content" == *'marker_root = root / "close_no_decision"'* ]]; then
+        printf '%s' "$content" | env PYTHONPATH="$SOURCE_ROOT" "$REAL_PYTHON" -
+        exit $?
+    fi
+    exit 0
+fi
+if [ "${1:-}" = "scripts/v2_scoreboard.py" ]; then
+    echo '[v2-scoreboard] terminal KILL'
+    exit 21
+fi
+if [ "${1:-}" = "-m" ]; then
+    exit 0
+fi
+if [ "${1:-}" = "-c" ]; then
+    exit 0
+fi
+exit 0
+""",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    result = subprocess.run(
+        ["bash", str(scripts / "heartbeat.sh")],
+        cwd=repo,
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "REAL_PYTHON": sys.executable,
+            "SOURCE_ROOT": str(Path.cwd()),
+            "PRELUDE_BACKUP_DIR": str(backup),
+            "PRELUDE_BACKUP_WAIT_SECONDS": "0",
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    log = (output / "cron_heartbeat.log").read_text(encoding="utf-8")
+
+    assert result.returncode == 0
+    assert "v2 terminal KILL active (expected)" in log
+    assert "v2 조기 KILL 조건 발동" not in log
+    if corrupt_pair:
+        assert "close no-decision probe FAIL" in log
+        assert "close no-decision (7d):" not in log
+    else:
+        assert "close no-decision (7d): days=0 cohort-files=0" in log
+        assert "close no-decision day 감지" not in log
 
 
 def test_heartbeat_uses_stable_strict_json_for_v2_and_score_artifacts():

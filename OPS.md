@@ -1,6 +1,6 @@
 # OPS.md — 매일 자동 운영 인프라
 
-> **현재 운영: R1 preopen/open + pump v2 radar (2026-07-26).**
+> **현재 운영: R1 preopen/open. pump-v2는 2026-08-05 KILL로 종료됐다.**
 > 자동 주문은 없고 사용자가 알림을 보고 직접 판단한다. R2/A1·legacy
 > distribution/preopen·pump v1은 record-only다. 현재 성과 해석은
 > `radar-not-strategy`이며 forward 증거가 쌓이기 전 승격하지 않는다.
@@ -27,7 +27,8 @@ scripts/daily_run_distribution.sh
    ├─ immutable R1 snapshot → Telegram receipt → 전용 ledger
    ├─ 4h update + exact closed-boundary gate → legacy distribution record-only
    ├─ R2 / A1 / pump v1 record-only
-   └─ Binance D1 update → pump v2 decision/receipt/shadow ledger
+   └─ pump-v2 terminal KILL 검증 → 정상 no-op
+      (신규 decision/receipt/ledger 없음, terminal 감사 marker/log만)
 
 KST 09:30 / 10:05 close timers
    ↓
@@ -60,7 +61,7 @@ KST 10:10 dashboard publish → KST 10:30 heartbeat
 | **04:00 매일** | 19:00 전일 | versioned SQLite·verdict/anchor backup | `scripts/backup_db.sh` |
 | **07:30 매일** | 22:30 전일 | full pytest selftest (Telegram kill-switch) | `venv/bin/python -m pytest` |
 | **08:50 매일** | 23:50 전일 | R1 preopen 발송 + legacy record-only | `scripts/daily_run_preopen.sh` |
-| **09:05 매일** | 00:05 | R1 open·pump v2 발송 + challenger 기록 | `scripts/daily_run_distribution.sh` |
+| **09:05 매일** | 00:05 | R1 open 발송 + challenger 기록; pump-v2 terminal no-op | `scripts/daily_run_distribution.sh` |
 | **09:30 매일** | 00:30 | distribution paper/shadow ledger 청산 | `scripts/daily_close_distribution.sh` |
 | **10:05 매일** | 01:05 | pre-open 청산 + 전일 R1 24h label/evaluator | `scripts/daily_close_preopen.sh` |
 | **10:10 매일** | 01:10 | dashboard JSON 빌드 + publish | `scripts/publish_dashboard.sh` |
@@ -113,7 +114,7 @@ Ruff(변경 Python)+전수 pytest gate가 정상 `git push` 경로에서 차단�
   close로 flat-fill한다. 평가기는 complete artifact만 기본 forward 통계에 사용한다.
 - 과거 재생은 `scheduled_replay`, 실제 목표일 생성은 `forward_observed`로 분리한다.
   사용자가 실제로 받은 성과는 그중 `delivery_ok=True` cohort를 따로 본다.
-- close 게이트 모드는 4종: `close`(정상 청산) / `skip-zero-pick`(검증된 무추천일) /
+- close 게이트 기본 모드는 `close`(정상 청산) / `skip-zero-pick`(검증된 무추천일) /
   `skip-legacy-unverifiable`(계약 이전) / `skip-no-decision`(발송 파이프 자체가 죽어
   snapshot·receipt·원장 행이 전부 없는 날 — 2026-07-28 신설). skip-no-decision은
   plan과 락 하 재검증이 같은 술어(`is_no_decision_day`)를 쓰고, 검증 시
@@ -121,6 +122,10 @@ Ruff(변경 Python)+전수 pytest gate가 정상 `git push` 경로에서 차단�
   원장 행(상태 무관)이나 receipt가 하나라도 남아 있으면 조용한 skip이 아니라
   무결성 실패로 fail-closed 한다. 이 마커 일수는 커버리지 분모 보정에 쓴다
   (무추천일과 무결정일은 다르다 — MNAR 방지).
+- v2 KILL 전환에는 별도 `skip-terminal-kill`을 쓴다. 검증된 terminal state+anchor,
+  `decision_date > effective_asof`, decision/receipt/원장 행 전무가 모두 참일 때만 허용하며
+  pipeline death 분모에 넣지 않는다. 과거 공용 KILL이 R1을 막은 2026-08-06~08에는
+  `skip-policy-blocked`로만 기록한다(`forward_valid=false`); 08-09부터 R1 receipt 계약은 다시 엄격하다.
 
 ### 1.5 pump v2 evidence와 terminal 판정
 
@@ -131,7 +136,8 @@ Ruff(변경 Python)+전수 pytest gate가 정상 `git push` 경로에서 차단�
   일치해야 CLOSED 성과나 recall 근거로 사용한다. 2026-07-26 zero-pick receipt는
   검증하되 `legacy-unverifiable`로 분리한다.
 - 조기 KILL 또는 2026-09-01 GO/KILL은 별도 immutable terminal state와 anchor에
-  기록한다. 상태 누락·손상·미래시각·불일치 시 발송은 fail closed한다.
+  기록한다. 이 terminal은 pump-v2 전용이다. 유효 KILL은 runner의 정상 no-op이며,
+  상태 누락·손상·미래시각·불일치만 fail closed한다. R1 발송과는 독립이다.
 - 로컬 관리자 권한으로 state와 anchor를 함께 바꾸는 위협까지 방어하려면 추후
   HMAC 비밀키 또는 외부 WORM 저장소가 필요하다.
 
@@ -168,8 +174,8 @@ service가 nonzero를 반환한다.
 
 ### 3.1 현재 운영 포맷
 
-현재 실발송 진입점은 R1의 `scripts/recommend_send.py`와 pump v2의
-`scripts/pump_detector_v2_today.py`뿐이다. 아래 distribution/pre-open 예시는
+현재 실발송 진입점은 R1의 `scripts/recommend_send.py`다. 종료된 pump-v2의
+`scripts/pump_detector_v2_today.py`는 immutable KILL 확인 후 전송 전에 끝난다. 아래 distribution/pre-open 예시는
 record-only legacy formatter의 보존 문서이며 현재 R1 메시지 계약이 아니다.
 알림 문구 자체는 사용자 승인 없이 변경하지 않는다.
 
@@ -240,7 +246,7 @@ PRELUDE_DASHBOARD_PIN=... # installer/publish 필수
 허용된 세 키만 환경변수로 내보낸다. `.env`를 셸 코드로 `source`하거나
 `notifier/telegram.py`가 암묵적으로 읽지 않는다.
 
-legacy formatter의 prefix는 `🌅 prelude`다. 현재 R1/pump v2 메시지 계약은 위
+legacy formatter의 prefix는 `🌅 prelude`다. 현재 R1 메시지 계약은 위
 실발송 진입점이 소유하며 사용자 승인 없이 바꾸지 않는다.
 
 **연결 테스트**:
@@ -335,7 +341,7 @@ legacy CLI 기본값은 ACTIVE가 없으면 발송하지 않으며 현재 daily 
 - 업비트 D1: 08:50 preopen, 09:05 distribution과 close runner에서 갱신
 - 업비트 4h: 09:05 distribution과 09:30 close에서 갱신
 - 업비트 15m: 08:50 legacy preopen 및 09:30/10:05 close에서 갱신
-- 바이낸스 D1: 09:05 pump v2 직전에 갱신
+- 바이낸스 D1: pump-v2 KILL 이후 신규 radar 입력 갱신에는 사용하지 않음(보존 데이터)
 - Binance/Upbit 1h와 매시간 collector는 현재 scheduler 미등록
 
 ### 7.2 freshness 보장
@@ -352,8 +358,9 @@ legacy CLI 기본값은 ACTIVE가 없으면 발송하지 않으며 현재 daily 
 
 ## 8. 일관성 검증 (현재 inline provenance)
 
-현재 R1/pump 경로는 snapshot/decision→delivery receipt→전용 ledger identity를
-쓰기와 청산 단계에서 검증하고 불일치 시 fail closed한다.
+현재 활성 R1 경로는 snapshot→delivery receipt→전용 ledger identity를 쓰기와
+청산 단계에서 검증하고 불일치 시 fail closed한다. 기능 은퇴한 pump-v2의
+decision→receipt→ledger 사슬도 과거 증거 검증과 터미널 no-op 판정에 보존한다.
 `scripts/verify_telegram.py`는 legacy `output/ledger.csv`용 수동 검사이며 timer에서
 호출되지 않는다.
 

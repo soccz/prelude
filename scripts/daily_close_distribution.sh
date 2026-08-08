@@ -118,7 +118,7 @@ close_validated_cohort() {
             return
         fi
         case "$mode" in
-            close|skip-zero-pick|skip-legacy-unverifiable|skip-no-decision) ;;
+            close|skip-zero-pick|skip-legacy-unverifiable|skip-no-decision|skip-terminal-kill|skip-policy-blocked) ;;
             *)
                 record_critical_failure 2 \
                     "$step evidence gate invalid mode"
@@ -151,6 +151,10 @@ close_validated_cohort() {
                     echo "  $step skipped — pre-contract legacy-unverifiable revalidated under lock; never forward-valid" >> "$LOG"
                 elif [ "$mode" = "skip-no-decision" ]; then
                     echo "  $step skipped — no canonical decision evidence and no ledger rows (send-day failure already alarmed)" >> "$LOG"
+                elif [ "$mode" = "skip-terminal-kill" ]; then
+                    echo "  $step skipped — pump-v2 immutable KILL is active (expected terminal no-op)" >> "$LOG"
+                elif [ "$mode" = "skip-policy-blocked" ]; then
+                    echo "  $step skipped — bounded superseded-policy gap (forward-invalid; no receipt/PnL fabricated)" >> "$LOG"
                 fi
                 continue
             else
@@ -168,6 +172,10 @@ close_validated_cohort() {
                     echo "  $step skipped — pre-contract legacy-unverifiable revalidated under lock; never forward-valid" >> "$LOG"
                 elif [ "$mode" = "skip-no-decision" ]; then
                     echo "  $step skipped — no canonical decision evidence and no ledger rows (send-day failure already alarmed)" >> "$LOG"
+                elif [ "$mode" = "skip-terminal-kill" ]; then
+                    echo "  $step skipped — pump-v2 immutable KILL is active (expected terminal no-op)" >> "$LOG"
+                elif [ "$mode" = "skip-policy-blocked" ]; then
+                    echo "  $step skipped — bounded superseded-policy gap (forward-invalid; no receipt/PnL fabricated)" >> "$LOG"
                 fi
                 continue
             else

@@ -40,9 +40,17 @@ def _fake_repo(tmp_path: Path) -> tuple[Path, str, dict[str, str], Path]:
     hook.parent.mkdir(parents=True)
     python.parent.mkdir(parents=True)
     shutil.copy2(HOOK, hook)
+    (repo / ".gitignore").write_text(
+        "venv/\ndata/*.db\n",
+        encoding="utf-8",
+    )
     (repo / "guarded.py").write_text("VALUE = 1\n", encoding="utf-8")
     python.write_text(
         "#!/bin/sh\n"
+        "[ \"$(cat guarded.py)\" = \"VALUE = 1\" ] || exit 88\n"
+        "[ -x venv/bin/python ] || exit 89\n"
+        "[ -s data/upbit_d1.db ] || exit 90\n"
+        "[ -s data/binance_d1.db ] || exit 91\n"
         "printf 'pytest:%s:guard=%s\\n' "
         "\"$*\" \"${PRELUDE_FORBID_TELEGRAM:-}\" >> \"$PREPUSH_CALLS\"\n"
         "exit \"${FAKE_PYTEST_RC:-0}\"\n",
@@ -96,10 +104,11 @@ def test_pre_push_hook_is_executable_and_has_both_gates() -> None:
     assert "git diff --name-only --diff-filter=ACMR" in text
     assert '"$RUFF_BIN" check "${python_files[@]}"' in text
     assert "PRELUDE_FORBID_TELEGRAM=1" in text
-    assert "venv/bin/python -m pytest -q -p no:cacheprovider" in text
+    assert '"$PYTHON_BIN" -m pytest -q -p no:cacheprovider' in text
     assert text.index('"$RUFF_BIN" check') < text.index(
-        "venv/bin/python -m pytest"
+        '"$PYTHON_BIN" -m pytest'
     )
+    assert "git worktree add --detach --quiet" in text
 
 
 def test_pre_push_hook_has_no_environment_bypass(tmp_path) -> None:
@@ -179,7 +188,7 @@ def test_pre_push_hook_blocks_failed_gate(
     assert expected in proc.stderr
 
 
-def test_pre_push_hook_blocks_dirty_tree_instead_of_testing_other_bytes(
+def test_pre_push_hook_tests_detached_head_when_live_worktree_is_dirty(
     tmp_path,
 ) -> None:
     repo, head, env, calls = _fake_repo(tmp_path)
@@ -192,9 +201,11 @@ def test_pre_push_hook_blocks_dirty_tree_instead_of_testing_other_bytes(
         input_text=_push_update(head),
     )
 
-    assert proc.returncode != 0
-    assert "worktree/index/untracked 변경 존재" in proc.stderr
-    assert not calls.exists()
+    assert proc.returncode == 0, proc.stderr
+    assert calls.read_text(encoding="utf-8").splitlines() == [
+        "ruff:check guarded.py",
+        "pytest:-m pytest -q -p no:cacheprovider:guard=1",
+    ]
 
 
 def test_pre_push_hook_blocks_unavailable_remote_base(tmp_path) -> None:

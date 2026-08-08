@@ -53,7 +53,7 @@ active KRW − stablecoin 5종 + D1 PIT 거래대금
 |---|---|
 | 07:30 | 전수 pytest selftest (실패 시 OnFailure 경보) |
 | 08:50 | R1 **예고** 발송 (진입가 09:00 확정) |
-| 09:05 | R1 **확정** 발송 + 🎯 pump v2 radar (후보 있는 날만) + shadow ledger |
+| 09:05 | R1 **확정** 발송 + challenger shadow ledger (pump-v2는 KILL 후 정상 no-op) |
 | 09:30 | 전일 청산 (−3%SL/+5%TP/EOD, 왕복 0.15% 차감) + 챔피언 재선정 |
 | 10:05 | 전 유니버스 forward 라벨 + 감사 평가 |
 | 10:10 | 암호화 대시보드 publish |
@@ -107,7 +107,9 @@ active KRW − stablecoin 5종 + D1 PIT 거래대금
   입력이 한 바이트 바뀌면 아티팩트가 무효화된다. pickle은 승인 digest 일치 시에만 실행.
 - **시한부 판정 박제 → 집행 완료**: v2의 GO/KILL은 불변 터미널 상태 + 독립 anchor로 봉인돼 있었고,
   동결 조기사망 조항이 **2026-08-05 자동 발동해 KILL로 종결**됐다(n=9 · mean −0.097% ·
-  `radar_terminal_verdict.json` integrity hash). KILL 이후 v2 발사는 전송 API 직전에서 차단된다.
+  `radar_terminal_verdict.json` integrity hash). KILL 이후 일일 live v2 runner는
+  scoring·decision·receipt·ledger·전송 전에 정상 no-op으로 종료한다(명시적 진단 dry-run은 가능).
+  **이 판정은 v2에만 적용되며 R1 preopen/open은 계속 운영한다.**
   **무증거로 죽는 실험과 데이터로 판정받는 실험은 다르다** — 이 실험은 후자로 죽었다.
 - **위생 4원칙 (유일한 비타협)**: look-ahead 차단 · 유니버스 시간정합 · 거래비용 상시 차감 · 자동주문 금지.
 

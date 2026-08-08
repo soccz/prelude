@@ -7,7 +7,7 @@ def test_distribution_daily_script_keeps_distribution_record_only():
     text = Path("scripts/daily_run_distribution.sh").read_text()
 
     predict_block = text.split("python scripts/predict_today_distribution.py", 1)[1]
-    predict_block = predict_block.split("echo \"[7/11]", 1)[0]
+    predict_block = predict_block.split("echo \"[7/10]", 1)[0]
 
     assert "--send-telegram" not in predict_block
     assert "--send-silence-telegram" not in predict_block

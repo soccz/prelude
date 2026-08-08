@@ -1,4 +1,4 @@
-"""Immutable terminal GO/KILL verdict shared by every canonical radar.
+"""Immutable terminal GO/KILL verdict for the retired pump-v2 radar.
 
 The daily scorecard is mutable reporting evidence.  This module deliberately
 keeps the one-way operational decision in a separate, content-addressed file:
@@ -38,6 +38,20 @@ RADAR_VERDICT_SCHEMA = "radar_terminal_verdict.v1"
 JUDGMENT_DAY = date(2026, 9, 1)
 KST = ZoneInfo("Asia/Seoul")
 MAX_SEND_CLOCK_SKEW = timedelta(minutes=5)
+# 2026-08-05에 실제로 봉인된 pump-v2 terminal KILL. 이 시각 이후에는
+# state+anchor가 둘 다 사라져도 "아직 미결"로 되돌아갈 수 없다.
+PUMP_V2_RETIRED_AT = datetime(
+    2026,
+    8,
+    5,
+    1,
+    30,
+    43,
+    423095,
+    tzinfo=timezone.utc,
+)
+PUMP_V2_TERMINAL_EFFECTIVE_ASOF = date(2026, 8, 5)
+PUMP_V2_TERMINAL_VERDICT_ID = "radar-verdict-cae133d0a18f1b030273715f"
 
 CRITERIA_KEYS = (
     "n>=200",
@@ -68,7 +82,11 @@ _TOP_LEVEL_KEYS = {
 
 
 class RadarVerdictError(RuntimeError):
-    """The shared terminal verdict is missing, corrupt, or contradictory."""
+    """The pump-v2 terminal verdict is missing, corrupt, or contradictory."""
+
+
+class RadarTerminalKill(RadarVerdictError):
+    """A valid, effective immutable KILL stopped pump-v2 as designed."""
 
 
 def _canonical_json(value: Mapping[str, object]) -> bytes:
@@ -1023,6 +1041,20 @@ def assert_radar_send_allowed(
         return state
 
 
+def assert_pump_v2_runtime_allowed(
+    *,
+    path: str | Path = RADAR_TERMINAL_STATE,
+    now: datetime | None = None,
+) -> dict[str, Any] | None:
+    """Apply the permanent, exact pump-v2 retirement contract."""
+    with radar_send_guard(
+        path=path,
+        now=now,
+        enforce_pump_v2_retirement=True,
+    ) as state:
+        return state
+
+
 @contextmanager
 def radar_send_guard(
     *,
@@ -1030,6 +1062,7 @@ def radar_send_guard(
     now: datetime | None = None,
     clock: Callable[[], datetime] | None = None,
     boundary_check: Callable[[datetime], None] | None = None,
+    enforce_pump_v2_retirement: bool = False,
 ) -> Iterator[dict[str, Any] | None]:
     """Linearize terminal resolution and one real Telegram API attempt.
 
@@ -1046,6 +1079,31 @@ def radar_send_guard(
             raise RadarVerdictError("radar send clock must be timezone-aware")
         observed_day = observed.astimezone(KST).date()
         state = _load_pair_unlocked(resolved)
+        retirement_active = (
+            enforce_pump_v2_retirement
+            and observed.astimezone(timezone.utc) >= PUMP_V2_RETIRED_AT
+        )
+        if retirement_active:
+            if state is None:
+                raise RadarVerdictError(
+                    "pump-v2 terminal KILL pair missing after retirement"
+                )
+            expected_identity = {
+                "verdict": "kill",
+                "status": "early_kill",
+                "verdict_id": PUMP_V2_TERMINAL_VERDICT_ID,
+                "effective_asof": (
+                    PUMP_V2_TERMINAL_EFFECTIVE_ASOF.isoformat()
+                ),
+                "recorded_at": PUMP_V2_RETIRED_AT.isoformat(),
+            }
+            if any(
+                state.get(key) != value
+                for key, value in expected_identity.items()
+            ):
+                raise RadarVerdictError(
+                    "pump-v2 terminal KILL identity mismatch after retirement"
+                )
         if state is None:
             if observed_day >= JUDGMENT_DAY:
                 raise RadarVerdictError(
@@ -1066,7 +1124,7 @@ def radar_send_guard(
                 "radar send blocked: terminal verdict is future-dated"
             )
         if state["verdict"] != "go":
-            raise RadarVerdictError(
+            raise RadarTerminalKill(
                 "radar send blocked by immutable KILL verdict "
                 f"{state['verdict_id']}"
             )

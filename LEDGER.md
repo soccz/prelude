@@ -1,13 +1,14 @@
 # LEDGER.md — 가상 reference ledger
 
-> **현재 운영: R1 preopen/open과 pump v2의 분리된 reference ledger.**
+> **현재 운영: R1 preopen/open reference ledger. pump-v2 ledger는 KILL 시점에 동결.**
 > 시스템은 추천·기록만 하고 실제 매매는 사용자가 직접 한다.
 
 **현재 운영 원장**:
 - R1 open: `output/shadow_ledger_recommend.csv`
 - R1 preopen: `output/shadow_ledger_recommend_preopen.csv`
   (첫 compliant preopen run 전에는 파일이 없을 수 있음)
-- R2/A1/pump v1/v2: 각 모델의 별도 `output/shadow_ledger_*.csv`
+- R2/A1/pump v1: 각 모델의 별도 record-only `output/shadow_ledger_*.csv`
+- pump-v2: `output/shadow_ledger_pump_hunter_v2.csv`를 2026-08-05 KILL 증거로 보존하며 신규 행 없음
 - 성공 delivery receipt 이후 다음 실행 가능한 15분봉부터 96봉을 평가하고
   TP5/SL3/EOD·왕복 0.15% 비용을 기록
 - 같은 날 추천은 equal-weight, 무추천일은 cash 0%로 집계
@@ -255,8 +256,10 @@ date,coin,btc_regime,
 xsec_alpha 의 verify_telegram.py 패턴: 텔레그램이 ledger 와 부호 / 크기 일치하는지 자동 검증.
 
 `scripts/verify_telegram.py`는 legacy `output/ledger.csv`용 수동 검사이며 현재
-systemd timer에서 호출되지 않는다. 현재 R1/pump 경로는 snapshot/decision,
+systemd timer에서 호출되지 않는다. 현재 활성 R1 경로는 snapshot,
 delivery receipt, 전용 ledger identity를 쓰기·청산 단계에서 fail closed로 검증한다.
+기능 은퇴한 pump-v2의 decision/receipt/ledger는 과거 감사 증거와 터미널
+no-op 검증용으로 동결 보존한다.
 
 ---
 
@@ -281,10 +284,12 @@ delivery receipt, 전용 ledger identity를 쓰기·청산 단계에서 fail clo
 |---|---|
 | `output/shadow_ledger_recommend.csv` | 현재 R1 open 전용 원장 |
 | `output/shadow_ledger_recommend_preopen.csv` | 현재 R1 preopen 전용 원장 (첫 실행 전 미생성 가능) |
-| `output/shadow_ledger_pump_hunter_v2.csv` | 현재 pump v2 원장 |
+| `output/shadow_ledger_pump_hunter_v2.csv` | KILL 시점에 동결된 pump-v2 원장 |
 | `scripts/close_recommend_ledger.py` | receipt 이후 15m 경로 청산 + `skip-no-decision` 검증·마커 기록 |
 | `ledger/path_quality.py` | 15m 경로 완전성 판정 (`assess_15m_window` 단건 = `assess_15m_windows` 날짜별 벌크 로더, 동등성 테스트 고정) |
 | `output/close_no_decision/{cohort}/{asof}.json` | 발송 파이프가 아예 죽어 증거·원장 행이 전무했던 날의 감사 마커 (커버리지 분모 보정용, 백업 포함) |
+| `output/close_terminal_skip/pump-v2/{asof}.json` | 유효 terminal KILL 뒤 v2 정상 no-op 감사 마커 (`forward_valid=false`, PnL 표본 아님) |
+| `output/close_policy_blocked/{cohort}/{asof}.json` | 08-06~08 구 shared-KILL에 막힌 R1 이음매 감사 마커 (`forward_valid=false`, receipt/PnL 소급 생성 금지) |
 | `ledger/portfolio_metrics.py` | day-equal/cash-day 포트폴리오 지표 |
 | `ledger/exit_lab.py` | record-only 청산 변형 |
 | `ops/champion_selector.py` | 채널별 forward champion 판정 |

@@ -41,15 +41,6 @@ def _allow_mocked_sends(monkeypatch):
     )
 
 
-@pytest.fixture(autouse=True)
-def _isolate_terminal_verdict(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        recommend_send,
-        "RADAR_VERDICT_PATH",
-        tmp_path / "radar-terminal.json",
-    )
-
-
 def test_live_resolver_refuses_missing_champion_state(monkeypatch):
     monkeypatch.setattr(recommend_send, "get_champion", lambda *_a, **_k: None)
 
@@ -291,7 +282,6 @@ def _stub_dispatch(monkeypatch, snapshot: dict) -> None:
 def _concurrent_send_worker(
     snapshot: dict,
     receipt_root: str,
-    radar_verdict_path: str,
     start: Any,
     results: Any,
     api_calls: Any,
@@ -334,7 +324,6 @@ def _concurrent_send_worker(
             snapshot["asof"],
             snapshot["slot"],
             receipt_root=receipt_root,
-            radar_verdict_path=radar_verdict_path,
         )
     except Exception as exc:  # pragma: no cover - surfaced in parent assertion
         results.put(("error", repr(exc)))
@@ -877,7 +866,6 @@ def test_concurrent_processes_send_same_snapshot_exactly_once(tmp_path):
     context = multiprocessing.get_context("spawn")
     snapshot = _snapshot(tmp_path)
     receipt_root = tmp_path / "receipts"
-    radar_verdict_path = tmp_path / "radar-terminal.json"
     api_calls = context.Value("i", 0)
     worker_count = 2
     start = context.Barrier(worker_count + 1)
@@ -888,7 +876,6 @@ def test_concurrent_processes_send_same_snapshot_exactly_once(tmp_path):
             args=(
                 snapshot,
                 str(receipt_root),
-                str(radar_verdict_path),
                 start,
                 results,
                 api_calls,

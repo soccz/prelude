@@ -91,6 +91,11 @@ def _isolate_terminal_verdict(tmp_path, monkeypatch):
         "RADAR_VERDICT_PATH",
         tmp_path / "radar-terminal.json",
     )
+    monkeypatch.setattr(
+        runner,
+        "_now_kst",
+        lambda: datetime(2026, 7, 26, 9, 15, tzinfo=runner.KST),
+    )
 
 
 def _result(*, coin: str = "KRW-TEST") -> dict:
