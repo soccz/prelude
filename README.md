@@ -4,7 +4,7 @@
 > KST 08:50·09:05에 알려 주는 개인 트레이딩 보조 레이더.
 > 사용자가 직접 판단·매매하며 **자동 주문은 없다.**
 
-![tests](https://img.shields.io/badge/tests-1362%20passed-brightgreen)
+![tests](https://img.shields.io/badge/tests-1400%20passed-brightgreen)
 ![status](https://img.shields.io/badge/verdict-radar--not--strategy-orange)
 ![evidence](https://img.shields.io/badge/evidence-snapshot%E2%86%92receipt%E2%86%92label-blue)
 ![judgment](https://img.shields.io/badge/v2%20verdict-KILL%20(early%2C%202026--08--05)-red)
@@ -40,7 +40,7 @@
 ```
 active KRW − stablecoin 5종 + D1 PIT 거래대금
               ↓ Top100 exact-boundary freshness gate
-        첫 실패 시 결손 종목만 1회 재수집·재검증
+    각 gate 첫 실패 시 결손 종목만 1회 재수집·재검증
 슬롯당 단일 R1 inference snapshot ──→ Telegram delivery receipt
               ↓                              ↓
       전 유니버스 score 기록        다음 실행 15분봉부터 새 96봉
@@ -91,6 +91,7 @@ active KRW − stablecoin 5종 + D1 PIT 거래대금
 | 07-25→26 | Track 1 측정 무결성 (증거 사슬 전면 재건) | historical 탐색 **공식 종료** — 이후 판단은 forward만 |
 | 07-27→28 | 3중 장애 (발송 사망·close 마비·침묵) → 적대 리뷰 2×2회전 복구 | CRITICAL 7건 적발·해소 · v2 소생(소급 0/53→**53/53 ok**) |
 | 07-30 | 09:05 D1 경계 race 재현·수리 | 결손 종목 1회 표적 재수집 + 동일 gate 재검증, 광역/지속 결손 fail-closed |
+| 08-11 | 두 gate 사이 신규거래 race 재현·수리 | recommend·distribution 각각 최대 1회 표적 재수집, 두 번째 실패는 계속 fail-closed |
 
 상세 서사와 각 판정의 원자료: [프로젝트 보고서](https://soccz.github.io/projects/prelude/) ·
 [`_workspace/`](_workspace/) (연구 노트·독립 재검산 판정서 40여 건) · [`PHASES.md`](PHASES.md)
@@ -133,7 +134,7 @@ python scripts/recommend_today.py --slot open --dry-run
 sudo bash deploy/install_systemd.sh --check-only      # 설치본-저장소 정합 검사
 
 # 전체 검증
-python -m pytest -q tests/                            # 1362 passed 기대
+python -m pytest -q tests/                            # 1400 passed 기대
 ```
 
 ---

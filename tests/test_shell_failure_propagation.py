@@ -524,7 +524,61 @@ exit 0
     assert f"[critical] {critical_label}" not in logs
 
 
-def test_distribution_uses_at_most_one_d1_reconcile_across_both_health_gates(
+def test_distribution_allows_one_bounded_d1_reconcile_per_health_gate(
+    tmp_path,
+):
+    result, calls, logs = _run_auxiliary_shell_with_fake_python(
+        tmp_path,
+        "daily_run_distribution.sh",
+        """
+if [ "$*" = "scripts/health_check.py --channel recommend --no-telegram" ]; then
+    count=$(/usr/bin/grep -Fxc -- "$*" "$CALL_LOG")
+    if [ "$count" -eq 1 ]; then
+        exit 23
+    fi
+fi
+if [ "$*" = "scripts/health_check.py --channel distribution --no-telegram" ]; then
+    count=$(/usr/bin/grep -Fxc -- "$*" "$CALL_LOG")
+    if [ "$count" -eq 1 ]; then
+        exit 24
+    fi
+fi
+exit 0
+""",
+    )
+
+    commands = calls.splitlines()
+    assert result.returncode == 0
+    assert (
+        commands.count("-m data.collector_d1 --refresh-current-boundary")
+        == 2
+    )
+    assert (
+        commands.count(
+            "scripts/health_check.py --channel recommend --no-telegram"
+        )
+        == 2
+    )
+    assert (
+        commands.count(
+            "scripts/health_check.py --channel distribution --no-telegram"
+        )
+        == 2
+    )
+    assert commands.count("scripts/recommend_send.py --slot open") == 1
+    assert commands.count("scripts/recommend_today.py --require-receipt") == 1
+    assert commands.count(
+        "scripts/predict_today_distribution.py --universe top100 --top-k 10"
+    ) == 1
+    assert commands.count("scripts/recommend_today.py --ranking R2") == 1
+    assert commands.count("scripts/recommend_today.py --ranking A1") == 1
+    assert commands.count("scripts/pump_detector_today.py") == 1
+    assert "channel=recommend first_exit=23 refresh_exit=0" in logs
+    assert "channel=distribution first_exit=24 refresh_exit=0" in logs
+    assert "[critical]" not in logs
+
+
+def test_distribution_uses_at_most_one_d1_reconcile_for_each_failing_gate(
     tmp_path,
 ):
     result, calls, logs = _run_auxiliary_shell_with_fake_python(
@@ -545,7 +599,7 @@ exit 0
     assert result.returncode == 23
     assert (
         commands.count("-m data.collector_d1 --refresh-current-boundary")
-        == 1
+        == 2
     )
     assert (
         commands.count(
@@ -557,12 +611,18 @@ exit 0
         commands.count(
             "scripts/health_check.py --channel distribution --no-telegram"
         )
-        == 1
+        == 2
     )
     assert "scripts/recommend_send.py --slot open" not in commands
     assert "scripts/predict_today_distribution.py" not in calls
-    assert "pipeline D1 reconcile was already used" in logs
-    assert "channel=distribution exit=24" in logs
+    assert (
+        "channel=recommend first_exit=23 refresh_exit=0 final_exit=23"
+        in logs
+    )
+    assert (
+        "channel=distribution first_exit=24 refresh_exit=0 final_exit=24"
+        in logs
+    )
 
 
 def test_distribution_refresh_failure_stays_fail_closed_when_health_fails(

@@ -51,8 +51,10 @@ record_critical_failure() {
 
 # Upbit의 새 09:00 D1 candle이 일부 market에서 첫 fetch 직후 잠시 보이지
 # 않는 경우가 있다. health gate 자체는 그대로 fail-closed로 두고, 실패 시
-# 현재 경계가 없는 live market만 파이프라인 전체에서 한 번 재수집한 뒤
-# 같은 gate를 한 번 더 평가한다. 무한 retry나 stale 관용은 금지한다.
+# 현재 경계가 없는 live market만 각 health gate에서 한 번 재수집한 뒤
+# 같은 gate를 한 번 더 평가한다. recommend 검사 뒤 새 거래가 시작되면
+# distribution 검사에서 결손 집합이 달라질 수 있으므로 두 gate의 상한을
+# 분리한다. 무한 retry나 stale 관용은 금지한다.
 # 지연 2초는 07-30 관측
 # (첫 수집 직후 부재, health 시점 업스트림 존재)의 초기값이며 로그로 조정한다.
 D1_RECONCILE_DELAY_SECONDS="${PRELUDE_D1_RECONCILE_DELAY_SECONDS:-2}"
@@ -60,13 +62,28 @@ if ! [[ "$D1_RECONCILE_DELAY_SECONDS" =~ ^[0-9]+$ ]]; then
     echo "invalid PRELUDE_D1_RECONCILE_DELAY_SECONDS: $D1_RECONCILE_DELAY_SECONDS" >&2
     exit 2
 fi
-D1_RECONCILE_ATTEMPTED=0
+RECOMMEND_D1_RECONCILE_ATTEMPTED=0
+DISTRIBUTION_D1_RECONCILE_ATTEMPTED=0
 
 run_health_with_d1_reconcile() {
     local channel="$1"
     local first_rc
     local refresh_rc=0
     local final_rc
+    local reconcile_attempted
+
+    case "$channel" in
+        recommend)
+            reconcile_attempted="$RECOMMEND_D1_RECONCILE_ATTEMPTED"
+            ;;
+        distribution)
+            reconcile_attempted="$DISTRIBUTION_D1_RECONCILE_ATTEMPTED"
+            ;;
+        *)
+            echo "  invalid health channel for D1 reconcile: $channel" >> "$LOG"
+            return 2
+            ;;
+    esac
 
     if python scripts/health_check.py \
         --channel "$channel" --no-telegram >> "$LOG" 2>&1; then
@@ -74,13 +91,20 @@ run_health_with_d1_reconcile() {
     else
         first_rc=$?
     fi
-    if [ "$D1_RECONCILE_ATTEMPTED" -eq 1 ]; then
-        echo "  health gate failed after pipeline D1 reconcile was already used" \
+    if [ "$reconcile_attempted" -eq 1 ]; then
+        echo "  health gate failed after its D1 reconcile was already used" \
             "(channel=$channel exit=$first_rc) — 추가 retry 없이 fail-closed" \
             >> "$LOG"
         return "$first_rc"
     fi
-    D1_RECONCILE_ATTEMPTED=1
+    case "$channel" in
+        recommend)
+            RECOMMEND_D1_RECONCILE_ATTEMPTED=1
+            ;;
+        distribution)
+            DISTRIBUTION_D1_RECONCILE_ATTEMPTED=1
+            ;;
+    esac
     echo "  health gate first attempt failed (channel=$channel exit=$first_rc)" \
         "— current D1 boundary targeted refresh 후 1회 재검증" >> "$LOG"
 
