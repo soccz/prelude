@@ -691,6 +691,47 @@ def test_snapshot_tolerates_probability_nesting_violation_as_diagnostic(
     assert "KRW-T4" in nesting_warnings[0].getMessage()
 
 
+@pytest.mark.parametrize("ranking", ["R2", "A1"])
+def test_record_only_top3_probability_nesting_violation_is_diagnostic(
+    tmp_path,
+    caplog,
+    monkeypatch,
+    ranking,
+):
+    def scorer(asof, **kwargs):
+        result = _score_result(asof, kwargs["slot"], kwargs["ranking"])
+        degraded = result["universe"][0]
+        degraded["p_up20"] = 0.2
+        degraded["pump_prob"] = 0.2
+        degraded["pump_prob_pct"] = "20.0%"
+        return result
+
+    monkeypatch.setattr(recommend_snapshot.log, "propagate", True)
+    with caplog.at_level("WARNING", logger="signals.recommend_snapshot"):
+        snapshot = get_or_create_recommend_snapshot(
+            "2026-07-25",
+            slot="open",
+            ranking=ranking,
+            root=tmp_path,
+            scorer=scorer,
+        )
+        loaded = load_snapshot(
+            snapshot["snapshot_path"],
+            asof="2026-07-25",
+            slot="open",
+            ranking=ranking,
+        )
+
+    assert loaded["top3"][0]["p_up20"] == 0.2
+    nesting_warnings = [
+        record
+        for record in caplog.records
+        if "probability nesting violated" in record.getMessage()
+    ]
+    assert nesting_warnings
+    assert any("KRW-T1" in record.getMessage() for record in nesting_warnings)
+
+
 def test_snapshot_rejects_resigned_preopen_entry_price(tmp_path):
     snapshot = get_or_create_recommend_snapshot(
         "2026-07-25",

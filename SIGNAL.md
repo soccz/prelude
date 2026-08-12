@@ -508,14 +508,14 @@ versioned shadow로 비교한다.
 포함관계 검사의 운영 규칙 (2026-07-28 변경): 전 유니버스 fail-closed는 첫 실운영
 (2026-07-27 09:05)에서 rank 77 후보 하나로 R1 발송·라벨 축적 전체를 죽였다
 (36/100 위반은 위 문단의 알려진 모델 성질이므로 이 하드체크는 만족된 적 없는
-불변식이었다). 이에 **발송분(top-k)만 하드 fail-closed를 유지하고, 유니버스
-꼬리 위반은 집계 진단 경고로 강등**했다(snapshot 검증·label artifact 검증 동일
-계약, quant-reviewer 적대검증 2회전 통과). 위반율은 snapshot에 저장된 확률
-벡터에서 사후 재계산 가능하다. 이는 종전 문서의 "Top3 한정 완화는 사용자 결정
-대기안" 항목을 가동 불능 해소를 위해 채택한 것으로, 되돌리려면 이 완화를 원복
-하면 된다. 다만 top-k 하드체크의 실측 마진이 얇다(07-26 기준 open_r2 최소 위반
-rank 4) — 근본 해결인 calibration 재구축·단조 projection은 여전히 사용자 승인
-대기. 또한 현재 R1 formatter에는 과거 문구 `둘 다 검증된 calibrated`가 남아
+불변식이었다). 이에 **실제 발송 경로인 R1 top-k만 하드 fail-closed를 유지하고,
+R1 유니버스 꼬리와 발송되지 않는 R2/A1 challenger 전체는 집계 진단 경고로
+강등**했다(snapshot 검증·label artifact 검증 동일 계약, quant-reviewer
+적대검증 2회전 통과). 2026-08-12에는 R2의 첫 top-k 위반(KRW-DOGE, rank 3)이
+record-only 배치 전체를 실패시킨 운영 결함도 이 경계로 수정했다. 위반율은
+snapshot에 저장된 확률 벡터에서 사후 재계산 가능하다. 근본 해결인 calibration
+재구축·단조 projection은 여전히 사용자 승인 대기다. 또한 현재 R1 formatter에는
+과거 문구 `둘 다 검증된 calibrated`가 남아
 있어 위 증거와 모순된다. 현 활성 정렬·표시·알림은 임의 변경하지 않으며, 이
 문구 수정과 versioned projection은 사용자 승인 후 적용한다.
 

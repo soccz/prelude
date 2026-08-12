@@ -440,11 +440,12 @@ def _validate_snapshot_contract(document: dict, path: Path) -> None:
             ):
                 # 독립 head 라 포함관계가 구조적으로 보장되지 않는 알려진 모델
                 # 성질(07-26 snapshot 기준 36/100 위반, 최소 위반 rank 25)이다.
-                # 실제 발송분(top-k)은 사용자에게 보이는 숫자라 하드 실패를
-                # 유지하고, 유니버스 꼬리는 진단으로만 남긴다 — rank 하위 코인
-                # 하나가 전체 발송을 죽이는 구조 방지. calibration 재구축(사용자
-                # 승인 사안) 전까지는 관찰 대상.
-                if index <= len(top3):
+                # 실제 발송분인 R1 top-k는 사용자에게 보이는 숫자라 하드 실패를
+                # 유지한다. R2/A1은 challenger-only record 경로이므로 top-k를
+                # 포함해 진단으로만 남긴다 — 독립 head의 알려진 성질 하나가
+                # record-only distribution 배치 전체를 죽이지 않게 한다.
+                # calibration 재구축(사용자 승인 사안) 전까지는 관찰 대상.
+                if ranking == "R1" and index <= len(top3):
                     raise SnapshotError(
                         f"snapshot {coin} probability nesting violated in "
                         f"top-k: {path}"
