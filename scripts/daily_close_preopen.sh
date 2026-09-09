@@ -50,6 +50,15 @@ record_critical_failure() {
     echo "  [critical] $step failed (exit=$rc) — 가능한 후속 단계는 계속" >> "$LOG"
 }
 
+# Initial 300s research budget: the 2026-09-08 evaluator took about 110.6s,
+# making 120s too close to normal runtime; 300s is about 2.7x that observation.
+# Bound hangs without changing core close
+# or label deadlines. Failures remain nonzero/OnFailure-visible and still block
+# publish; this reduces core latency, not complete research/publish isolation.
+run_research_step() {
+    /usr/bin/timeout --signal=TERM --kill-after=10s 300s "$@"
+}
+
 TARGET_DECISION_DATE=$(date -d yesterday +%F)
 close_validated_preopen_r1() {
     local canonical_date
@@ -169,6 +178,11 @@ else
     record_critical_failure "$?" "preopen close 15m universe update"
 fi
 
+# R1 close and full-universe labels depend on canonical evidence/15m data, not
+# legacy preopen results or research reports. Complete both before that work.
+echo "[3b/5] close_recommend_ledger (R1 preopen 전용 원장)" >> "$LOG"
+close_validated_preopen_r1
+
 LABEL_DATE=$(date -d yesterday +%F)
 echo "[2/5] full-universe score labels (through $LABEL_DATE)" >> "$LOG"
 if python scripts/label_recommend_snapshots.py --through-date "$LABEL_DATE" >> "$LOG" 2>&1; then
@@ -183,13 +197,6 @@ else
     fi
 fi
 
-echo "[2b/5] full-universe score evaluation" >> "$LOG"
-if python scripts/evaluate_recommend_score_labels.py >> "$LOG" 2>&1; then
-    :
-else
-    record_critical_failure "$?" "full-universe score evaluation"
-fi
-
 # ★ set -e 가드: close_preopen_ledger 실패해도 아래 meta-train/idea-validation 은 계속.
 echo "[3/5] close_preopen_ledger" >> "$LOG"
 if python scripts/close_preopen_ledger.py >> "$LOG" 2>&1; then
@@ -198,18 +205,22 @@ else
     record_critical_failure "$?" "preopen close"
 fi
 
-echo "[3b/5] close_recommend_ledger (R1 preopen 전용 원장)" >> "$LOG"
-close_validated_preopen_r1
+echo "[2b/5] full-universe score evaluation" >> "$LOG"
+if run_research_step python scripts/evaluate_recommend_score_labels.py >> "$LOG" 2>&1; then
+    :
+else
+    record_critical_failure "$?" "full-universe score evaluation"
+fi
 
 echo "[4/5] train_recommendation_meta (shadow-gated)" >> "$LOG"
-if python scripts/train_recommendation_meta.py >> "$LOG" 2>&1; then
+if run_research_step python scripts/train_recommendation_meta.py >> "$LOG" 2>&1; then
     :
 else
     record_critical_failure "$?" "recommendation meta train"
 fi
 
 echo "[3b/4] policy_competition (model + send-policy forward audit)" >> "$LOG"
-if python -m ops.policy_competition >> "$LOG" 2>&1; then
+if run_research_step python -m ops.policy_competition >> "$LOG" 2>&1; then
     :
 else
     record_critical_failure "$?" "policy_competition"
@@ -217,13 +228,13 @@ fi
 
 echo "[5/5] idea_validation_report" >> "$LOG"
 IDEA_REPORT_OK=0
-if python scripts/idea_validation_report.py >> "$LOG" 2>&1; then
+if run_research_step python scripts/idea_validation_report.py >> "$LOG" 2>&1; then
     IDEA_REPORT_OK=1
 else
     record_critical_failure "$?" "idea validation report"
 fi
 if [ "$IDEA_REPORT_OK" -eq 1 ]; then
-    if python scripts/build_idea_validation_html.py >> "$LOG" 2>&1; then
+    if run_research_step python scripts/build_idea_validation_html.py >> "$LOG" 2>&1; then
         :
     else
         record_critical_failure "$?" "idea validation HTML"

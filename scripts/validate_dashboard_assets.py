@@ -37,6 +37,7 @@ from ops.champion_selector import (  # noqa: E402
     ChampionStateError,
     load_champion_state_artifact,
 )
+from ops.dashboard_current import validate_current_system  # noqa: E402
 from ops.policy_competition import (  # noqa: E402
     PolicyArtifactError,
     load_policy_artifact,
@@ -343,6 +344,15 @@ def _validate_summary(
         field="summary.generated_at_utc",
         now=now,
     )
+    # Older encrypted generations remain readable; new builders always emit
+    # this object. If present, unknown/private fields fail publication closed.
+    if "current_system" in payload:
+        try:
+            validate_current_system(
+                payload["current_system"], asof=expected_asof.isoformat(), now=now,
+            )
+        except (ValueError, TypeError, KeyError) as exc:
+            raise DashboardAssetError("summary.current_system invalid") from exc
     channels = _require_object(payload, "channels", context="summary")
     if set(channels) != {"distribution", "preopen", "recommend"}:
         raise DashboardAssetError("summary.channels schema mismatch")

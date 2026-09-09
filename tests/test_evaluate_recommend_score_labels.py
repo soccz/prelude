@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import argparse
+import copy
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 import scripts.evaluate_recommend_score_labels as evaluator
@@ -12,7 +14,11 @@ from signals.recommend_score_labels import (
     LABEL_SCHEMA_VERSION,
     SCHEDULED_REPLAY_PROVENANCE_COHORT,
     _artifact_digest,
+    label_recommend_snapshot,
+    load_label_artifact,
 )
+from ledger.path_quality import PathAssessment
+from signals.recommend_snapshot import get_or_create_recommend_snapshot
 
 
 def _row(date_index: int, rank: int, *, features: bool = True) -> dict:
@@ -489,3 +495,287 @@ def test_path_quality_summary_and_complete_only_cohort(tmp_path):
         channel["cohorts"]["all_scores"]["n_rows"]
         == complete_only["n_rows"] + 40
     )
+
+
+def _channel_rows(*, days: int = 1, n_rows: int = 20) -> list[dict]:
+    return [
+        {**_row(day, rank), "_date": f"2026-07-{day + 1:02d}",
+         "_provenance_cohort": FORWARD_PROVENANCE_COHORT}
+        for day in range(days) for rank in range(1, n_rows + 1)
+    ]
+
+
+def _halt(row: dict) -> None:
+    row["label_status"] = "halted_no_observations"
+    row["path_quality"] = "halted_no_observations"
+    row["path_complete"] = False
+    for field in (
+        "up10", "dn5", "mfe", "mae", "eod_return", "eod_return_net",
+        "net_return", "tp5_sl3_first_passage", "tp5_sl3_return_net",
+    ):
+        if field in row:
+            row[field] = None
+
+
+def _evaluate_rows(rows: list[dict], *, min_days: int = 1) -> dict:
+    return evaluator._evaluate_channel(
+        rows, top_ns=(3,), n_boot=50, seed=42, min_rows=5, min_days=min_days
+    )
+
+
+FAMILIES = (
+    "top_n_vs_full_universe", "liquidity_matched_baseline",
+    "within_volatility_band_lift",
+)
+
+
+@pytest.mark.parametrize("rank", [1, 2, 3])
+def test_halted_top_pick_is_never_replaced_with_rank_four(rank):
+    rows = _channel_rows()
+    _halt(rows[rank - 1])
+    channel = _evaluate_rows(rows)
+    for family in FAMILIES:
+        result = channel[family]["3"]
+        assert result["status"] == "unavailable"
+        assert result["metrics"] is None
+        audit = result["selection_audit"][0]
+        assert [item["rank"] for item in audit["selected"]] == [1, 2, 3]
+        assert audit["unobserved_selected"] == [{
+            "coin": f"KRW-T{rank:02d}",
+            "label_status": "halted_no_observations",
+        }]
+        assert "selected_outcome_unavailable" in audit["evaluation_reasons"]
+    assert channel["n_rows"] == 19
+    assert channel["recorded_n_rows"] == 20
+    delivered = channel["cohorts"]["delivered"]
+    assert delivered["n_rows"] == 2
+    assert delivered["outcome_coverage"]["expected_rows"] == 3
+    assert delivered["outcome_coverage"]["observed_rows"] == 2
+    assert delivered["outcome_coverage"]["unobserved_rows"] == 1
+    assert delivered["outcome_coverage"]["unobserved_fraction"] == pytest.approx(1 / 3)
+
+
+def test_halted_nearest_control_is_not_rematched():
+    rows = _channel_rows()
+    _halt(rows[3])  # Rank 4 is the frozen nearest control for rank 1.
+    result = _evaluate_rows(rows)["liquidity_matched_baseline"]["3"]
+    audit = result["selection_audit"][0]
+    assert audit["baseline_groups"] == [["KRW-T04", "KRW-T05", "KRW-T06"]]
+    assert result["status"] == "unavailable"
+    assert audit["evaluation_reasons"] == ["baseline_outcome_unavailable"]
+    assert audit["unobserved_baseline"][0]["coin"] == "KRW-T04"
+    assert result["matched_pairs"] == 0
+
+
+def test_halted_unmatched_control_blocks_only_comparisons_that_need_it():
+    rows = _channel_rows()
+    _halt(rows[-1])
+    channel = _evaluate_rows(rows)
+    assert channel["liquidity_matched_baseline"]["3"]["status"] == "ok"
+    assert channel["top_n_vs_full_universe"]["3"]["status"] == "unavailable"
+    volatility = channel["within_volatility_band_lift"]["3"]
+    audit = volatility["selection_audit"][0]
+    assert "KRW-T20" in audit["baseline_groups"][1]
+    assert audit["evaluation_reasons"] == ["baseline_outcome_unavailable"]
+    assert volatility["status"] == "unavailable"
+
+
+def test_all_halted_date_retains_raw_denominators_and_empty_observations():
+    rows = _channel_rows()
+    for row in rows:
+        _halt(row)
+    channel = _evaluate_rows(rows)
+    assert channel["recorded_n_rows"] == 20
+    assert channel["recorded_n_dates"] == 1
+    assert channel["n_rows"] == channel["n_dates"] == 0
+    assert channel["outcome_coverage"]["unobserved_fraction"] == 1.0
+    assert channel["return_basis"]["field"] is None
+    assert channel["cohorts"]["all_scores"]["heads"]["p_up10"]["status"] == "insufficient"
+    for family in FAMILIES:
+        result = channel[family]["3"]
+        assert result["coverage"]["recorded_dates"] == 1
+        assert result["coverage"]["planned_dates"] == 1
+        assert result["coverage"]["comparable_dates"] == 0
+        assert result["n_days"] == 0
+        assert result["metrics"] is None
+
+
+def test_plans_are_outcome_blind_shuffle_stable_and_input_is_immutable():
+    rows = _channel_rows(days=3)
+    original = copy.deepcopy(rows)
+    plan = evaluator._build_comparison_plans(pd.DataFrame(rows), (3, 5))
+    changed = copy.deepcopy(rows)
+    for row in changed:
+        _halt(row)
+        row["up10"] = False
+        row["dn5"] = True
+        row["eod_return"] = -0.99
+    changed.reverse()
+    assert evaluator._build_comparison_plans(pd.DataFrame(changed), (3, 5)) == plan
+    first = _evaluate_rows(rows)
+    assert rows == original
+    assert _evaluate_rows(list(reversed(rows))) == first
+
+
+@pytest.mark.parametrize("missing_rank", [1, 4])
+@pytest.mark.parametrize("family", FAMILIES)
+def test_missing_metric_never_averages_only_remaining_members(family, missing_rank):
+    rows = _channel_rows()
+    rows[missing_rank - 1]["tp5_sl3_return_net"] = None
+    result = _evaluate_rows(rows)[family]["3"]
+    metric = result["metrics"]["first_passage_net_mean"]
+    assert metric["selected_day_equal"] is None
+    assert metric["baseline_day_equal"] is None
+    assert metric["coverage"]["comparable_dates"] == 0
+    assert metric["coverage"]["unavailable_dates"] == 1
+    assert result["metrics"]["up10_rate"]["selected_day_equal"] == 1.0
+    assert result["selection_audit"][0]["evaluation_status"] == "comparable"
+    assert "first_passage_net_mean" in result["selection_audit"][0]["unavailable_metrics"]
+
+
+def test_metric_missing_date_is_paired_excluded_not_cross_date_averaged():
+    rows = _channel_rows(days=2)
+    rows[0]["tp5_sl3_return_net"] = None
+    for row in rows[20:]:
+        row["tp5_sl3_return_net"] = 0.0123
+    result = _evaluate_rows(rows, min_days=2)["top_n_vs_full_universe"]["3"]
+    metric = result["metrics"]["first_passage_net_mean"]
+    assert metric["selected_day_equal"] == pytest.approx(0.0123)
+    assert metric["baseline_day_equal"] == pytest.approx(0.0123)
+    assert metric["coverage"]["comparable_dates"] == 1
+    delta = metric["difference_selected_minus_baseline"]
+    assert delta["ci95"] is None
+    assert delta["n_days"] == 1
+
+
+def test_halt_does_not_downgrade_observed_net_basis_to_gross():
+    rows = _channel_rows()
+    for row in rows:
+        row["eod_return_net"] = row["eod_return"] - 0.0015
+    _halt(rows[-1])
+    channel = _evaluate_rows(rows)
+    assert channel["return_basis"]["field"] == "eod_return_net"
+    assert channel["return_basis"]["cost_adjustment"] == "none_already_net"
+    metric = channel["liquidity_matched_baseline"]["3"]["metrics"]["return_mean"]
+    assert metric["selected_day_equal"] == pytest.approx(0.0185)
+
+
+def test_delivery_fields_absent_are_unknown_not_zero_expected_picks():
+    rows = _channel_rows()
+    for row in rows:
+        row.pop("delivery_ok")
+    delivered = _evaluate_rows(rows)["cohorts"]["delivered"]
+    assert delivered["status"] == "unavailable"
+    assert delivered["outcome_coverage"]["expected_rows"] is None
+    assert delivered["outcome_coverage"]["unobserved_fraction"] is None
+
+
+def test_version_diagnostics_do_not_filter_or_create_approval():
+    rows = _channel_rows(days=2)
+    for index, row in enumerate(rows):
+        row["_model_identity"] = {
+            "model_id": "r1", "model_version": "v1" if index < 20 else "v2",
+            "rule_version": "r1-rule", "score_source_sha256": "a" * 64,
+        }
+    channel = _evaluate_rows(rows)
+    versions = channel["model_versions"]
+    assert versions["mixed_recorded_identities"] is True
+    assert versions["has_unknown_identity_fields"] is False
+    assert [group["recorded_rows"] for group in versions["groups"]] == [20, 20]
+    assert channel["n_rows"] == 40
+    assert "not a fresh-holdout or promotion" in versions["note"]
+
+
+def test_normal_labeled_comparisons_match_fixed_manual_groups():
+    rows = _channel_rows()
+    channel = _evaluate_rows(rows)
+    expected_groups = {
+        FAMILIES[0]: [list(range(1, 21))],
+        FAMILIES[1]: [[4, 5, 6]],
+        FAMILIES[2]: [[4, 7, 10, 13, 16, 19], [5, 8, 11, 14, 17, 20], [6, 9, 12, 15, 18]],
+    }
+    def mean(values):
+        return sum(values) / len(values)
+    for family, groups in expected_groups.items():
+        result = channel[family]["3"]
+        assert result["selection_audit"][0]["baseline_groups"] == [
+            [f"KRW-T{rank:02d}" for rank in group] for group in groups
+        ]
+        expected = mean([mean([float(rows[rank - 1]["up10"]) for rank in group]) for group in groups])
+        assert result["metrics"]["up10_rate"]["baseline_day_equal"] == pytest.approx(expected)
+        assert result["metrics"]["up10_rate"]["selected_day_equal"] == 1.0
+
+
+def _modern_halted_artifact(tmp_path: Path, *, all_halted: bool) -> Path:
+    """Bound synthetic snapshot/label; injected scorers and paths, no DB or HTTP."""
+    def scorer(asof, *, slot, ranking, limit_markets):
+        candidates = []
+        for rank in range(1, 5):
+            candidates.append({
+                "coin": f"KRW-T{rank:02d}", "rank": rank, "score": 0.5,
+                "pump_prob": 0.02, "pump_prob_pct": "2.0%", "rr_ratio": 1.0,
+                "p_up5": 0.3, "p_up10": 0.1, "p_up20": 0.02,
+                "p_dn5": 0.1, "p_dn10": 0.03, "exp_downside": -0.02,
+                "dump_risk_flag": False, "entry_open": 100.0,
+                "sl": -0.03, "tp": 0.05, "btc_regime": "neutral",
+                "feature_values": {"f_log_qv": 10.0 + rank / 10},
+            })
+        return {
+            "asof": asof, "slot": slot, "ranking": ranking, "feature_date": asof,
+            "btc_regime": "neutral", "universe_n": 4,
+            "calibration_source": "bucket_score_pump20",
+            "rank_basis": "R1_riskreward(de-corr head)", "n_history_dates": 100,
+            "score_schema_version": "recommend_score.v2",
+            "rule_version": "r1_riskreward_v1", "model_random_seed": 42,
+            "feature_columns": ["f_log_qv"],
+            "training": {
+                "start": "2025-01-01", "end": "2026-07-18",
+                "cutoff_exclusive": "2026-07-19", "embargo_days": 5,
+                "rows": 1000, "dates": 100,
+            },
+            "universe": candidates, "top3": candidates[:3],
+        }
+    snapshot = get_or_create_recommend_snapshot(
+        "2026-07-24", slot="open", root=tmp_path / "snapshots", scorer=scorer
+    )
+    def assessor(coin, start_at, **_kwargs):
+        halted = all_halted or coin == "KRW-T01"
+        return PathAssessment(
+            bars=[] if halted else [(100.0, 101.0, 99.0, 100.0)] * 96,
+            timestamps=tuple(pd.date_range(pd.Timestamp(start_at).tz_localize(None), periods=96, freq="15min")),
+            path_complete=not halted,
+            path_quality="target_no_observations" if halted else "complete",
+            raw_bars=0 if halted else 96, expected_bars=96,
+            flat_filled_bars=0, benchmark_bars=96,
+        )
+    result = label_recommend_snapshot(
+        snapshot["snapshot_path"], output_root=tmp_path / "labels",
+        receipt_root=tmp_path / "receipts", db_path=tmp_path / "never-created.db",
+        now="2026-07-26 10:00:00", assessor=assessor, halt_prober=lambda _coin: True,
+    )
+    assert not (tmp_path / "never-created.db").exists()
+    path = Path(result["artifact_path"])
+    load_label_artifact(path)
+    return path
+
+
+@pytest.mark.parametrize("all_halted", [False, True])
+def test_loader_retains_validated_modern_halt_rows_and_all_halt_artifact(tmp_path, all_halted):
+    path = _modern_halted_artifact(tmp_path, all_halted=all_halted)
+    before = path.read_bytes()
+    channels, audit = evaluator._load_complete_rows(
+        tmp_path / "labels", through_date=evaluator.calendar_date(2026, 7, 25)
+    )
+    assert len(channels[("open", "R1")]) == 4
+    assert audit["complete_used"] == 1
+    assert audit["used"][0]["recorded_rows"] == 4
+    assert audit["used"][0]["rows"] == (0 if all_halted else 3)
+    assert audit["used"][0]["unobserved_rows"] == (4 if all_halted else 1)
+    report = evaluator.evaluate_label_root(
+        tmp_path / "labels", output_path=tmp_path / "new-report.json",
+        top_ns=(3,), n_boot=50, min_rows=5, min_days=1,
+        through_date="2026-07-25",
+    )
+    assert report["schema"] == "recommend_score_label_evaluation.v3"
+    assert report["channels"]["open:R1"]["input_recorded_n_rows"] == 4
+    assert path.read_bytes() == before

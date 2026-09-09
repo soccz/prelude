@@ -9,7 +9,8 @@ dispatcher 는 선정된 챔피언의 predict 인터페이스(여기 명시)를 
     - 셀렉터/발송/대시보드 배선은 ops-steward 영역 (이 파일은 그쪽이 읽는 카탈로그).
 
 확장 규율 (새 가설 추가 = dict 한 개 추가):
-    MODELS 리스트에 ModelSpec(...) 하나를 append 하면 셀렉터가 자동으로 후보에 포함한다.
+    MODELS 리스트에 ModelSpec(...) 하나를 append 하면 관찰 대상으로 등록된다.
+    기본값은 challenger_only=True이며, 실전 승격 자격은 명시적으로 허용해야 한다.
     새 모델이 갖춰야 할 것:
       1) forward CLOSED ledger CSV (realized 수익률/하방 컬럼 포함)
       2) slots (어느 시점에 발송 가능한가: preopen/open)
@@ -71,7 +72,8 @@ class ModelSpec:
         forward 게이트(n>=30) 미달 시 기본 챔피언으로 쓸 백테스트-최선 모델인가.
         게이트 통과 모델이 하나도 없으면 이 모델이 항상 발송(SHADOW)된다.
     challenger_only : bool
-        True 면 데이터가 충분해도 챔피언 승격 금지(챌린저로만 관찰). 데이터 적은 신모델용.
+        기본 True: 데이터가 충분해도 챔피언 승격 금지(챌린저로만 관찰).
+        False의 명시적 설정은 필요한 승인·검증을 대신하지 않는다.
     hypothesis : str
         "왜 이게 오를/안전한 신호인가" 한 줄 가설 (quant-evaluator 검증 대상).
     notes : str
@@ -84,7 +86,7 @@ class ModelSpec:
     metric: MetricSource
     predict_ref: str
     is_backtest_fallback: bool = False
-    challenger_only: bool = False
+    challenger_only: bool = True
     hypothesis: str = ""
     notes: str = ""
 

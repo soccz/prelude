@@ -1,0 +1,29 @@
+[Unit]
+Description=prelude public trade/orderbook record-only capture (R1-independent)
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor=/home/soccz/22tb/prelude
+OnFailure=prelude-failure-alert@%n.service
+
+[Service]
+Type=oneshot
+User=soccz
+UMask=0077
+NoNewPrivileges=true
+WorkingDirectory=/home/soccz/22tb/prelude
+Environment=TZ=Asia/Seoul PYTHONDONTWRITEBYTECODE=1 PRELUDE_FORBID_TELEGRAM=1
+# Initial budgets: observe raw volume/drops before changing these limits.
+# The collector holds its own capture-root lock, never the R1 pipeline lock.
+ExecStart=/home/soccz/22tb/prelude/venv/bin/python -B /home/soccz/22tb/prelude/scripts/capture_recommend_microstructure.py --orderbook-depth 1 --max-wait-seconds 2400 --required-warmup-seconds 600 --max-raw-bytes-per-channel 536870912
+Restart=no
+Nice=15
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+CPUQuota=50%
+MemoryMax=2G
+# RuntimeMaxSec does not bound a oneshot's start phase; use this deadline.
+TimeoutStartSec=2700
+TimeoutStopSec=90
+KillMode=control-group
+StandardOutput=journal
+StandardError=journal

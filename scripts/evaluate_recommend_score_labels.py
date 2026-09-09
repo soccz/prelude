@@ -16,7 +16,7 @@
 
 수익률 규율:
 
-* 한 channel의 모든 행에 ``net_return`` 또는 ``eod_return_net``이 있으면 그대로
+* 한 channel의 관측된 labeled 행 전체에 ``net_return`` 또는 ``eod_return_net``이 있으면 그대로
   사용하며 비용을 다시 빼지 않는다.
 * 그렇지 않으면 ``eod_return``을 gross 진단값 그대로 사용한다. 이 평가기는 알림별 실제
   체결비용을 임의 가정해 차감하지 않으며 보고서에 gross임을 명시한다.
@@ -54,7 +54,7 @@ from signals.recommend_score_labels import (  # noqa: E402
 DEFAULT_INPUT_ROOT = _ROOT / "output" / "recommend_score_labels"
 DEFAULT_OUTPUT = _ROOT / "output" / "recommend_score_label_evaluation.json"
 
-REPORT_SCHEMA = "recommend_score_label_evaluation.v2"
+REPORT_SCHEMA = "recommend_score_label_evaluation.v3"
 DEFAULT_TOP_NS = (3, 5, 10)
 DEFAULT_BOOTSTRAPS = 1000
 MAX_BOOTSTRAPS = 100_000
@@ -523,8 +523,14 @@ def _daily_comparison_report(
         selected_col = f"selected_{metric}"
         baseline_col = f"baseline_{metric}"
         valid = daily[[selected_col, baseline_col]].dropna()
+        metric_coverage = {
+            "comparable_dates": int(len(valid)),
+            "unavailable_dates": int(len(daily) - len(valid)),
+            "rule": "both_sides_complete_or_neither_side_used",
+        }
         if valid.empty:
             reports[metric] = {
+                "coverage": metric_coverage,
                 "selected_day_equal": None,
                 "baseline_day_equal": None,
                 "difference_selected_minus_baseline": _metric_null(
@@ -534,6 +540,7 @@ def _daily_comparison_report(
             continue
         difference = valid[selected_col] - valid[baseline_col]
         reports[metric] = {
+            "coverage": metric_coverage,
             "selected_day_equal": float(valid[selected_col].mean()),
             "baseline_day_equal": float(valid[baseline_col].mean()),
             "difference_selected_minus_baseline": _mean_and_cluster_ci(
@@ -554,190 +561,261 @@ def _daily_comparison_report(
     }
 
 
-def _comparison_record(
+def _selection_plan(
     date: str,
     selected: pd.DataFrame,
-    baseline: pd.DataFrame,
+    baseline_groups: list[list[str]],
+    *,
+    reason: str | None = None,
+    selected_bands: list[str] | None = None,
 ) -> dict:
-    record: dict[str, Any] = {
-        "_date": date,
-        "selected_n": int(len(selected)),
-        "baseline_n": int(len(baseline)),
+    """A predictor-only plan. Never put an outcome or label status here."""
+    return {
+        "date": str(date),
+        "selected": [
+            {"coin": str(row.coin), "rank": int(row.rank)}
+            for row in selected[["coin", "rank"]].itertuples(index=False)
+        ],
+        "baseline_groups": baseline_groups,
+        "selected_bands": selected_bands or [],
+        "plan_status": "unavailable" if reason else "planned",
+        "plan_reason": reason,
     }
-    for output_name, column in COMPARISON_METRICS.items():
-        record[f"selected_{output_name}"] = _row_metric_mean(selected, column)
-        record[f"baseline_{output_name}"] = _row_metric_mean(baseline, column)
-    return record
 
 
-def _top_n_vs_universe(
-    frame: pd.DataFrame,
-    top_n: int,
-    *,
-    n_boot: int,
-    seed: int,
-    min_days: int,
-) -> dict:
-    records = []
-    for date, day in frame.groupby("_date", sort=True):
-        selected = day.sort_values(["rank", "coin"]).head(top_n)
-        if selected.empty:
-            continue
-        records.append(_comparison_record(str(date), selected, day))
-    return _daily_comparison_report(
-        records,
-        baseline_name="same_day_full_universe_including_top_n",
-        n_boot=n_boot,
-        seed=seed,
-        min_days=min_days,
-        extra={"top_n": top_n},
+def _build_comparison_plans(frame: pd.DataFrame, top_ns: tuple[int, ...]) -> dict:
+    """Freeze every comparison before making any outcome-dependent decision.
+
+    The projection is deliberate: changing labels, path quality or returns
+    cannot alter top-N membership, feature coverage, matching or ATR bands.
+    """
+    work = frame.reindex(
+        columns=["_date", "coin", "rank", "feature_values"]
+    ).copy()
+    work = work.sort_values(["_date", "rank", "coin"]).reset_index(drop=True)
+    liquidity, liquidity_coverage = _choose_feature(work, LIQUIDITY_FEATURES)
+    volatility, volatility_coverage = _choose_feature(work, VOLATILITY_FEATURES)
+    work["_match_feature"] = (
+        _extract_feature(work, liquidity) if liquidity else np.nan
     )
-
-
-def _liquidity_matched(
-    frame: pd.DataFrame,
-    top_n: int,
-    *,
-    n_boot: int,
-    seed: int,
-    min_days: int,
-) -> dict:
-    feature, coverage = _choose_feature(frame, LIQUIDITY_FEATURES)
-    if feature is None:
-        return {
-            "status": "unavailable",
-            "reason": "liquidity_feature_unavailable_or_coverage_below_80pct",
-            "feature": None,
-            "feature_coverage": coverage,
-            "top_n": top_n,
-            "metrics": None,
-        }
-    work = frame.copy()
-    work["_match_feature"] = _extract_feature(work, feature)
-    records = []
-    matched_pairs = 0
-    skipped_dates = 0
-    for date, day in work.groupby("_date", sort=True):
-        ordered = day.sort_values(["rank", "coin"])
-        selected = ordered.head(top_n)
-        controls = ordered.iloc[top_n:].dropna(subset=["_match_feature"])
-        if (
-            selected["_match_feature"].isna().any()
-            or len(controls) < len(selected)
-            or selected.empty
-        ):
-            skipped_dates += 1
-            continue
-        available = set(controls.index)
-        matched_indices = []
-        for _, pick in selected.iterrows():
-            candidates = controls.loc[list(available)].copy()
-            candidates["_distance"] = (
-                candidates["_match_feature"] - pick["_match_feature"]
-            ).abs()
-            candidates = candidates.sort_values(
-                ["_distance", "coin"], kind="mergesort"
-            )
-            chosen = candidates.index[0]
-            matched_indices.append(chosen)
-            available.remove(chosen)
-        matched = controls.loc[matched_indices]
-        matched_pairs += len(matched)
-        records.append(_comparison_record(str(date), selected, matched))
-    return _daily_comparison_report(
-        records,
-        baseline_name="deterministic_nearest_liquidity_non_top_controls",
-        n_boot=n_boot,
-        seed=seed + 200,
-        min_days=min_days,
-        extra={
-            "top_n": top_n,
-            "feature": feature,
-            "feature_coverage": coverage,
-            "matching": "absolute_distance_without_replacement_tie_by_coin",
-            "matched_pairs": matched_pairs,
-            "skipped_dates": skipped_dates,
-        },
+    work["_vol_feature"] = (
+        _extract_feature(work, volatility) if volatility else np.nan
     )
+    result = {
+        "top_n_vs_full_universe": {},
+        "liquidity_matched_baseline": {},
+        "within_volatility_band_lift": {},
+    }
+    for top_n in top_ns:
+        full_plans, liquidity_plans, volatility_plans = [], [], []
+        for date, day in work.groupby("_date", sort=True):
+            selected = day.head(top_n)
+            full_plans.append(_selection_plan(
+                date, selected, [day["coin"].astype(str).tolist()]
+            ))
+
+            controls = day.iloc[top_n:].dropna(subset=["_match_feature"])
+            reason = None
+            matched_coins = []
+            if liquidity is None:
+                reason = "liquidity_feature_unavailable_or_coverage_below_80pct"
+            elif selected["_match_feature"].isna().any():
+                reason = "selected_liquidity_feature_missing"
+            elif len(controls) < len(selected):
+                reason = "insufficient_liquidity_controls"
+            else:
+                available = set(controls.index)
+                for _, pick in selected.iterrows():
+                    candidates = controls.loc[sorted(available)].copy()
+                    candidates["_distance"] = (
+                        candidates["_match_feature"] - pick["_match_feature"]
+                    ).abs()
+                    candidates = candidates.sort_values(
+                        ["_distance", "coin"], kind="mergesort"
+                    )
+                    chosen = candidates.index[0]
+                    matched_coins.append(str(candidates.loc[chosen, "coin"]))
+                    available.remove(chosen)
+            liquidity_plans.append(_selection_plan(
+                date, selected, [matched_coins] if not reason else [],
+                reason=reason,
+            ))
+
+            valid = day.dropna(subset=["_vol_feature"]).sort_values(
+                ["_vol_feature", "coin"], kind="mergesort"
+            ).copy()
+            reason = None
+            groups, selected_bands = [], []
+            if volatility is None:
+                reason = "atr_feature_unavailable_or_coverage_below_80pct"
+            elif selected["_vol_feature"].isna().any():
+                reason = "selected_atr_feature_missing"
+            elif len(valid) < 6:
+                reason = "insufficient_atr_feature_rows"
+            else:
+                percentile = valid["_vol_feature"].rank(method="first", pct=True)
+                valid["_vol_band"] = np.minimum(
+                    np.ceil(percentile * 3).astype(int) - 1, 2
+                )
+                non_top = valid[~valid.index.isin(selected.index)]
+                for index in selected.index:
+                    band = int(valid.loc[index, "_vol_band"])
+                    pool = non_top[non_top["_vol_band"] == band]
+                    selected_bands.append(("low", "mid", "high")[band])
+                    if pool.empty:
+                        reason = "empty_atr_band_controls"
+                    groups.append(pool["coin"].astype(str).tolist())
+            volatility_plans.append(_selection_plan(
+                date, selected, groups, reason=reason,
+                selected_bands=selected_bands,
+            ))
+        result["top_n_vs_full_universe"][str(top_n)] = {
+            "plans": full_plans,
+            "baseline": "same_day_full_universe_including_top_n",
+            "seed": top_n,
+            "extra": {"top_n": top_n},
+        }
+        result["liquidity_matched_baseline"][str(top_n)] = {
+            "plans": liquidity_plans,
+            "baseline": "deterministic_nearest_liquidity_non_top_controls",
+            "seed": top_n + 200,
+            "extra": {
+                "top_n": top_n,
+                "feature": liquidity,
+                "feature_coverage": liquidity_coverage,
+                "matching": "absolute_distance_without_replacement_tie_by_coin",
+            },
+        }
+        result["within_volatility_band_lift"][str(top_n)] = {
+            "plans": volatility_plans,
+            "baseline": "same_day_non_top_controls_within_atr_tertile",
+            "seed": top_n + 400,
+            "extra": {
+                "top_n": top_n,
+                "feature": volatility,
+                "feature_coverage": volatility_coverage,
+                "bands": "same-day ATR tertiles",
+            },
+        }
+    return result
 
 
-def _within_volatility_band(
+def _evaluate_comparison_plan(
+    bundle: dict,
     frame: pd.DataFrame,
-    top_n: int,
     *,
     n_boot: int,
     seed: int,
     min_days: int,
 ) -> dict:
-    feature, coverage = _choose_feature(frame, VOLATILITY_FEATURES)
-    if feature is None:
-        return {
-            "status": "unavailable",
-            "reason": "atr_feature_unavailable_or_coverage_below_80pct",
-            "feature": None,
-            "feature_coverage": coverage,
-            "top_n": top_n,
-            "metrics": None,
+    """Join outcomes to frozen identities; missing members are never replaced."""
+    records, audits = [], []
+    days = {
+        str(date): day.set_index("coin", drop=False)
+        for date, day in frame.groupby("_date", sort=True)
+    }
+    for plan in bundle["plans"]:
+        audit = {
+            **plan,
+            "evaluation_status": "unavailable",
+            "evaluation_reasons": [],
+            "unobserved_selected": [],
+            "unobserved_baseline": [],
+            "unavailable_metrics": {},
         }
-    work = frame.copy()
-    work["_vol_feature"] = _extract_feature(work, feature)
-    records = []
-    skipped_dates = 0
-    selected_band_counts = {"low": 0, "mid": 0, "high": 0}
-    labels = {0: "low", 1: "mid", 2: "high"}
-    for date, day in work.groupby("_date", sort=True):
-        valid = day.dropna(subset=["_vol_feature"]).sort_values(
-            ["_vol_feature", "coin"], kind="mergesort"
-        ).copy()
-        selected = day.sort_values(["rank", "coin"]).head(top_n)
-        if selected.empty or selected["_vol_feature"].isna().any() or len(valid) < 6:
-            skipped_dates += 1
+        audits.append(audit)
+        if plan["plan_status"] != "planned":
+            audit["evaluation_reasons"] = [plan["plan_reason"]]
             continue
-        percentile = valid["_vol_feature"].rank(method="first", pct=True)
-        valid["_vol_band"] = np.minimum(
-            np.ceil(percentile * 3).astype(int) - 1, 2
-        )
-        selected = selected.join(valid[["_vol_band"]], how="left")
-        non_top = valid[~valid.index.isin(selected.index)]
-        baseline_rows = []
-        day_band_counts = {"low": 0, "mid": 0, "high": 0}
-        valid_day = True
-        for _, pick in selected.iterrows():
-            band = pick["_vol_band"]
-            controls = non_top[non_top["_vol_band"] == band]
-            if pd.isna(band) or controls.empty:
-                valid_day = False
-                break
-            day_band_counts[labels[int(band)]] += 1
-            baseline_rows.append({
-                output_name: _row_metric_mean(controls, column)
-                for output_name, column in COMPARISON_METRICS.items()
-            })
-        if not valid_day:
-            skipped_dates += 1
-            continue
-        for label, count in day_band_counts.items():
-            selected_band_counts[label] += count
-        baseline = pd.DataFrame({
-            column: [row[output_name] for row in baseline_rows]
-            for output_name, column in COMPARISON_METRICS.items()
+        day = days[plan["date"]]
+        selected_coins = [item["coin"] for item in plan["selected"]]
+        baseline_coins = sorted({
+            coin for group in plan["baseline_groups"] for coin in group
         })
-        records.append(_comparison_record(str(date), selected, baseline))
-    return _daily_comparison_report(
-        records,
-        baseline_name="same_day_non_top_controls_within_atr_tertile",
-        n_boot=n_boot,
-        seed=seed + 400,
-        min_days=min_days,
-        extra={
-            "top_n": top_n,
-            "feature": feature,
-            "feature_coverage": coverage,
-            "bands": "same-day ATR tertiles",
-            "selected_band_counts": selected_band_counts,
-            "skipped_dates": skipped_dates,
-        },
+        for role, coins in (
+            ("selected", selected_coins), ("baseline", baseline_coins)
+        ):
+            missing = [
+                {"coin": coin, "label_status": str(day.loc[coin, "label_status"])}
+                for coin in coins if day.loc[coin, "label_status"] != "labeled"
+            ]
+            audit[f"unobserved_{role}"] = missing
+            if missing:
+                audit["evaluation_reasons"].append(f"{role}_outcome_unavailable")
+        if audit["evaluation_reasons"]:
+            continue
+
+        audit["evaluation_status"] = "comparable"
+        record = {"_date": plan["date"]}
+        for metric, column in COMPARISON_METRICS.items():
+            # Check every required member BEFORE either mean. In particular,
+            # a legacy missing metric must not shrink one side via dropna().
+            values = pd.to_numeric(
+                day[column] if column in day
+                else pd.Series(np.nan, index=day.index),
+                errors="coerce",
+            )
+            missing = {}
+            for role, coins in (
+                ("selected", selected_coins), ("baseline", baseline_coins)
+            ):
+                absent = [
+                    coin for coin in coins if not np.isfinite(values.loc[coin])
+                ]
+                if absent:
+                    missing[role] = absent
+            if missing:
+                audit["unavailable_metrics"][metric] = missing
+                record[f"selected_{metric}"] = None
+                record[f"baseline_{metric}"] = None
+            else:
+                record[f"selected_{metric}"] = float(
+                    values.loc[selected_coins].mean()
+                )
+                record[f"baseline_{metric}"] = float(np.mean([
+                    values.loc[group].mean() for group in plan["baseline_groups"]
+                ]))
+        records.append(record)
+
+    reasons: dict[str, int] = {}
+    for audit in audits:
+        for reason in audit["evaluation_reasons"]:
+            reasons[reason] = reasons.get(reason, 0) + 1
+    comparable = [
+        audit for audit in audits if audit["evaluation_status"] == "comparable"
+    ]
+    coverage = {
+        "recorded_dates": len(audits),
+        "planned_dates": sum(p["plan_status"] == "planned" for p in audits),
+        "comparable_dates": len(comparable),
+        "unavailable_dates": len(audits) - len(comparable),
+        "reasons": reasons,
+        "rule": "fixed_members_complete_labels_before_any_mean_no_replacement",
+    }
+    extra = {
+        **bundle["extra"], "coverage": coverage, "selection_audit": audits,
+    }
+    if "matching" in extra:
+        extra["matched_pairs"] = sum(len(p["selected"]) for p in comparable)
+        extra["skipped_dates"] = coverage["unavailable_dates"]
+    if "bands" in extra:
+        extra["selected_band_counts"] = {
+            band: sum(p["selected_bands"].count(band) for p in comparable)
+            for band in ("low", "mid", "high")
+        }
+        extra["skipped_dates"] = coverage["unavailable_dates"]
+    result = _daily_comparison_report(
+        records, baseline_name=bundle["baseline"], n_boot=n_boot,
+        seed=seed + bundle["seed"], min_days=min_days, extra=extra,
     )
+    # Preserve the useful legacy explanation when no feature can be selected.
+    if not records and bundle["extra"].get("feature", True) is None:
+        result["reason"] = (
+            "liquidity_feature_unavailable_or_coverage_below_80pct"
+            if "matching" in extra
+            else "atr_feature_unavailable_or_coverage_below_80pct"
+        )
+    return result
 
 
 def _delivery_cohort(frame: pd.DataFrame) -> tuple[pd.DataFrame | None, dict]:
@@ -763,6 +841,95 @@ def _delivery_cohort(frame: pd.DataFrame) -> tuple[pd.DataFrame | None, dict]:
         "status": "unavailable",
         "selection": None,
         "reason": "delivery_fields_absent_in_label_artifacts",
+    }
+
+
+def _outcome_coverage(frame: pd.DataFrame) -> dict:
+    observed = frame[frame["label_status"] == "labeled"]
+    daily = []
+    for date, day in frame.groupby("_date", sort=True):
+        missing = day[day["label_status"] != "labeled"].sort_values(
+            ["rank", "coin"]
+        )
+        daily.append({
+            "date": str(date),
+            "expected_rows": int(len(day)),
+            "observed_rows": int(len(day) - len(missing)),
+            "unobserved": [
+                {"coin": str(row.coin), "rank": int(row.rank),
+                 "label_status": str(row.label_status)}
+                for row in missing.itertuples(index=False)
+            ],
+        })
+    return {
+        "status": "available",
+        "expected_rows": int(len(frame)),
+        "observed_rows": int(len(observed)),
+        "unobserved_rows": int(len(frame) - len(observed)),
+        "unobserved_fraction": (
+            float(1 - len(observed) / len(frame)) if len(frame) else None
+        ),
+        "recorded_dates": int(frame["_date"].nunique()),
+        "observed_dates": int(observed["_date"].nunique()),
+        "label_status_counts": {
+            str(status): int(count)
+            for status, count in frame["label_status"].value_counts().items()
+        },
+        "daily": daily,
+    }
+
+
+def _delivered_outcomes(frame: pd.DataFrame) -> tuple[pd.DataFrame | None, dict]:
+    expected, availability = _delivery_cohort(frame)
+    if expected is None:
+        return None, {
+            **availability,
+            "outcome_coverage": {
+                "status": "unavailable",
+                "reason": availability["reason"],
+                "expected_rows": None,
+                "observed_rows": None,
+                "unobserved_rows": None,
+                "unobserved_fraction": None,
+            },
+        }
+    observed = expected[expected["label_status"] == "labeled"].copy()
+    return observed, {
+        **availability,
+        "outcome_coverage": {
+            **_outcome_coverage(expected),
+            "meaning": (
+                "missing outcomes among recorded delivered picks; "
+                "not a delivery failure rate"
+            ),
+        },
+    }
+
+
+def _model_version_summary(frame: pd.DataFrame) -> dict:
+    fields = ("model_id", "model_version", "rule_version", "score_source_sha256")
+    versions: dict[tuple[str, ...], list[dict]] = {}
+    for row in frame.to_dict("records"):
+        identity = row.get("_model_identity") or {}
+        key = tuple(str(identity.get(field) or "unknown") for field in fields)
+        versions.setdefault(key, []).append(row)
+    groups = []
+    for key, rows in sorted(versions.items()):
+        dates = sorted({str(row["_date"]) for row in rows})
+        groups.append({
+            **dict(zip(fields, key)),
+            "recorded_rows": len(rows),
+            "observed_rows": sum(row["label_status"] == "labeled" for row in rows),
+            "n_dates": len(dates), "dates": dates,
+        })
+    return {
+        "groups": groups,
+        "mixed_recorded_identities": len(groups) > 1,
+        "has_unknown_identity_fields": any("unknown" in key for key in versions),
+        "note": (
+            "diagnostic only: channel statistics retain mixed recorded versions; "
+            "these counts are not a fresh-holdout or promotion eligibility claim"
+        ),
     }
 
 
@@ -1020,16 +1187,15 @@ def _load_complete_rows(
     used: list[dict[str, Any]] = []
     for (slot, ranking, asof), (path, document) in sorted(accepted.items()):
         all_rows = document.get("rows") or []
-        # 거래정지 구조적 종결(halted_no_observations)은 평가 표본이 아니다 —
-        # 관측 자체가 불가능했던 행이므로 제외하고, 나머지는 전부 labeled 여야 한다.
-        rows = [
-            row
+        # Retain structurally unobserved candidates for selection and coverage.
+        # A complete artifact may contain ONLY halted rows; it is still evidence.
+        if not all_rows or any(
+            row.get("label_status") not in {"labeled", "halted_no_observations"}
             for row in all_rows
-            if row.get("label_status") != "halted_no_observations"
-        ]
-        if not rows or any(row.get("label_status") != "labeled" for row in rows):
+        ):
             skipped.append({"path": str(path), "reason": "complete_without_all_labeled_rows"})
             continue
+        observed_rows = sum(row["label_status"] == "labeled" for row in all_rows)
         try:
             provenance, provenance_source = _resolve_artifact_provenance(document)
         except ValueError as exc:
@@ -1038,12 +1204,21 @@ def _load_complete_rows(
                 "reason": f"invalid_provenance:{exc}",
             })
             continue
-        for row in rows:
+        model_identity = {
+            "model_id": (document.get("snapshot_model") or {}).get("id"),
+            "model_version": (document.get("snapshot_model") or {}).get("version"),
+            "rule_version": (document.get("snapshot_rule") or {}).get("version"),
+            "score_source_sha256": (document.get("snapshot_code") or {}).get(
+                "score_source_sha256"
+            ),
+        }
+        for row in all_rows:
             channels.setdefault((slot, ranking), []).append({
                 **row,
                 "_date": asof,
                 "_artifact": str(path),
                 "_provenance_cohort": provenance,
+                "_model_identity": model_identity,
             })
         used.append({
             "path": str(path),
@@ -1068,16 +1243,22 @@ def _load_complete_rows(
             "slot": slot,
             "ranking": ranking,
             "asof": asof,
-            "rows": len(rows),
+            "rows": observed_rows,
+            "recorded_rows": len(all_rows),
+            "unobserved_rows": len(all_rows) - observed_rows,
             "provenance_cohort": provenance,
             "provenance_source": provenance_source,
         })
     provenance_artifacts: dict[str, int] = {}
     provenance_rows: dict[str, int] = {}
+    provenance_recorded_rows: dict[str, int] = {}
     for item in used:
         cohort = str(item["provenance_cohort"])
         provenance_artifacts[cohort] = provenance_artifacts.get(cohort, 0) + 1
         provenance_rows[cohort] = provenance_rows.get(cohort, 0) + int(item["rows"])
+        provenance_recorded_rows[cohort] = (
+            provenance_recorded_rows.get(cohort, 0) + int(item["recorded_rows"])
+        )
     return channels, {
         "found": len(artifacts),
         "complete_used": len(used),
@@ -1085,6 +1266,7 @@ def _load_complete_rows(
         "skipped": skipped,
         "provenance_artifacts": provenance_artifacts,
         "provenance_rows": provenance_rows,
+        "provenance_recorded_rows": provenance_recorded_rows,
     }
 
 
@@ -1097,11 +1279,13 @@ def _excluded_provenance_report(
     min_rows: int,
     min_days: int,
 ) -> dict:
-    frame = _with_outcome_audit_columns(frame)
-    audit_return, return_basis = _return_basis(frame)
-    frame["_audit_return"] = audit_return
-    delivered, delivery_availability = _delivery_cohort(frame)
-    status = "available" if len(frame) else "empty"
+    observed = frame[frame["label_status"] == "labeled"].copy()
+    observed = _with_outcome_audit_columns(observed)
+    observed["_audit_return"], return_basis = _return_basis(observed)
+    delivered, delivery_availability = _delivered_outcomes(frame)
+    if delivered is not None:
+        delivered = observed.loc[delivered.index].copy()
+    status = "available" if len(observed) else "empty"
     return {
         "included_in_default_forward_statistics": False,
         "reason": (
@@ -1109,16 +1293,21 @@ def _excluded_provenance_report(
             if cohort == SCHEDULED_REPLAY_PROVENANCE_COHORT
             else "provenance is not verified as an observed forward decision"
         ),
-        "n_rows": int(len(frame)),
-        "n_dates": int(frame["_date"].nunique()) if len(frame) else 0,
+        "n_rows": int(len(observed)),
+        "n_dates": int(observed["_date"].nunique()),
+        "recorded_n_rows": int(len(frame)),
+        "recorded_n_dates": int(frame["_date"].nunique()),
+        "outcome_coverage": _outcome_coverage(frame),
+        "model_versions": _model_version_summary(frame),
         "return_basis": return_basis,
         "cohorts": {
             "all_scores": _cohort_report(
-                frame,
+                observed,
                 availability={
                     "status": status,
                     "selection": f"provenance_cohort={cohort}:all_recorded_scores",
-                    "reason": None if len(frame) else "no_rows",
+                    "reason": None if len(observed) else "no_rows",
+                    "outcome_coverage": _outcome_coverage(frame),
                 },
                 n_boot=n_boot,
                 seed=seed,
@@ -1146,31 +1335,43 @@ def _evaluate_channel(
     min_rows: int,
     min_days: int,
 ) -> dict:
-    input_frame = _with_outcome_audit_columns(pd.DataFrame(rows))
-    input_frame["rank"] = pd.to_numeric(input_frame.get("rank"), errors="coerce")
-    frame = input_frame[
-        input_frame["_provenance_cohort"] == FORWARD_PROVENANCE_COHORT
+    raw = pd.DataFrame(rows)
+    raw["rank"] = pd.to_numeric(raw.get("rank"), errors="coerce")
+    raw = raw.sort_values(["_date", "rank", "coin"]).reset_index(drop=True)
+    recorded = raw[
+        raw["_provenance_cohort"] == FORWARD_PROVENANCE_COHORT
     ].copy()
+
+    # All three plan families are frozen on raw candidates BEFORE observing
+    # label status, returns, delivery outcomes or path-quality subsets.
+    plans = _build_comparison_plans(recorded, top_ns)
+    recorded = _with_outcome_audit_columns(recorded)
+    frame = recorded[recorded["label_status"] == "labeled"].copy()
     frame["_audit_return"], return_basis = _return_basis(frame)
+    recorded["_audit_return"] = frame["_audit_return"]
+    delivered, delivery_availability = _delivered_outcomes(recorded)
+    if delivered is not None:
+        delivered = frame.loc[delivered.index].copy()
+    complete_path, path_quality_availability = _path_quality_cohort(frame)
     all_availability = {
         "status": "available" if len(frame) else "empty",
         "selection": "all_recorded_universe_scores",
         "reason": None if len(frame) else "no_forward_observed_rows",
+        "outcome_coverage": _outcome_coverage(recorded),
     }
-    delivered, delivery_availability = _delivery_cohort(frame)
-    complete_path, path_quality_availability = _path_quality_cohort(frame)
-    provenance_counts = {
-        cohort: {
-            "n_rows": int(len(group)),
-            "n_dates": int(group["_date"].nunique()),
+
+    provenance_counts = {}
+    for cohort, group in raw.groupby("_provenance_cohort", sort=True, dropna=False):
+        observed = group[group["label_status"] == "labeled"]
+        provenance_counts[cohort] = {
+            "n_rows": int(len(observed)),
+            "n_dates": int(observed["_date"].nunique()),
+            "recorded_n_rows": int(len(group)),
+            "recorded_n_dates": int(group["_date"].nunique()),
             "included_in_default_forward_statistics": (
                 cohort == FORWARD_PROVENANCE_COHORT
             ),
         }
-        for cohort, group in input_frame.groupby(
-            "_provenance_cohort", sort=True, dropna=False
-        )
-    }
     for cohort in (
         FORWARD_PROVENANCE_COHORT,
         OFF_SCHEDULE_PROVENANCE_COHORT,
@@ -1178,40 +1379,41 @@ def _evaluate_channel(
         UNKNOWN_PROVENANCE_COHORT,
     ):
         provenance_counts.setdefault(cohort, {
-            "n_rows": 0,
-            "n_dates": 0,
+            "n_rows": 0, "n_dates": 0, "recorded_n_rows": 0, "recorded_n_dates": 0,
             "included_in_default_forward_statistics": (
                 cohort == FORWARD_PROVENANCE_COHORT
             ),
         })
-    excluded = {}
     excluded_names = {
         OFF_SCHEDULE_PROVENANCE_COHORT,
         SCHEDULED_REPLAY_PROVENANCE_COHORT,
         UNKNOWN_PROVENANCE_COHORT,
         *(
             str(value)
-            for value in input_frame["_provenance_cohort"].dropna().unique()
+            for value in raw["_provenance_cohort"].dropna().unique()
             if value != FORWARD_PROVENANCE_COHORT
         ),
     }
+    excluded = {}
     for offset, cohort in enumerate(sorted(excluded_names)):
-        subset = input_frame[
-            input_frame["_provenance_cohort"] == cohort
-        ].copy()
+        subset = raw[raw["_provenance_cohort"] == cohort].copy()
         excluded[cohort] = _excluded_provenance_report(
-            subset,
-            cohort=cohort,
-            n_boot=n_boot,
+            subset, cohort=cohort, n_boot=n_boot,
             seed=seed + 1000 + offset * 100,
-            min_rows=min_rows,
-            min_days=min_days,
+            min_rows=min_rows, min_days=min_days,
         )
+    input_observed = raw[raw["label_status"] == "labeled"]
     return {
         "n_rows": int(len(frame)),
         "n_dates": int(frame["_date"].nunique()),
-        "input_n_rows": int(len(input_frame)),
-        "input_n_dates": int(input_frame["_date"].nunique()),
+        "input_n_rows": int(len(input_observed)),
+        "input_n_dates": int(input_observed["_date"].nunique()),
+        "recorded_n_rows": int(len(recorded)),
+        "recorded_n_dates": int(recorded["_date"].nunique()),
+        "input_recorded_n_rows": int(len(raw)),
+        "input_recorded_n_dates": int(raw["_date"].nunique()),
+        "outcome_coverage": _outcome_coverage(recorded),
+        "model_versions": _model_version_summary(recorded),
         "return_basis": return_basis,
         "path_quality": _path_quality_summary(frame),
         "provenance": {
@@ -1221,48 +1423,27 @@ def _evaluate_channel(
         },
         "cohorts": {
             "all_scores": _cohort_report(
-                frame,
-                availability=all_availability,
-                n_boot=n_boot,
-                seed=seed,
-                min_rows=min_rows,
-                min_days=min_days,
+                frame, availability=all_availability,
+                n_boot=n_boot, seed=seed, min_rows=min_rows, min_days=min_days,
             ),
             "delivered": _cohort_report(
-                delivered,
-                availability=delivery_availability,
-                n_boot=n_boot,
-                seed=seed + 20,
-                min_rows=min_rows,
-                min_days=min_days,
+                delivered, availability=delivery_availability,
+                n_boot=n_boot, seed=seed + 20, min_rows=min_rows, min_days=min_days,
             ),
             "complete_path_only": _cohort_report(
-                complete_path,
-                availability=path_quality_availability,
-                n_boot=n_boot,
-                seed=seed + 40,
-                min_rows=min_rows,
-                min_days=min_days,
+                complete_path, availability=path_quality_availability,
+                n_boot=n_boot, seed=seed + 40, min_rows=min_rows, min_days=min_days,
             ),
         },
         "excluded_provenance_cohorts": excluded,
-        "top_n_vs_full_universe": {
-            str(n): _top_n_vs_universe(
-                frame, n, n_boot=n_boot, seed=seed + n, min_days=min_days
-            )
-            for n in top_ns
-        },
-        "liquidity_matched_baseline": {
-            str(n): _liquidity_matched(
-                frame, n, n_boot=n_boot, seed=seed + n, min_days=min_days
-            )
-            for n in top_ns
-        },
-        "within_volatility_band_lift": {
-            str(n): _within_volatility_band(
-                frame, n, n_boot=n_boot, seed=seed + n, min_days=min_days
-            )
-            for n in top_ns
+        **{
+            family: {
+                n: _evaluate_comparison_plan(
+                    bundle, recorded, n_boot=n_boot, seed=seed, min_days=min_days
+                )
+                for n, bundle in bundles.items()
+            }
+            for family, bundles in plans.items()
         },
     }
 
@@ -1353,8 +1534,27 @@ def evaluate_label_root(
             "completed_through_date_kst": completed_cutoff.isoformat(),
             "return_rule": (
                 "use net_return/eod_return_net without extra cost only when complete "
-                "for channel; otherwise use eod_return as gross diagnostic without "
+                "for observed labeled channel rows; otherwise use eod_return as gross diagnostic without "
                 "assumed cost"
+            ),
+            "selection_rule": (
+                "freeze top-N, liquidity matching and ATR-band controls using all "
+                "recorded candidates before reading outcomes; never replace missing "
+                "selected or baseline members; comparisons have separate date cohorts"
+            ),
+            "missing_outcome_rule": (
+                "unobserved selected or required control excludes that date-comparison; "
+                "a missing metric excludes both sides of that metric-date, not members"
+            ),
+            "count_rule": (
+                "legacy n_rows/n_dates count labeled observations; recorded_* and "
+                "outcome_coverage retain unobserved candidates and all-halted dates; "
+                "probability and complete_path_only diagnostics remain labeled-only"
+            ),
+            "model_version_rule": (
+                "recorded model/rule/source identities are reported, not filtered; "
+                "mixed versions and unknown identities do not establish new forward "
+                "evidence or promotion approval"
             ),
             "forward_provenance_rule": (
                 "default channel statistics use provenance_cohort=forward_observed "

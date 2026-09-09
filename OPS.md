@@ -60,6 +60,7 @@ KST 10:10 dashboard publish → KST 10:30 heartbeat
 |---|---|---|---|
 | **04:00 매일** | 19:00 전일 | versioned SQLite·verdict/anchor backup | `scripts/backup_db.sh` |
 | **07:30 매일** | 22:30 전일 | full pytest selftest (Telegram kill-switch) | `venv/bin/python -m pytest` |
+| **08:45 매일** | 23:45 전일 | 공개 체결·호가 → 인과 피처 → 별도 비교 실험 기록 | `scripts/capture_recommend_microstructure.py` |
 | **08:50 매일** | 23:50 전일 | R1 preopen 발송 + legacy record-only | `scripts/daily_run_preopen.sh` |
 | **09:05 매일** | 00:05 | R1 open 발송 + challenger 기록; pump-v2 terminal no-op | `scripts/daily_run_distribution.sh` |
 | **09:30 매일** | 00:30 | distribution paper/shadow ledger 청산 | `scripts/daily_close_distribution.sh` |
@@ -68,11 +69,13 @@ KST 10:10 dashboard publish → KST 10:30 heartbeat
 | **10:30 매일** | 01:30 | evidence·publish·ledger·DB heartbeat | `scripts/heartbeat.sh` |
 
 표의 시각은 nominal calendar다. `RandomizedDelaySec` 때문에 backup은 최대 120초,
-preopen/preopen-close는 최대 30초, 나머지는 최대 60초 뒤 시작할 수 있다.
+preopen/preopen-close는 최대 30초, microstructure는 random delay 없이 AccuracySec=5초,
+나머지는 최대 60초 뒤 시작할 수 있다.
 
 ### 1.2 단일 scheduler 계약
 
-운영 scheduler는 `deploy/prelude-*.service`와 8개 timer뿐이다.
+지원 scheduler는 `deploy/prelude-*.service`와 9개 timer다(기존8개 + 독립 microstructure).
+새9번째 timer의 실제 설치 결과는 아래 §1.3과 PHASES 8차의 설치 검증을 따른다.
 `deploy/crontab.txt`는 과거 참고 자료이며 활성화하면 안 된다. 설치기는 전체 사용자
 cron과 설치/등록된 prelude timer를 읽고, 중복 작업이 있으면 자동 수정하지 않고
 fail closed한다.
@@ -81,17 +84,33 @@ fail closed한다.
 # 먼저 .env에 PRELUDE_DASHBOARD_PIN을 추가
 sudo bash deploy/install_systemd.sh --check-only
 sudo bash deploy/install_systemd.sh
+# 기존8개 정의/상태는 보존하고 새 공개 수집기만 추가할 때
+sudo bash deploy/install_systemd.sh --add-microstructure
 ```
 
-08:50·09:05 signal timer는 늦은 catch-up 발송을 막기 위해 `Persistent=false`,
-나머지는 `Persistent=true`다. 8개 operational service는
+08:45 수집 및 08:50·09:05 signal timer는 늦은 catch-up을 막기 위해 `Persistent=false`,
+나머지는 `Persistent=true`다. 9개 service는
 `OnFailure=prelude-failure-alert@%n.service`로 실패를 알리고, stage wrapper가
 후속 publish를 선행 stage 성공 증거와 연결한다.
 
-07:30 selftest는 정상 달력에서는 08:50 전에 끝나며, 지연 부팅으로 두 start job이
-함께 queue되면 `Before=prelude-preopen.service prelude-distribution.service`가
-signal service를 selftest 종료 뒤로 정렬한다. 실패는 먼저 경보하지만 signal
-service를 영구 차단하는 배포 gate는 아니다. 코드 push 자체는 별도 pre-push
+**09-09 설치 완료 확인:** selftest unit은 추천 서비스의 `Before`와 close 서비스의
+`After`를 제거했다. 07:30 전수검사·실패 경보·timer는 유지하며 초기 Nice19/CPU50%/메모리4GiB,
+낮은 CPU·I/O weight와 수치 라이브러리 단일 스레드로 제한한다. CPUQuota50%는 서버 전체의50%가 아니라
+논리 CPU0.5개분이다. 이는 자원 경합이 전혀 없다는 보장이 아니다.
+처음 AI의 `sudo -n` 시도는 비밀번호 필요로 실패했지만, 이후 사용자가 서버에서
+`--update-selftest`를 적용했다. 09-09 후속 읽기 검사에서 설치19개 파일의 저장소 일치와
+loaded selftest의 순서 의존 제거·CPUQuota500ms/1s·메모리4GiB·Nice19를 확인했다.
+현재 추가 설치는 필요 없다. 다시 점검할 때는 다음 읽기 전용 명령을 사용한다.
+
+```bash
+sudo bash /home/soccz/22tb/prelude/deploy/install_systemd.sh --check-only
+```
+
+`--update-selftest`는 이미 설치된 service 하나만 교체하며 나머지18개 설치파일과9개 timer 상태를 보존한다.
+실행 전/재로드 후 selftest가 inactive 또는 failed인지 확인하며, 실행 중이면 거부/복구하고 중단시키지 않는다.
+두 상태 관측은 외부 관리자와의 원자적 실행 배제가 아니다. 다른 설치 정의 불일치도 묵인하지 않는다.
+설치 전에는 지연 부팅 시 예전 `Before` 때문에 추천이 selftest 종료를 기다릴 수 있었다.
+이 순서 연결은 추천 service를 영구 차단하는 배포 gate는 아니다. 코드 push 자체는 별도 pre-push
 Ruff(변경 Python)+전수 pytest gate가 정상 `git push` 경로에서 차단한다.
 이것은 로컬 안전장치라 Git 자체의 의도적 `--no-verify`까지 막지는 못한다.
 원격에서 절대 강제하려면 별도 CI required check와 branch protection이 필요하며,
@@ -100,6 +119,180 @@ Ruff(변경 Python)+전수 pytest gate가 정상 `git push` 경로에서 차단�
 **2026-07-29 반영 상태:** 8개 timer를 포함한 저장소 unit과
 `/etc/systemd/system` 설치본을 동기화했다. 설치 후에도 위 `--check-only`를
 통과해야 적용 완료로 간주한다.
+
+### 1.3 공개 체결 정보의 독립 검증 경로 (2026-09-07)
+
+#### 공개 대시보드의 현재 상태 계약 (2026-09-09)
+
+`ops/dashboard_current.py`는 기존 암호화5파일 중 `summary.current_system`
+(`prelude_dashboard_current.v1`)만 추가한다. 기존 `channels.preopen`은 역사적 구모델 원장이며
+현재 R1 장전 알림과 합치지 않는다. R1 두 슬롯의 발송 증거와 연구 기록 상태를 별도 표시한다.
+
+- 텔레그램 서버 수락과 사용자의 열람/실제 매매는 다르다. 미관측 후보 수는 null이며0이 아니다.
+- 두 연구의 기존 읽기 전용 probe를 각30초 제한으로 호출한다. 실패·불일치·이전 예정일 누락은
+  상태로 표시하고 R1 전달 카드를 숨기지 않는다. 원본 예외 문자열/경로/메시지ID는 내보내지 않는다.
+- 이 projection은 누적 outcome 검증기가 아니다. 기록 완료/무교체/선정 변경을 효과 입증으로
+  표시하지 않으며 비교 표본 수·수익률을 추정하지 않는다. 과거 asof에는 오늘 연구 상태를 붙이지 않는다.
+- 개인 `NOTES.md`는 더 이상 게시 생성기에서 읽지 않는다. 기존 암호화 과거 원장 형식은 유지한다.
+  이전에 게시된 Git 이력까지 삭제하는 작업이나 사용자의 PIN 변경은 포함하지 않는다.
+- `validate_dashboard_assets.py`가 현재 상태의 필드 allowlist·시각·자료형을 검사한다.
+  과거 암호화 세대는 호환하며 새 화면은 현재 상태 필드가 없으면 미제공이라고 표시한다.
+- 상속 `PRELUDE_PUBLISH_LOCK_FD` 검증 실패는 즉시 종료한다. 인증된5파일·동일세대·출처 검사를
+  통과한 임시 clone의 data만 게시하며 공유 Pages 작업 폴더를 덮어쓰지 않는다.
+
+**09-08 16:01 당시 확인:** 사용자 설치 완료.9개 timer loaded/enabled/active,
+설치파일19개와 저장소 SHA 일치. 새 timer는 **09-09 08:45 KST** 첫 실행을 기다린다.
+수집 service는 아직 실행 전이며, 설치 성공이 첫 수집/실험 성공을 뜻하지 않는다.
+별도 root `--check-only` 재실행은 에이전트의 sudo 인증 제한으로 못 했으나,
+사용자 설치기의 cron/중복·설치 후 검사 완료 로그와 직접 설치 상태 검증을 확인했다.
+
+`prelude-microstructure.timer`는 R1 발송의 선행 의존성이나 pipeline lock을 사용하지 않는다.
+공개 trade/orderbook만 구독하고 키·주문·추천 전송·자동 재학습을 사용하지 않는다.
+오늘 실제 R1 snapshot이 만들어지면 수집을 종료하고, 그 snapshot의 **계산 시작 전 300초**로
+event/received 양 시각을 다시 자른다. native capture의 종료 기준은 기존대로 decision_completed_at이다.
+
+- 최초 목표일은2026-09-08이었으나 설치 전 오전 창이 지나 수집하지 못했다.
+  09-08 오후 기준 설치 후 첫 정규 수집은 **2026-09-09 08:45 KST**다.
+  실험 달력은 원래09-08 시작을 유지해 누락을 숨기지 않는다. 과거 수신시각을 복원하지 않는다.
+- 초기 자원 예산: depth1, warmup600초, 최대 대기2400초, 채널별 수락 payload512MiB,
+  CPU50%·메모리2GiB·oneshot 최대2700초·종료90초. payload 한도는 실제 파일/누적 디스크 용량 한도가 아니다.
+- **09-08 수집 전 저장공간 보호 추가:** 예약 wrapper는 공개 시장 조회 전과 수집 시작 직전에
+  raw/feature 경로와 별도 trial 경로의 가장 가까운 기존 디렉터리 파일시스템을 각각 검사한다.
+  일반 사용자 가용량 `f_bavail × f_frsize`가 초기 `1GiB + 4 × 2채널 × payload한도`보다 작거나
+  조회에 실패하면 새 연구 수집만 nonzero로 중단한다(기본 **5GiB**). 경로를 만들거나 증거를 삭제하지 않는다.
+  계수4·여유1GiB는 정규 실측 후 조정할 운영 초기값이지 압축/메타데이터 최대치의 증명이 아니다.
+  이는 수집 **진입 전 검사**이며 실행 중 다른 프로세스의 공간 소비·디스크 quota·누적 보존 정책을 대신하지 않는다.
+  실제 추천 선행 의존성은 추가하지 않으며 unit 변경/재설치도 없다.
+- 원본·manifest·`recommend_features.json`·`trial_evaluation.json`은 각 capture 디렉터리에 보존한다.
+  별도 `output/recommend_microstructure_trials/<date>/r1_boundary_trade_imbalance_v1/`에
+  원 Top3/시험 Top3와 `score.json`→`commit.json`을 덮어쓰기 없이 저장한다.
+  이 별도 디렉터리도 기존 정규 evidence 백업 목록에 포함한다(실제 첫 백업은 정규 실행 후 확인).
+- 원본은 순차 검증해 전체 호가를 메모리에 쌓지 않는다. 무체결은 null, 장애는 unavailable이며
+  후보100개를 그대로 유지한다. canary 성공은 실험 적격 또는 추천 효과의 증거가 아니다.
+- score 파일·디렉터리의 내구 저장 후 관측한 시각이 기존 receipt의 canonical entry보다 빨라야
+  prospective 비교에 들어간다. 늦음·미확인 저장·미성숙 결과·수집 누락 날짜를 구별한다.
+- 기존8개 byte/inode·enabled/active는 add-only 설치가 보존한다. 정의 불일치를 자동 수리하지 않으며,
+  동일 활성 timer를 재시작하지 않는다. 실제 설치에서도 기존8개의 활성 진입시각은 유지됐다.
+  다만 daemon-reload 전후 다음 실행의 초 단위 지연값은 달라졌으므로 시각 완전동일을 보장하지 않는다.
+  전체 `--check-only`는 의도적으로 비활성인 timer도 실패로 보고한다.
+
+읽기 전용 비교 확인(과거 보고서 덮어쓰기 없음):
+
+```bash
+PRELUDE_FORBID_TELEGRAM=1 venv/bin/python -B scripts/evaluate_recommend_microstructure_trial.py
+systemctl status prelude-microstructure.timer --no-pager
+```
+
+이 경로는 새 정보가 유효한지를 검증하는 **record-only 실험**이다. 기존 R1 모델·순위·발송은 그대로다.
+NTP yes는 정밀 시각 오차의 증명은 아니며, 같은 호스트의 OnFailure는 외부 독립 감시를 대신하지 못한다.
+기존 selftest의 지연 부팅 순서 의존은 위의 한정 설치로 제거했다. close/publish의 연구 상태 결합은 신규 수집기와 별개다.
+
+#### 첫 정규 실행 수리·Top10 별도 시험 연결 (2026-09-09)
+
+09-09 수집은08:45:02 시작해282시장의335,706행을 저장했으나,09:09:02 피처 생성에서 실패했다.
+원인은 `int(datetime.timestamp()*1e9)`가 원본 snapshot 완료시각을96ns 작게 기록한 것이다.
+`data/upbit_microstructure.py::datetime_to_ns`를 UTC 정수 timedelta 산식으로 수리했다.
+실패한 manifest/raw/snapshot은 그대로이며 오늘을 성공으로 소급 바꾸지 않는다.
+같은 날 selftest의1실패도 수신 스레드 시작 직후 테스트가 종료 신호를 보내는 경쟁 조건으로 재현했다.
+테스트가 실제 종료 이벤트를 기다리도록 수리했고 production collector의 종료 동작은 바꾸지 않았다.
+
+**09-10부터 기존 설치 service가 읽는 wrapper**는 기존 동점 score/commit → 별도Top10 score/commit →
+각 누적평가 순서로 실행한다. 새 시험은 `r1_top10_trade_imbalance_v1`, 저장 위치는
+`output/recommend_trade_shortlist_trials/<date>/<trial_id>/score.json,commit.json`이다.
+기존 동점 시험의09-08 시작일과 누락일은 보존하고 새 시험만09-10 시작이다. 기존 R1 발송·순위·라벨은 바뀌지 않는다.
+
+- 새 시험 저장공간/발행 오류는 기존 동점 발행·평가를 막지 않지만 최종 nonzero로 경보한다.
+  기존 발행 자체가 불확실하면 새 시험을 대신 성공시켜 정상으로 처리하지 않는다.
+  양쪽 점수부터 내구 저장하므로 누적 과거 평가가 새 점수의 진입 전 저장을 늦추지 않는다.
+- 새 평가 파일은 capture 디렉터리의 `trade_shortlist_evaluation.json`이다. 과거 보고서는 덮어쓰지 않는다.
+  기존 raw 전체 해시 검증을 재사용하며 중복 해시는 남아 있다. 실제 신규 publisher의 정규 실행 시간은 아직 미측정이다.
+  매일 누적평가 비용은 자료와 함께 증가할 수 있으며 기존 service 실행 상한 안에서 관찰해야 한다.
+- 새 trial 디렉터리도 기존 evidence 백업 목록에 포함했다. fixture archive 회귀는 실제 첫 백업 성공과 다르다.
+- `ops.recommend_trade_shortlist_status`가 새 namespace를 별도로 확인한다.09-10 전 not_started,
+  당일10시 전 waiting과 직전 기한이 지난 날짜를 확인하며,10:30 heartbeat가 경고한다.
+  현재 하루의 native raw/소스 검증, score/commit과 평가의 당일 선정·시각 연결을 확인한다.
+  기존 경량 probe와 달리 원본 해시를 읽으므로 별도30초+종료5초로 제한한다. 한도 초과도 조용한 성공이 아닌 경고다.
+  evaluation JSON은4MiB 초기 상한이다. 성과/라벨/진입 전 적격은 이 운영 probe의 검사 대상이 아니다.
+- native reader는 현재 generator 해시 일치도 요구한다. 동결 소스가 바뀌면 과거 파일을 새 코드로 정당화하지 않고
+  검증 실패로 남긴다. 추후 변경은 별도 버전/시험으로 설계해야 한다.
+- 09-09 13:49 읽기 확인: 기존 두 슬롯은 Telegram 서버수락 증거 정상, 기존 수집은 evidence_invalid,
+  새 시험은 not_started였다. 실패 원본4개 SHA도 최초 감사와 같았다. 실제 신규 적격 표본/추천 우위는 아직0/미검증이다.
+
+읽기 전용 확인(실제 주문·발송·학습·출력 생성 없음):
+
+```bash
+PRELUDE_FORBID_TELEGRAM=1 PYTHONDONTWRITEBYTECODE=1 venv/bin/python -B -m ops.recommend_trade_shortlist_status --format text
+PRELUDE_FORBID_TELEGRAM=1 PYTHONDONTWRITEBYTECODE=1 venv/bin/python -B scripts/evaluate_recommend_trade_shortlist_trial.py
+```
+
+#### 수집 미실행·중간 중단 감시 (2026-09-08 추가)
+
+기존 `OnFailure`는 서비스가 실행하다 실패한 경우를 알리지만, timer가 아예 실행하지 않은 날에는
+실패 이벤트가 없다. 기존10:30 heartbeat에 `ops.recommend_microstructure_status`를 연결해 이 공백을 보완했다.
+새 timer·sudo 설치·알림 포맷 변경은 없다. 정상은 로그만, 이상은 기존 heartbeat 경고 묶음에 한 항목으로 포함한다.
+수집 실패 직후 경보와 나중 heartbeat의 미해결 상태 경고가 모두 올 수 있다. 상세 heartbeat 경보 전달 성공 시
+기존 generic OnFailure 중복은 억제하고, 전달 실패 시에만 fallback을 사용한다.
+
+- 운영 최초 기대일은 **09-09**, 연구 표본 달력은 **09-08**을 유지한다. 09-08 누락을 지우지 않는다.
+- 완료 기한은 초기10:00 KST:08:45+실행45분+종료90초에 여유를 더했다. 실제 경보는 **heartbeat10:30 이후**다.
+  전수 selftest/시스템 부하 등에 따라 heartbeat 자체가 지연될 수 있으며10:30 정각 전달을 보장하지 않는다.
+  기한 전에는 오늘은waiting으로 두고 가장 최근 기한이 지난 전일도 검사해 늦은 부팅 오탐/미탐을 줄인다.
+  무제한 과거 누락 탐색이 아니며, 연구 평가기의 누적 달력 진단은 별도로 유지한다.
+- 당일 수집 디렉터리0개=미실행 증거 부재,2개 이상=모호성 경고다. 최신 성공본만 임의로 선택하지 않는다.
+  manifest 미완결, 원본 snapshot 부재, 피처 품질 부적격, score/commit 누락, 평가 파일 누락·변조를 구분한다.
+- 정상 무교체는 `complete_noop`, 시험 순위 변경은 `complete_changed`다. 실제 R1은 어느 경우에도 바뀌지 않는다.
+  수집은 정상이나 필요한 동점 종목에 관측 체결이 없어 시험할 수 없으면 `complete_unavailable`로 구분한다.
+  이는 조용히 남기는 자료 가용성 진단이지 유효 시험 표본 또는 정상 무교체가 아니다.
+- 작은 JSON은 초기4MiB/파일 상한으로 읽고 snapshot/manifest/feature/score/commit/평가의 연결·체크섬·시각 순서를
+  검사한다. 원본 gzip은 존재·일반 파일 여부·크기만 확인하며 내용은 열지 않는다. 파일 그래프 구조도 검사하지만
+  현재 generator 소스와 원본 내용 전체 해시는 재계산하지 않는다. 읽는 중 변경·symlink/FIFO·중복 JSON key는 거부한다.
+  점검은 외부 timeout30초+종료5초로 제한한다. 이 상한들도 실제 파일 증가·실행 시간 관측 후 조정할 운영 초기값이다.
+- **통과 의미는 제한적이다:** 메타데이터 수준의 저장 경로 정상이다. 동일 크기 원본 내용 손상·소스 변경·진입 전 저장 적격·
+  추천 성능을 증명하지 않는다. 후자는 기존 정본 연구 평가기가 담당한다. 경고가 나도 자동 재수집/복원/commit 재작성은 없다.
+
+직접 확인(읽기 전용, 로그/원장/Telegram에 쓰지 않음):
+
+```bash
+PRELUDE_FORBID_TELEGRAM=1 PYTHONDONTWRITEBYTECODE=1 venv/bin/python -B -m ops.recommend_microstructure_status --format text
+systemctl status prelude-microstructure.timer --no-pager
+journalctl -u prelude-microstructure.service -n 50 --no-pager
+```
+
+CLI exit0은 정상/대기/운영 시작 전, exit1은 주의 필요, exit2는 호출·점검 설정 오류다.
+`--now`는 장애 시각 재현용이며 과거 산출물을 만들지 않는다. 기한 전에도 전일 장애가 있으면 exit1이다.
+미실행이면 timer와 서비스 로그를 먼저 확인하고, 현재 시각으로 오전 원본을 재수집해 과거 증거를 대체하지 않는다.
+09-08 실제 읽기 실행은 `not_started`, 첫 timer 예약은09-09 08:45였다.09-09 실제 실패와 수리는 위 후속 항목을 따른다.
+
+#### 기존 실제 백업 읽기 검증 (2026-09-08)
+
+04:04 백업 `ledgers_20260908_040402_2529188.tar.gz`의 manifest/checksum/SHA 일치,
+중복 없는1081개 member,09-07 open snapshot/receipt의 JSON 파싱·현재 immutable 파일과 바이트 일치를 확인했다.
+archive SHA는 `c8949540fc5c216910576daa4bf003132b4be89daeac59b8989606dd104ed396`이며 원본을 변경하지 않았다.
+같은 날짜 일봉·15분봉 SQLite 보관본도 checksum 및 읽기 전용 `PRAGMA integrity_check=ok`를 확인했다.
+이는 전체 복원 훈련이나 새 정규 trial의 백업 성공을 뜻하지 않는다.
+해당 archive의 microstructure 원본 경로는 빈 디렉터리뿐이고 trial은0개다. 새 실제 자료의 보관은 생성 후 확인한다.
+
+**물리 장애 대비 미완료:** 현재 `backup/prelude_db`와 prelude 원본은 동일 파일시스템이다.
+파일 손상/논리 실수의 복구점은 있지만 같은 디스크 고장을 버티는 독립 사본은 아니다.
+다른 물리 장치/외부 저장소의 대상·용량·접근 권한이 정해져야 별도 복제를 설계할 수 있다.
+외부 계정 생성·전송·원본 복원 덮어쓰기는 수행하지 않는다.
+
+#### 핵심 결과 우선·연구 정지 시간 제한 (2026-09-08)
+
+- `daily_close_distribution.sh`: 기존 수집 뒤 R1 open 전용 원장을 legacy paper 원장보다 먼저 갱신한다.
+- `daily_close_preopen.sh`: 기존15분봉 수집 → R1 preopen 원장 → 전 유니버스 라벨 → legacy 원장 → 연구 평가 순서다.
+  원장/라벨의 정의·입력·청산 인자·검증 gate는 바꾸지 않는다.
+- 두 wrapper의 연구 명령(policy/meta/idea/HTML 및 preopen score 평가)은 개별 **300초** 뒤 TERM,
+  추가10초 뒤 KILL로 제한한다. 초기120초는09-08 실제 score 평가의 약110.6초와 너무 가까워 반려했다.
+  300초도 관측값의 약2.7배를 둔 운영 초기값이며 자료 증가·부하에 따라 재검토한다.
+- 실패124/137 및 기존 실패는 계속 nonzero·critical log·OnFailure 경로로 전파한다.
+  먼저 발생한 핵심 오류를 나중의 연구 오류로 덮지 않고 가능한 후속 작업은 계속한다.
+  idea 보고서 실패 때 HTML을 만들지 않으며, 기존 pipeline success marker와 publish 차단도 유지한다.
+
+이는 **핵심 결과 선처리와 연구 명령별 정지 시간 제한**이다. 연구 실패와 dashboard 게시의 완전 분리,
+전체 pipeline lock 제거, 지연 부팅 selftest 의존 제거는 아니다. 핵심 수집/원장/라벨 및 legacy 작업에
+새 시간제한을 적용한 것도 아니다. 따라서 모든 종류의 지연을 제거했다는 주장은 하지 않는다.
+unit·일정·발송 포맷은 불변이고 기존 service가 다음 실행에서 갱신된 shell을 읽는다. 추가 설치는 없다.
 
 ### 1.4 R1 snapshot과 forward 평가
 
@@ -114,6 +307,12 @@ Ruff(변경 Python)+전수 pytest gate가 정상 `git push` 경로에서 차단�
   close로 flat-fill한다. 평가기는 complete artifact만 기본 forward 통계에 사용한다.
 - 과거 재생은 `scheduled_replay`, 실제 목표일 생성은 `forward_observed`로 분리한다.
   사용자가 실제로 받은 성과는 그중 `delivery_ok=True` cohort를 따로 본다.
+- **2026-09-07 평가기 v3:** TopN·유동성 매칭·ATR band는 결과를 보지 않고 저장된 원후보로 먼저
+  고정한다. 선정 종목이나 필요한 대조군이 `halted_no_observations`이면 그 날짜의 해당 비교를
+  unavailable로 남기며 다음 순위·다른 대조군으로 대체하지 않는다. 지표 한 필드만 결측이면
+  그 지표의 날짜 쌍만 제외하고 일부 종목 평균으로 메우지 않는다.
+  기록된 후보/관측 결과/전달된 후보의 결과 미관측 coverage를 구분한다. 기존 확률 진단은 labeled-only,
+  complete-path-only는 진단용이며 선정 필터가 아니다. 과거 보고서는 소급 덮어쓰지 않는다.
 - close 게이트 기본 모드는 `close`(정상 청산) / `skip-zero-pick`(검증된 무추천일) /
   `skip-legacy-unverifiable`(계약 이전) / `skip-no-decision`(발송 파이프 자체가 죽어
   snapshot·receipt·원장 행이 전부 없는 날 — 2026-07-28 신설). skip-no-decision은
@@ -126,6 +325,36 @@ Ruff(변경 Python)+전수 pytest gate가 정상 `git push` 경로에서 차단�
   `decision_date > effective_asof`, decision/receipt/원장 행 전무가 모두 참일 때만 허용하며
   pipeline death 분모에 넣지 않는다. 과거 공용 KILL이 R1을 막은 2026-08-06~08에는
   `skip-policy-blocked`로만 기록한다(`forward_valid=false`); 08-09부터 R1 receipt 계약은 다시 엄격하다.
+
+#### 전달 불확실성과 안전한 상태 확인 (2026-09-07)
+
+- 추천 및 보조 champion 변경 알림은 동일 send lock 안에서 **API 호출 전 발송 시도 intent를 fsync**한다.
+  저장 위치는 receipt 옆 `<receipt.stem>.attempts/000001.intent.json`이며,
+  검증된 receipt를 `000001.result.json`에 연결한다. 기존 receipt 형식과 성공 이력은 유지한다.
+  이 디렉터리는 기존 `output/recommend_receipts` 재귀 백업 범위에 포함된다.
+- API 수락 뒤 receipt 기록 전 종료하면 미완료 intent가 다음 실행을 막는다. 오래된 실패 receipt는
+  최신 intent의 실패 증거가 아니다. 새 성공 receipt가 일치하면 result 파일 기록 직전 종료였어도
+  중복 발송하지 않는다. 명확한 실패만 다음 시도를 허용하며 부분 수락·응답 불명은 자동 재시도하지 않는다.
+- 이는 **정확히 한 번 전달 보장이 아니다**. intent 저장 직후 API 전에 죽어 실제로는 못 보냈어도
+  보류될 수 있다. 임의 TTL 해제·파일 삭제 후 재발송은 하지 않는다. 장애 시 intent/receipt/로그와
+  실제 채팅을 보존·대조하여 판단해야 한다. 슬롯 마감 후 당일 메시지를 소급 발송하지 않는다.
+- `report_recommendation_status.py`는 snapshot/receipt/journal을 **읽기만** 한다. 미완료 시도는
+  `delivery_uncertain`, 손상·불일치는 `invalid_evidence`; 과거 실패를 최신 미발송으로 오인하지 않는다.
+  receipt를 읽기 전후 journal 증거를 재대조하여 조회 중 새 시도가 기록되면 확정 상태 대신
+  확인 필요로 표시한다. 조회 중 증거가 손상된 경우도 실패 상태로 단정하지 않고 검증 실패로 남긴다.
+  exit 0은 로컬 증거상 주의 상태 없음, 1은 확인 필요, 2는 잘못된 CLI 인자다.
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PRELUDE_FORBID_TELEGRAM=1 venv/bin/python -B scripts/report_recommendation_status.py --format text
+```
+
+- 사용자 승인에 따라 알림 확률은 **검증 중 추정치**, 09:00 가격은 **현재 체결가격이 아닌 참고가격**으로
+  정정한다. 기존 종목·순위·확률값·TP/SL은 변경하지 않는다. 이미 보낸 메시지를 수정·재발송하지 않는다.
+- 새 `ModelSpec`의 기본값은 `challenger_only=True`다. 기존 7개 명시 등록 설정은 그대로다.
+  기본 잠금이 별도 승인·모델 버전별 forward 검증 체계 전체를 대체하지는 않는다.
+- 이번 변경은 저장소 Python 코드이며 systemd unit 설치/재시작은 필요 없다. 다음 정규 실행이 새 코드를
+  읽지만, 실제 다음 발송 성공 여부는 그 실행의 새 intent/receipt로 확인해야 한다.
+  이 조회는 독립 외부 감시가 아니므로 서버·스케줄러·네트워크 전체 장애까지 보장하지 않는다.
 
 ### 1.5 pump v2 evidence와 terminal 판정
 
@@ -306,7 +535,7 @@ legacy CLI 기본값은 ACTIVE가 없으면 발송하지 않으며 현재 daily 
 
 ## 6. retrain pipeline (legacy·미등록)
 
-`scripts/retrain_run.sh`와 `signals/retrain.py`는 남아 있지만 8개 systemd timer나
+`scripts/retrain_run.sh`와 `signals/retrain.py`는 남아 있지만 지원 systemd timer나
 활성 cron에는 등록되지 않았다. 구현 promotion gate도 아래 설계와 완전히 일치하지
 않으므로 사용자 승인과 재검증 전에는 실행·배포하지 않는다.
 

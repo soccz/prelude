@@ -1189,6 +1189,14 @@ def test_r1_api_boundary_ignores_pump_v2_kill(tmp_path, monkeypatch):
     record_terminal_verdict(_candidate(verdict="early_kill"), path=path)
     snapshot = _r1_snapshot(tmp_path)
     calls: list[str] = []
+
+    class ReceiptClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = recommend_send._now_kst()
+            return value if tz is None else value.astimezone(tz)
+
+    monkeypatch.setattr(receipt_module, "datetime", ReceiptClock)
     monkeypatch.setattr(
         recommend_send,
         "_now_kst",
@@ -1259,6 +1267,8 @@ def test_r1_api_boundary_is_independent_of_v2_terminal_state(
             tzinfo=recommend_send.KST,
         ),
     )
+    monkeypatch.setattr(recommend_send, "_now_kst", lambda: FixedDatetime.now(recommend_send.KST))
+
     def mocked_transport(message, **_kwargs):
         calls.append(message)
         digest = hashlib.sha256(message.encode()).hexdigest()
@@ -1354,7 +1364,7 @@ def test_r1_ignores_go_verdict_but_pump_v2_cannot_be_revived(
             error=None,
         )
 
-    monkeypatch.setattr(recommend_send, "_now_kst", lambda: observed)
+    monkeypatch.setattr(recommend_send, "_now_kst", lambda: R1Datetime.now(recommend_send.KST))
     monkeypatch.setattr(recommend_send, "datetime", R1Datetime)
     monkeypatch.setattr(receipt_module, "datetime", R1Datetime)
     r1_calls: list[str] = []

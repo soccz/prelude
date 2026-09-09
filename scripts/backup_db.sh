@@ -401,6 +401,8 @@ done
 for item in \
     output/recommend_snapshots \
     output/recommend_receipts \
+    output/recommend_microstructure_trials \
+    output/recommend_trade_shortlist_trials \
     output/pump_v1_decisions \
     output/pump_v2_receipts \
     output/pump_v2_decisions \

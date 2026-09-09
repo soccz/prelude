@@ -517,6 +517,42 @@ def test_lock_contention_is_reported_as_retryable_failure(tmp_path):
     assert "retry required" in log
 
 
+@pytest.mark.parametrize(
+    ("inherited_fd", "expected_rc"),
+    [("999999", 73), ("", 2), ("2", 2), ("not-a-descriptor", 2)],
+)
+def test_invalid_inherited_lock_stops_before_python_git_or_clone(
+    tmp_path, monkeypatch, inherited_fd, expected_rc,
+):
+    # _run_publish uses only a local bare remote and fake application Python.
+    # The real lock verifier must reject the injected descriptor before even
+    # reaching secret preflight, a build, an alert, or isolated git mutation.
+    monkeypatch.setenv("PRELUDE_PUBLISH_LOCK_FD", inherited_fd)
+    monkeypatch.setenv("GIT_CALL_LOG", str(tmp_path / "git.log"))
+    fake_python_writer = _write_fake_python
+
+    def install_traced_commands(fake_bin):
+        fake_python_writer(fake_bin)
+        fake_git = fake_bin / "git"
+        fake_git.write_text(
+            '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$GIT_CALL_LOG"\n'
+            'exec /usr/bin/git "$@"\n',
+            encoding="utf-8",
+        )
+        fake_git.chmod(0o755)
+
+    monkeypatch.setattr(__import__(__name__), "_write_fake_python", install_traced_commands)
+    result, remote, site, scratch = _run_publish(tmp_path)
+
+    assert result.returncode == expected_rc
+    assert not (tmp_path / "python.log").exists()
+    assert not (tmp_path / "git.log").exists()
+    assert not scratch.exists()
+    assert _git(remote, "rev-parse", "main") == _git(site, "rev-parse", "HEAD")
+    assert not (tmp_path / "repo" / "output" / "cron_publish.log").exists()
+    assert "lock_exec" in result.stderr
+
+
 def test_publish_source_has_no_shared_worktree_mutation_commands():
     source = Path("scripts/publish_dashboard.sh").read_text(encoding="utf-8")
 

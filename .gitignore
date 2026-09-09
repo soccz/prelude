@@ -71,6 +71,15 @@ output/**/.*.lock
 output/pump_v1_decisions/
 output/pump_v2_receipts/
 output/close_no_decision/
+output/close_policy_blocked/
+output/close_terminal_skip/
+output/recommend_microstructure_trials/
+output/recommend_trade_shortlist_trials/
+
+# Isolated Pages checkout and release previews (never publish via code repo)
+/_workspace/pages_release_*/
+/_workspace/release_preview_*/
+/_workspace/release_checks_*/
 
 # Microstructure raw capture (data — git 추적 X, 로컬+백업 보관)
 data/microstructure/

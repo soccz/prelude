@@ -59,6 +59,7 @@ from notifier.delivery_receipt import (  # noqa: E402
     receipt_path,
     write_delivery_receipt,
 )
+from notifier.delivery_attempt import delivery_attempt_journal  # noqa: E402
 from notifier.telegram import (  # noqa: E402
     TelegramSendResult,
     send_telegram,
@@ -169,7 +170,7 @@ def _send_live_transport(
         return (
             ok,
             None if ok else "send_telegram returned false",
-            datetime.now(timezone.utc).isoformat() if ok else None,
+            _now_kst().astimezone(timezone.utc).isoformat() if ok else None,
             None,
         )
 
@@ -435,7 +436,7 @@ def format_radar(res: dict, slot: str, *, dry_run: bool = False,
     is_preopen = resolved_slot == "preopen"
 
     lines.append(f"━━━ risk-reward 레이더 top{len(top3)} ━━━")
-    lines.append("(상방=고가가 그만큼 갈 확률 / 하방=저가가 그만큼 빠질 확률, 둘 다 검증된 calibrated)")
+    lines.append("(상방=고가가 그만큼 갈 가능성 / 하방=저가가 그만큼 빠질 가능성, 검증 중 추정치·안전 보장 아님)")
     lines.append("")
     for it in top3:
         coin = str(it.get("coin", "")).replace("KRW-", "")
@@ -443,9 +444,9 @@ def format_radar(res: dict, slot: str, *, dry_run: bool = False,
         entry = it.get("entry_open")
         if is_preopen or entry is None:
             # pre-open(08:50): 09:00 미개장 → 진입가 미확정. None 을 "—" 로 보이지 않게.
-            entry_line = "진입가 09:00 open(개장 후 확정)"
+            entry_line = "09:00 참고가격(개장 후 확정, 현재 체결가격 아님)"
         else:
-            entry_line = f"진입 ≈ {entry:g}"
+            entry_line = f"09:00 참고가격 ≈ {entry:g} (현재 체결가격 아님)"
         lines.append(f"#{it.get('rank', '?')} {coin}  {entry_line}{warn}")
         lines.append(
             f"   ▸ 상방  ≥5% {_pct(it.get('p_up5'))} · ≥10% {_pct(it.get('p_up10'))}"
@@ -459,7 +460,7 @@ def format_radar(res: dict, slot: str, *, dry_run: bool = False,
 
     lines.append("━━━ 사용 ━━━")
     lines.append("• 자동매매 없음 — 알림만. 본인 판단으로 직접 매매")
-    lines.append("• 가이드: 진입 09:00 open, -3% 손절(SL) / +5% 익절(TP)")
+    lines.append("• 09:00 가격은 참고만. -3% 손절(SL) / +5% 익절(TP)는 가상평가 설정이며 실제 체결가격 기준으로 직접 판단")
     lines.append("• 검증중(SHADOW) — 가상 ledger·dashboard 로 성과 추적, 실거래 주문 X")
     lines.append("• ⚠️dump_risk = 과열·고유동 board-top — 하방 클 수 있으니 사이즈 축소")
     return "\n".join(lines)
@@ -557,7 +558,11 @@ def maybe_notify_champion_change(
     with _exclusive_snapshot_send_lock(
         event_snapshot,
         receipt_root=receipt_root,
-    ):
+    ) as journal:
+        observed = _now_kst()
+        attempt_state = journal.inspect(now=observed)
+        if attempt_state["state"] == "pending":
+            raise RuntimeError(attempt_state["reason"])
         existing = read_delivery_receipt(
             event_snapshot,
             root=receipt_root,
@@ -578,18 +583,15 @@ def maybe_notify_champion_change(
                 slot,
                 now=_now_kst(),
             )
-        attempted_at = datetime.now(timezone.utc).isoformat()
-        try:
-            ok, error, sent_at, transport = _send_live_transport(
-                msg,
-                asof=live_asof or asof,
-                slot=slot,
-            )
-        except Exception as exc:  # noqa: BLE001
-            ok = False
-            error = f"{type(exc).__name__}: {exc}"
-            sent_at = None
-            transport = None
+        intent = journal.begin(msg, now=observed, receipt=existing)
+        attempted_at = intent["attempted_at"]
+        journal.verify()
+        _assert_live_send_window(live_asof or asof, slot, now=_now_kst())
+        ok, error, sent_at, transport = _send_live_transport(
+            msg,
+            asof=live_asof or asof,
+            slot=slot,
+        )
         if (
             date.fromisoformat(live_asof or asof)
             >= RECEIPT_INTEGRITY_ACTIVATION_DATE
@@ -608,6 +610,7 @@ def maybe_notify_champion_change(
             message=msg,
             root=receipt_root,
         )
+        journal.complete(intent, receipt=read_delivery_receipt(event_snapshot, root=receipt_root), now=_now_kst())
         return ok
 
 
@@ -619,13 +622,13 @@ def _exclusive_snapshot_send_lock(
     snapshot: dict,
     *,
     receipt_root: str | Path | None = None,
-) -> Iterator[None]:
+) -> Iterator:
     """동일 snapshot의 receipt 확인→API 호출→receipt 저장을 직렬화."""
     receipt = receipt_path(snapshot, root=receipt_root)
-    receipt.parent.mkdir(parents=True, exist_ok=True)
     lock_path = receipt.with_name(f".{receipt.name}.send.lock")
-    with file_lock(lock_path):
-        yield
+    with delivery_attempt_journal(snapshot, receipt_root=receipt_root) as journal:
+        with file_lock(lock_path):
+            yield journal
 
 
 def _send_and_record(
@@ -637,7 +640,11 @@ def _send_and_record(
 ) -> bool:
     """성공 receipt가 없는 snapshot만 발송하고 결과를 동일 lock 안에서 기록."""
     _assert_live_snapshot_boundary(snapshot, slot, _now_kst())
-    with _exclusive_snapshot_send_lock(snapshot, receipt_root=receipt_root):
+    with _exclusive_snapshot_send_lock(snapshot, receipt_root=receipt_root) as journal:
+        observed = _now_kst()
+        attempt_state = journal.inspect(now=observed)
+        if attempt_state["state"] == "pending":
+            raise RuntimeError(attempt_state["reason"])
         existing = read_delivery_receipt(snapshot, root=receipt_root)
         if existing is not None and existing["delivery_ok"]:
             log.info(
@@ -667,33 +674,23 @@ def _send_and_record(
         # primary recommendation API call. The auxiliary champion notice is
         # deliberately attempted only after this primary result is durably
         # recorded, so it can never consume the remaining slot window first.
+        _assert_live_snapshot_boundary(snapshot, slot, observed)
+        intent = journal.begin(message, now=observed, receipt=existing)
+        attempted_at = intent["attempted_at"]
+        journal.verify()
+        # Intent fsync can cross the deadline. Revalidate after durability and
+        # immediately before transport; a crash/exception leaves a pending intent.
         _assert_live_snapshot_boundary(snapshot, slot, _now_kst())
-        attempted_at = datetime.now(timezone.utc).isoformat()
-        try:
-            ok, error, sent_at, transport = _send_live_transport(
-                message,
-                asof=str(snapshot.get("asof", "")),
-                slot=slot,
-            )
-        except Exception as exc:
-            if (
-                date.fromisoformat(str(snapshot.get("asof", "")))
-                < RECEIPT_INTEGRITY_ACTIVATION_DATE
-            ):
-                write_delivery_receipt(
-                    snapshot,
-                    delivery_ok=False,
-                    attempted_at=attempted_at,
-                    sent_at=None,
-                    error=type(exc).__name__,
-                    root=receipt_root,
-                )
-            raise
+        # An exception is not evidence of nonacceptance, including in the
+        # legacy bool adapter. Preserve the intent without fabricating failure.
+        ok, error, sent_at, transport = _send_live_transport(
+            message,
+            asof=str(snapshot.get("asof", "")),
+            slot=slot,
+        )
 
-        # Telegram Bot API에는 client idempotency key가 없다. API가 메시지를
-        # 수락한 직후 receipt fsync 전에 SIGKILL/전원 장애가 나면 다음 실행이
-        # 중복 발송할 수 있다. 이 lock+receipt는 완료된 실행 및 동시 실행의
-        # 중복만 제거하며, 불가피한 crash window를 성공으로 추정하지 않는다.
+        # API 수락 뒤 receipt 저장 전에 죽어도 durable intent가 재발송을
+        # 차단한다. 성공을 추정하지 않으며 수동 확인 전 delivery_uncertain이다.
         receipt = write_delivery_receipt(
             snapshot,
             delivery_ok=bool(ok),
@@ -706,6 +703,7 @@ def _send_and_record(
         )
         log.info("telegram send %s", "OK" if ok else "FAIL")
         log.info("delivery receipt → %s", receipt)
+        journal.complete(intent, receipt=read_delivery_receipt(snapshot, root=receipt_root), now=_now_kst())
         if ok:
             try:
                 maybe_notify_champion_change(

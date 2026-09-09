@@ -6,6 +6,7 @@ import json
 import os
 import threading
 import time
+from dataclasses import replace
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -529,6 +530,7 @@ def test_synthetic_high_rate_capture_drains_without_loss(monkeypatch, tmp_path):
         stream = result.manifest["streams"][channel]
         assert stream["dropped_frames"] == 0
         assert stream["artifact"]["event_count"] == 500
+        assert stream["accepted_raw_bytes"] == stream["artifact"]["bytes_received"]
         assert stream["at_feature_cutoff"]["included_event_count"] == 500
 
 
@@ -590,6 +592,119 @@ def test_queue_overflow_is_explicit_and_capture_fails_closed(
         for channel in streams
     )
     assert not result.manifest["quality"]["transport_complete"]
+
+
+@pytest.mark.parametrize("limit", [True, False, 0, -1, 1.5, "10", None])
+def test_payload_budget_requires_positive_integer(tmp_path, limit):
+    with pytest.raises(ValueError, match="max_raw_bytes_per_channel"):
+        replace(_config(tmp_path), max_raw_bytes_per_channel=limit)
+
+
+@pytest.mark.parametrize("name", ["duration_seconds", "max_wait_seconds", "required_warmup_seconds"])
+@pytest.mark.parametrize("value", [True, float("nan"), float("inf"), -1, "10"])
+def test_resource_time_limits_cannot_be_nonfinite_or_nonnumeric(tmp_path, name, value):
+    with pytest.raises(ValueError, match=name):
+        replace(_config(tmp_path), **{name: value})
+
+
+@pytest.mark.parametrize("value", [True, 0, -1, 0.5, float("inf")])
+def test_queue_budget_requires_positive_integer(tmp_path, value):
+    with pytest.raises(ValueError, match="queue_max"):
+        replace(_config(tmp_path), queue_max=value)
+
+
+@pytest.mark.parametrize("channel", ["trade", "orderbook"])
+@pytest.mark.parametrize("count", [1, 2])
+@pytest.mark.parametrize("delayed_receiver", [False, True])
+def test_payload_budget_exact_boundary_and_rejected_frame(
+    tmp_path, monkeypatch, channel, count, delayed_receiver,
+):
+    stop_event = threading.Event()
+    receiver_entered = threading.Event()
+    receiver_allowed = threading.Event()
+    if delayed_receiver:
+        original_receiver = collector.ChannelWorker._receiver_loop
+
+        def gated_receiver(self):
+            receiver_entered.set()
+            try:
+                if not receiver_allowed.wait(5):
+                    self.state.receiver_error = "test receiver gate timed out"
+                    self.stop_event.set()
+            finally:
+                original_receiver(self)
+
+        monkeypatch.setattr(collector.ChannelWorker, "_receiver_loop", gated_receiver)
+    payload = (
+        trade_payload(event_at_ms=1_800_000_000_000, sequential_id=1)
+        if channel == "trade"
+        else orderbook_payload(event_at_ms=1_800_000_000_000, stream_type="SNAPSHOT")
+    )
+    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+    class FixedSocket(FakeWebSocket):
+        def send(self, _request):
+            self.messages = [raw] * count
+
+        def recv(self, timeout):
+            if self.messages:
+                return self.messages.pop(0)
+            stop_event.set()
+            raise TimeoutError
+
+    worker = collector.ChannelWorker(
+        capture_id="budget-test",
+        channel=channel,
+        config=replace(_config(tmp_path), max_raw_bytes_per_channel=len(raw)),
+        output_path=tmp_path / f"{channel}.jsonl.gz",
+        stop_event=stop_event,
+        connect_fn=lambda *_args, **_kwargs: FixedSocket(),
+    )
+    worker.start()
+    try:
+        if delayed_receiver:
+            assert receiver_entered.wait(5)
+            assert worker.state.accepted_raw_bytes == 0
+            receiver_allowed.set()
+        # join() requests shutdown; it does not mean "wait for test messages".
+        # Wait for socket exhaustion (count=1) or the budget guard (count=2)
+        # before joining, even if the receiver was not scheduled at start().
+        assert stop_event.wait(5), "payload exercise did not finish"
+    finally:
+        receiver_allowed.set()
+        worker.join()
+    assert stop_event.is_set()
+    assert not worker._receiver.is_alive()
+    assert not worker._writer.is_alive()
+    assert worker.state.accepted_raw_bytes == len(raw)
+    assert worker.state.artifact["event_count"] == 1
+    assert worker.state.dropped_frames == count - 1
+    assert worker.state.raw_byte_budget_exceeded is (count == 2)
+    assert bool(worker.state.receiver_error) is (count == 2)
+    if count == 2:
+        gap = worker.state.gaps[0]
+        assert gap["kind"] == "raw_byte_budget_exceeded"
+        assert gap["ingress_seq"] == 2
+        assert gap["rejected_frame_bytes"] == len(raw)
+        assert gap["limit_bytes"] == len(raw)
+
+
+def test_payload_budget_stops_capture_retains_incomplete_evidence(monkeypatch, tmp_path):
+    monkeypatch.setattr(collector, "clock_sync_status", lambda: {"ntp_synchronized": True})
+    result = collector.run_capture(
+        replace(_config(tmp_path), max_raw_bytes_per_channel=1),
+        connect_fn=FakeConnector(messages_per_channel=100),
+        install_signal_handlers=False,
+    )
+    assert not result.complete
+    assert result.manifest["stop_reason"] == "raw_byte_budget_exceeded"
+    assert not result.manifest["quality"]["transport_complete"]
+    assert result.manifest["resource_limits"]["max_raw_bytes_per_channel"] == 1
+    assert result.manifest["resource_limits"]["filesystem_byte_limit"] is False
+    assert result.manifest_path.is_file()
+    streams = result.manifest["streams"]
+    assert any(stream["raw_byte_budget_exceeded"] for stream in streams.values())
+    assert all(stream["accepted_raw_bytes"] == 0 for stream in streams.values())
 
 
 def test_post_cutoff_only_frames_cannot_make_capture_complete(

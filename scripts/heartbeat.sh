@@ -344,6 +344,18 @@ else
     WARN "recommend snapshot chain probe FAIL (exit=$probe_rc; details logged)"
 fi
 
+# 2e) Scheduled microstructure evidence: detect a day when the independent
+# timer never ran, without collecting, replaying or changing R1. Calendar and
+# waiting/no-op classification belong to the read-only status CLI, not shell.
+# Bound the probe; even convincing stdout never overrides its failure status.
+if /usr/bin/timeout --signal=TERM --kill-after=5s 30s \
+    python -m ops.recommend_microstructure_status --format text >>"$LOG" 2>&1; then
+    echo "  microstructure daily status checked" >> "$LOG"
+else
+    micro_probe_rc=$?
+    WARN "microstructure scheduled evidence probe FAIL (exit=$micro_probe_rc; details logged)"
+fi
+
 # 3) disk 사용량 — 검사 자체의 실패/비정상 출력도 silent skip하지 않는다.
 if USAGE=$(df /home/soccz/22tb 2>>"$LOG" | awk 'NR==2 {print $5}' | tr -d '%'); then
     if [[ "$USAGE" =~ ^[0-9]+$ ]]; then
@@ -356,6 +368,16 @@ if USAGE=$(df /home/soccz/22tb 2>>"$LOG" | awk 'NR==2 {print $5}' | tr -d '%'); 
     fi
 else
     WARN "disk usage 검사 실행 실패"
+fi
+
+# 3s) Independent Top10 trial starts on its own declared calendar. Its missing
+# publication must not be hidden by the original tie experiment's success.
+if /usr/bin/timeout --signal=TERM --kill-after=5s 30s \
+    python -m ops.recommend_trade_shortlist_status --format text >>"$LOG" 2>&1; then
+    echo "  shortlist daily status checked" >> "$LOG"
+else
+    shortlist_probe_rc=$?
+    WARN "shortlist scheduled evidence probe FAIL (exit=$shortlist_probe_rc; details logged)"
 fi
 
 # 3a) 오늘 04:00 evidence backup의 terminal manifest와 실제 archive/checksum

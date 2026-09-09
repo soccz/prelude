@@ -166,12 +166,14 @@ def utc_now_ns() -> int:
 
 
 def ns_to_iso(value: int | None) -> str | None:
+    """Legacy microsecond-resolution display; integer ns remain authoritative."""
     if value is None:
         return None
     return datetime.fromtimestamp(value / 1_000_000_000, timezone.utc).isoformat()
 
 
 def ms_to_iso(value: int | None) -> str | None:
+    """Legacy raw-envelope display; retain its existing serialization contract."""
     if value is None:
         return None
     return datetime.fromtimestamp(value / 1_000, timezone.utc).isoformat()
@@ -186,9 +188,17 @@ def parse_utc_datetime(value: str) -> datetime:
 
 
 def datetime_to_ns(value: datetime) -> int:
-    if value.tzinfo is None:
+    """Convert an aware Python datetime to exact Unix ns without float rounding.
+
+    datetime supplies microseconds, so the result is a multiple of 1,000 ns.
+    UTC normalization preserves offsets/DST folds; integer timedelta components
+    also handle pre-epoch dates without truncating negative fractional seconds.
+    Naive values remain rejected rather than assuming the machine's timezone.
+    """
+    if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("datetime must include timezone")
-    return int(value.astimezone(timezone.utc).timestamp() * 1_000_000_000)
+    delta = value.astimezone(timezone.utc) - datetime(1970, 1, 1, tzinfo=timezone.utc)
+    return ((delta.days * 86_400 + delta.seconds) * 1_000_000 + delta.microseconds) * 1_000
 
 
 def normalise_markets(markets: list[str] | tuple[str, ...]) -> list[str]:

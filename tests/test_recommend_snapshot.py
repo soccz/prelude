@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
+import notifier.delivery_receipt as receipt_module
 import scripts.recommend_send as recommend_send
 import scripts.recommend_today as recommend_today
 import signals.recommend as recommend
@@ -1104,6 +1105,8 @@ def test_real_send_writes_delivery_receipt_for_snapshot(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(recommend, "score_candidates", scorer)
     monkeypatch.setattr(recommend_snapshot, "datetime", DecisionDatetime)
+    monkeypatch.setattr(receipt_module, "datetime", DecisionDatetime)
+    monkeypatch.setattr(recommend_send, "_now_kst", lambda: DecisionDatetime.now(recommend_send.KST))
     monkeypatch.setattr(
         recommend_send,
         "resolve_champion",

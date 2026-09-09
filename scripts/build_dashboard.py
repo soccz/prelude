@@ -59,6 +59,7 @@ from ops.champion_selector import (  # noqa: E402
     ChampionStateError,
     load_champion_state_artifact,
 )
+from ops.dashboard_current import build_current_system  # noqa: E402
 from scripts.idea_validation_report import (
     IdeaArtifactError,
     build_input_manifest as build_idea_input_manifest,
@@ -2117,8 +2118,12 @@ def main():
     log.info(f"BTC benchmark: {len(btc_bench)} days")
 
     # 1) summary.json
-    notes_entries = parse_notes_md("NOTES.md")
-    notes_vs = compute_notes_vs_system(notes_entries, df_dist, df_pre)
+    # The public encrypted site is not a backup of the user's private diary.
+    # Keep the old frontend contract without reading/exporting NOTES.md.
+    notes_vs = {
+        "available": False,
+        "note": "개인 매매 메모는 공개 대시보드 산출물에 포함하지 않습니다.",
+    }
     coin_matrix = compute_coin_universe_matrix(df_dist, df_pre)
 
     # 신규 (5/25 정책 layer 추가 후) — idea_validation + meta model card 통합.
@@ -2173,6 +2178,7 @@ def main():
         "asof": asof.isoformat(),
         "asof_timezone": "Asia/Seoul",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "current_system": build_current_system(asof=asof.date().isoformat()),
         "channels": {
             "distribution": compute_distribution_summary(
                 df_dist,

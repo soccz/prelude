@@ -25,6 +25,7 @@ import hashlib
 import importlib.metadata
 import json
 import logging
+import math
 import os
 import platform
 import queue
@@ -82,6 +83,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "data" / "microstructure" / "upbit"
 DEFAULT_SNAPSHOT_ROOT = PROJECT_ROOT / "output" / "recommend_snapshots"
 DEFAULT_QUEUE_MAX = 50_000
+DEFAULT_MAX_RAW_BYTES_PER_CHANNEL = 512 * 1024 * 1024
 DEFAULT_MAX_WAIT_SECONDS = 30 * 60
 DEFAULT_REQUIRED_WARMUP_SECONDS = 10 * 60
 _CAPTURE_LOCK_NAME = ".capture-owner.lock"
@@ -103,6 +105,7 @@ class CaptureConfig:
     endpoint: str = PUBLIC_WEBSOCKET_ENDPOINT
     orderbook_depth: int = 30
     queue_max: int = DEFAULT_QUEUE_MAX
+    max_raw_bytes_per_channel: int = DEFAULT_MAX_RAW_BYTES_PER_CHANNEL
     max_wait_seconds: float = DEFAULT_MAX_WAIT_SECONDS
     required_warmup_seconds: float = DEFAULT_REQUIRED_WARMUP_SECONDS
     feature_cutoff_at: datetime | None = None
@@ -167,14 +170,28 @@ class CaptureConfig:
             raise ValueError(
                 f"orderbook_depth must be one of {SUPPORTED_ORDERBOOK_DEPTHS}"
             )
-        if self.queue_max <= 0:
-            raise ValueError("queue_max must be positive")
-        if self.duration_seconds is not None and self.duration_seconds <= 0:
-            raise ValueError("duration_seconds must be positive")
-        if self.max_wait_seconds <= 0:
-            raise ValueError("max_wait_seconds must be positive")
-        if self.required_warmup_seconds < 0:
-            raise ValueError("required_warmup_seconds must be non-negative")
+        if type(self.queue_max) is not int or self.queue_max <= 0:
+            raise ValueError("queue_max must be a positive integer")
+        if (
+            isinstance(self.max_raw_bytes_per_channel, bool)
+            or not isinstance(self.max_raw_bytes_per_channel, int)
+            or self.max_raw_bytes_per_channel <= 0
+        ):
+            raise ValueError("max_raw_bytes_per_channel must be a positive integer")
+        for name, value, allow_zero in (
+            ("duration_seconds", self.duration_seconds, False),
+            ("max_wait_seconds", self.max_wait_seconds, False),
+            ("required_warmup_seconds", self.required_warmup_seconds, True),
+        ):
+            if name == "duration_seconds" and value is None:
+                continue
+            if (
+                type(value) not in (int, float)
+                or not math.isfinite(value)
+                or value < 0
+                or (value == 0 and not allow_zero)
+            ):
+                raise ValueError(f"{name} must be finite and {'non-negative' if allow_zero else 'positive'}")
 
 
 @dataclass
@@ -212,6 +229,8 @@ class ConnectionRecord:
 class WorkerState:
     channel: Channel
     dropped_frames: int = 0
+    accepted_raw_bytes: int = 0
+    raw_byte_budget_exceeded: bool = False
     reconnect_count: int = 0
     writer_error: str | None = None
     receiver_error: str | None = None
@@ -227,6 +246,8 @@ class WorkerState:
         return {
             "channel": self.channel,
             "dropped_frames": self.dropped_frames,
+            "accepted_raw_bytes": self.accepted_raw_bytes,
+            "raw_byte_budget_exceeded": self.raw_byte_budget_exceeded,
             "reconnect_count": self.reconnect_count,
             "writer_error": self.writer_error,
             "receiver_error": self.receiver_error,
@@ -520,6 +541,29 @@ class ChannelWorker:
                                 if connection_record.first_ingress_seq is None:
                                     connection_record.first_ingress_seq = ingress_seq
                                 connection_record.last_ingress_seq = ingress_seq
+                                if (
+                                    self.state.accepted_raw_bytes + len(raw)
+                                    > self.config.max_raw_bytes_per_channel
+                                ):
+                                    self.state.dropped_frames += 1
+                                    self.state.raw_byte_budget_exceeded = True
+                                    self.state.receiver_error = (
+                                        f"{self.channel} raw byte budget exceeded at "
+                                        f"ingress_seq={ingress_seq}"
+                                    )
+                                    self.state.gaps.append(
+                                        {
+                                            "kind": "raw_byte_budget_exceeded",
+                                            "at_ns": received_at_ns,
+                                            "at": ns_to_iso(received_at_ns),
+                                            "ingress_seq": ingress_seq,
+                                            "rejected_frame_bytes": len(raw),
+                                            "accepted_raw_bytes": self.state.accepted_raw_bytes,
+                                            "limit_bytes": self.config.max_raw_bytes_per_channel,
+                                        }
+                                    )
+                                    self.stop_event.set()
+                                    break
                                 frame = RawFrame(
                                     raw=raw,
                                     received_at_ns=received_at_ns,
@@ -531,6 +575,7 @@ class ChannelWorker:
                                 )
                                 try:
                                     self.frames.put_nowait(frame)
+                                    self.state.accepted_raw_bytes += len(raw)
                                 except queue.Full:
                                     self.state.dropped_frames += 1
                                     self.state.receiver_error = (
@@ -1379,6 +1424,10 @@ def _run_capture_owned(
                     f"restore signal {signum}: {type(exc).__name__}: {exc}"
                 )
 
+    if stop_reason == "unknown" and any(
+        worker.state.raw_byte_budget_exceeded for worker in workers.values()
+    ):
+        stop_reason = "raw_byte_budget_exceeded"
     ended_at_ns = utc_now_ns()
     try:
         clock_at_end = clock_sync_status()
@@ -1534,6 +1583,12 @@ def _run_capture_owned(
         "feature_cutoff_at": cutoff_at.isoformat() if cutoff_at else None,
         "cutoff_source": cutoff_source,
         "snapshot_error": snapshot_error,
+        "resource_limits": {
+            "max_raw_bytes_per_channel": config.max_raw_bytes_per_channel,
+            "byte_accounting": "accepted websocket payload bytes before queueing",
+            "filesystem_byte_limit": False,
+            "on_exceeded": "stop both streams; retain incomplete evidence",
+        },
         "universe": {
             "source": config.universe_source,
             "fetch_started_at_ns": config.universe_fetch_started_at_ns,
@@ -1715,6 +1770,12 @@ def main() -> int:
     )
     parser.add_argument("--queue-max", type=int, default=DEFAULT_QUEUE_MAX)
     parser.add_argument(
+        "--max-raw-bytes-per-channel",
+        type=int,
+        default=DEFAULT_MAX_RAW_BYTES_PER_CHANNEL,
+        help="payload byte budget per stream; not a compressed filesystem size limit",
+    )
+    parser.add_argument(
         "--max-wait-seconds",
         type=float,
         default=DEFAULT_MAX_WAIT_SECONDS,
@@ -1772,6 +1833,7 @@ def main() -> int:
             endpoint=args.endpoint,
             orderbook_depth=args.orderbook_depth,
             queue_max=args.queue_max,
+            max_raw_bytes_per_channel=args.max_raw_bytes_per_channel,
             max_wait_seconds=args.max_wait_seconds,
             required_warmup_seconds=args.required_warmup_seconds,
             feature_cutoff_at=explicit_cutoff,

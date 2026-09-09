@@ -4,8 +4,9 @@ import json
 import hashlib
 import multiprocessing
 import os
+import signal
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -17,14 +18,24 @@ import ops.champion_selector as champion_selector
 import scripts.recommend_send as recommend_send
 from notifier.delivery_receipt import read_delivery_receipt
 from notifier.telegram import TelegramSendResult, TelegramServerMessage
+from notifier.delivery_attempt import inspect_delivery_attempt
+from notifier import delivery_attempt as attempt_module
+
+
+class _ReceiptClock(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        value = recommend_send._now_kst()
+        return value.astimezone(tz) if tz is not None else value.replace(tzinfo=None)
 
 
 @pytest.fixture(autouse=True)
 def _allow_mocked_sends(monkeypatch):
     # 이 모듈은 발송 경로 자체를 mock 된 requests 로 검증한다 —
     # 전역 kill-switch(tests/conftest.py)를 in-process 한정 해제.
-    # subprocess 를 띄우는 테스트는 이 모듈에 두지 말 것.
+    # spawn 자식은 PRELUDE_FORBID_TELEGRAM=1 재설정 및 mock 설치 필수.
     monkeypatch.delenv("PRELUDE_FORBID_TELEGRAM", raising=False)
+    monkeypatch.setattr(receipt_module, "datetime", _ReceiptClock)
 
     def forbid_unmocked_transport(*_args, **_kwargs):
         pytest.fail("unmocked Telegram transport reached")
@@ -310,6 +321,7 @@ def _concurrent_send_worker(
         second=2,
         tzinfo=recommend_send.KST,
     )
+    receipt_module.datetime = _ReceiptClock
 
     def fake_send(message, **_kwargs):
         with api_calls.get_lock():
@@ -549,6 +561,8 @@ def test_failed_receipt_is_retried_until_one_success(tmp_path, monkeypatch):
     assert not recommend_send.send_recommendation(
         snapshot["asof"], snapshot["slot"], receipt_root=receipt_root
     )
+    later = recommend_send._now_kst() + timedelta(seconds=1)
+    monkeypatch.setattr(recommend_send, "_now_kst", lambda: later)
     assert recommend_send.send_recommendation(
         snapshot["asof"], snapshot["slot"], receipt_root=receipt_root
     )
@@ -684,6 +698,7 @@ def test_postactivation_sender_records_server_bound_transport_evidence(
     _stub_dispatch(monkeypatch, snapshot)
     monkeypatch.setattr(recommend_send, "datetime", FixedDatetime)
     monkeypatch.setattr(receipt_module, "datetime", FixedDatetime)
+    monkeypatch.setattr(recommend_send, "_now_kst", lambda: FixedDatetime.now(recommend_send.KST))
     messages: list[str] = []
 
     def fake_detailed(message, **_kwargs):
@@ -751,6 +766,7 @@ def test_postactivation_partial_delivery_is_preserved_and_not_retried(
     _stub_dispatch(monkeypatch, snapshot)
     monkeypatch.setattr(recommend_send, "datetime", FixedDatetime)
     monkeypatch.setattr(receipt_module, "datetime", FixedDatetime)
+    monkeypatch.setattr(recommend_send, "_now_kst", lambda: FixedDatetime.now(recommend_send.KST))
     calls = 0
     message = "x" * 4001
 
@@ -818,6 +834,7 @@ def test_postactivation_ambiguous_acceptance_is_not_retried(
     _stub_dispatch(monkeypatch, snapshot)
     monkeypatch.setattr(recommend_send, "datetime", FixedDatetime)
     monkeypatch.setattr(receipt_module, "datetime", FixedDatetime)
+    monkeypatch.setattr(recommend_send, "_now_kst", lambda: FixedDatetime.now(recommend_send.KST))
     calls = 0
     message = "radar"
 
@@ -904,10 +921,10 @@ def test_concurrent_processes_send_same_snapshot_exactly_once(tmp_path):
         results.join_thread()
 
 
-def test_crash_after_api_success_before_receipt_can_duplicate(
+def test_crash_after_api_success_before_receipt_never_retries(
     tmp_path, monkeypatch
 ):
-    """Bot API에 idempotency key가 없어 이 crash window는 정직하게 남는다."""
+    """Durable intent preserves uncertainty and forbids a duplicate API call."""
 
     class SimulatedCrash(RuntimeError):
         pass
@@ -940,14 +957,15 @@ def test_crash_after_api_success_before_receipt_can_duplicate(
             snapshot["slot"],
             receipt_root=receipt_root,
         )
-    assert recommend_send.send_recommendation(
-        snapshot["asof"], snapshot["slot"], receipt_root=receipt_root
-    )
+    with pytest.raises(RuntimeError, match="delivery_uncertain"):
+        recommend_send.send_recommendation(
+            snapshot["asof"], snapshot["slot"], receipt_root=receipt_root
+        )
 
-    assert api_calls == 2
+    assert api_calls == 1
     receipt = read_delivery_receipt(snapshot, root=receipt_root)
-    assert receipt is not None
-    assert receipt["delivery_ok"] is True
+    assert receipt is None
+    assert inspect_delivery_attempt(snapshot, receipt_root=receipt_root, now=recommend_send._now_kst())["state"] == "pending"
 
 
 @pytest.mark.parametrize(
@@ -1139,19 +1157,21 @@ def test_champion_notice_receipt_prevents_duplicate_on_recommend_retry(
         if message == "recommendation":
             recommendation_attempts += 1
             if recommendation_attempts == 1:
-                raise RuntimeError("recommendation transport failed")
+                return False
         return True
 
     monkeypatch.setattr(recommend_send, "send_telegram", fake_send)
     receipt_root = tmp_path / "receipts"
 
-    with pytest.raises(RuntimeError, match="recommendation transport failed"):
-        recommend_send._send_and_record(
+    first_clock = recommend_send._now_kst
+    assert not recommend_send._send_and_record(
             snapshot,
             "recommendation",
             slot=snapshot["slot"],
             receipt_root=receipt_root,
         )
+    later = recommend_send._now_kst() + timedelta(seconds=1)
+    monkeypatch.setattr(recommend_send, "_now_kst", lambda: later)
     assert recommend_send._send_and_record(
         snapshot,
         "recommendation",
@@ -1177,9 +1197,10 @@ def test_champion_notice_receipt_prevents_duplicate_on_recommend_retry(
         )
         for options in send_options
     )
+    assert send_options[0]["clock"] is first_clock
     assert all(
         options["clock"] is recommend_send._now_kst
-        for options in send_options
+        for options in send_options[1:]
     )
     receipt = read_delivery_receipt(snapshot, root=receipt_root)
     assert receipt is not None
@@ -1369,3 +1390,209 @@ def test_live_send_slot_window_boundaries(slot, hour, minute, allowed):
                 slot,
                 now=now,
             )
+
+
+def _journal_send_case(tmp_path, monkeypatch, kind):
+    snapshot = _snapshot(tmp_path)
+    snapshot.update(asof="2026-09-07", snapshot_id="recommend-test-2026-09-07-open",
+                    snapshot_path=str(tmp_path / "snapshots/2026-09-07/open_r1.json"),
+                    decision_started_at="2026-09-07T00:05:00+00:00",
+                    decision_completed_at="2026-09-07T00:05:01+00:00")
+    snapshot["request"]["asof"] = snapshot["asof"]
+    clock = [datetime.fromisoformat("2026-09-07T09:05:02+09:00")]
+    monkeypatch.setattr(recommend_send, "_now_kst", lambda: clock[0])
+    state_path = tmp_path / "champion_state.json"
+    state_path.write_text(json.dumps(_champion_state(snapshot["asof"], [{
+        "asof": snapshot["asof"], "slot": "open", "from": "recommend-old",
+        "to": "recommend_r1_open", "reason": "fixture",
+    }])))
+    monkeypatch.setattr(recommend_send, "CHAMPION_STATE_PATH", state_path)
+    if kind == "primary":
+        monkeypatch.setattr(recommend_send, "maybe_notify_champion_change", lambda *a, **k: None)
+    root = tmp_path / "receipts"
+
+    def run():
+        if kind == "primary":
+            return recommend_send._send_and_record(snapshot, "radar", slot="open", receipt_root=root)
+        return recommend_send.maybe_notify_champion_change("open", live_asof=snapshot["asof"], receipt_root=root)
+
+    return snapshot, root, clock, state_path, run
+
+
+def _attempt_snapshot(root):
+    intent = json.loads(next(root.rglob("000001.intent.json")).read_text())
+    identity = intent["identity"]
+    return {**{key: identity[key] for key in ("snapshot_id", "snapshot_path", "asof", "slot")},
+            "model": {"id": identity["model_id"], "ranking": identity["ranking"]}}
+
+
+@pytest.mark.parametrize("kind", ["primary", "auxiliary"])
+def test_intent_publication_failure_prevents_every_transport(tmp_path, monkeypatch, kind):
+    _, _, _, _, run = _journal_send_case(tmp_path, monkeypatch, kind)
+    calls = []
+    monkeypatch.setattr(recommend_send, "send_telegram_with_receipt", lambda *a, **k: calls.append(1))
+
+    def fail(*args, **kwargs):
+        raise OSError("intent cannot be durable")
+
+    monkeypatch.setattr(attempt_module.DeliveryAttemptJournal, "begin", fail)
+    with pytest.raises(OSError, match="intent cannot"):
+        run()
+    assert calls == []
+
+
+@pytest.mark.parametrize("kind", ["primary", "auxiliary"])
+def test_deadline_cross_after_intent_fsync_prevents_transport(tmp_path, monkeypatch, kind):
+    _, root, clock, _, run = _journal_send_case(tmp_path, monkeypatch, kind)
+    original = attempt_module.DeliveryAttemptJournal.begin
+    calls = []
+
+    def begin(*args, **kwargs):
+        intent = original(*args, **kwargs)
+        clock[0] = clock[0].replace(hour=9, minute=21)
+        return intent
+
+    monkeypatch.setattr(attempt_module.DeliveryAttemptJournal, "begin", begin)
+    monkeypatch.setattr(recommend_send, "send_telegram_with_receipt", lambda *a, **k: calls.append(1))
+    with pytest.raises(RuntimeError, match="outside open live send window"):
+        run()
+    assert calls == []
+    assert inspect_delivery_attempt(_attempt_snapshot(root), receipt_root=root, now=clock[0])["state"] == "pending"
+
+
+@pytest.mark.parametrize("kind", ["primary", "auxiliary"])
+def test_successful_receipt_survives_result_write_crash_without_resend(tmp_path, monkeypatch, kind):
+    _, root, clock, _, run = _journal_send_case(tmp_path, monkeypatch, kind)
+    calls = []
+
+    def transport(message, **kwargs):
+        calls.append(message)
+        return _telegram_result(message, server_dates=(clock[0].astimezone(recommend_send.timezone.utc).isoformat(),))
+
+    def fail(*args, **kwargs):
+        raise OSError("result publication failed")
+
+    monkeypatch.setattr(recommend_send, "send_telegram_with_receipt", transport)
+    monkeypatch.setattr(attempt_module.DeliveryAttemptJournal, "complete", fail)
+    with pytest.raises(OSError, match="result publication"):
+        run()
+    state = inspect_delivery_attempt(_attempt_snapshot(root), receipt_root=root, now=clock[0])
+    assert (state["state"], state["resolution"]) == ("resolved", "delivered")
+    assert run() is True
+    assert len(calls) == 1 and list(root.rglob("*.result.json")) == []
+
+
+@pytest.mark.parametrize("kind", ["primary", "auxiliary"])
+def test_old_failure_cannot_resolve_new_crashed_attempt_in_either_sender(tmp_path, monkeypatch, kind):
+    _, root, clock, _, run = _journal_send_case(tmp_path, monkeypatch, kind)
+    calls = []
+
+    def transport(message, **kwargs):
+        calls.append(message)
+        if len(calls) == 1:
+            return _telegram_result(message, delivery_ok=False, server_dates=(), error="request rejected")
+        return _telegram_result(message, server_dates=(clock[0].astimezone(recommend_send.timezone.utc).isoformat(),))
+
+    monkeypatch.setattr(recommend_send, "send_telegram_with_receipt", transport)
+    assert run() is False
+    snapshot = _attempt_snapshot(root)
+    original_receipt = read_delivery_receipt(snapshot, root=root)
+    clock[0] += timedelta(seconds=1)
+
+    def fail(*args, **kwargs):
+        raise OSError("receipt disk failed after API acceptance")
+
+    monkeypatch.setattr(recommend_send, "write_delivery_receipt", fail)
+    with pytest.raises(OSError, match="receipt disk"):
+        run()
+    assert read_delivery_receipt(snapshot, root=root) == original_receipt
+    assert inspect_delivery_attempt(snapshot, receipt_root=root, now=clock[0])["state"] == "pending"
+    with pytest.raises(RuntimeError, match="delivery_uncertain"):
+        run()
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("kind", ["primary", "auxiliary"])
+def test_transport_exception_is_uncertain_not_fabricated_clear_failure(tmp_path, monkeypatch, kind):
+    _, root, clock, _, run = _journal_send_case(tmp_path, monkeypatch, kind)
+    calls = []
+
+    def transport(*args, **kwargs):
+        calls.append(1)
+        raise RuntimeError("unknown transport outcome")
+
+    monkeypatch.setattr(recommend_send, "send_telegram_with_receipt", transport)
+    with pytest.raises(RuntimeError, match="unknown transport outcome"):
+        run()
+    with pytest.raises(RuntimeError, match="delivery_uncertain"):
+        run()
+    assert calls == [1]
+    assert read_delivery_receipt(_attempt_snapshot(root), root=root) is None
+
+
+def _sigkill_sender(snapshot, root, state_path, kind, calls):
+    os.environ["PRELUDE_FORBID_TELEGRAM"] = "1"
+    now = datetime.fromisoformat("2026-09-07T00:05:02+00:00")
+    recommend_send._now_kst = lambda: now
+    recommend_send.CHAMPION_STATE_PATH = Path(state_path)
+
+    def accepted(message, **kwargs):
+        with calls.get_lock():
+            calls.value += 1
+        return _telegram_result(message, server_dates=(now.isoformat(),))
+
+    def killed(*args, **kwargs):
+        os.kill(os.getpid(), signal.SIGKILL)
+
+    recommend_send.send_telegram_with_receipt = accepted
+    recommend_send.write_delivery_receipt = killed
+    if kind == "primary":
+        recommend_send._send_and_record(snapshot, "radar", slot="open", receipt_root=root)
+    else:
+        recommend_send.maybe_notify_champion_change("open", live_asof=snapshot["asof"], receipt_root=root)
+
+
+@pytest.mark.parametrize("kind", ["primary", "auxiliary"])
+def test_sigkill_after_acceptance_blocks_restart_for_primary_and_auxiliary(tmp_path, monkeypatch, kind):
+    snapshot, root, clock, state_path, run = _journal_send_case(tmp_path, monkeypatch, kind)
+    context = multiprocessing.get_context("spawn")
+    calls = context.Value("i", 0)
+    process = context.Process(target=_sigkill_sender, args=(snapshot, str(root), str(state_path), kind, calls))
+    process.start()
+    try:
+        process.join(timeout=15)
+        assert process.exitcode == -signal.SIGKILL
+        assert calls.value == 1
+        with pytest.raises(RuntimeError, match="delivery_uncertain"):
+            run()
+        assert calls.value == 1
+        assert inspect_delivery_attempt(_attempt_snapshot(root), receipt_root=root, now=clock[0])["state"] == "pending"
+    finally:
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=5)
+
+
+@pytest.mark.parametrize("slot", ["open", "preopen"])
+def test_approved_wording_keeps_coins_ranks_and_numeric_estimates(tmp_path, slot):
+    snapshot = _snapshot(tmp_path)
+    snapshot["slot"] = slot
+    snapshot["top3"] = [{"coin": f"KRW-T{rank}", "rank": rank, "entry_open": 123.5,
+                         "p_up5": .42, "p_up10": .21, "p_up20": .08,
+                         "p_dn5": .17, "p_dn10": .03, "exp_downside": -.024,
+                         "dump_risk_flag": rank == 1} for rank in (1, 2, 3)]
+    before = json.dumps(snapshot, sort_keys=True)
+    message = recommend_send.format_radar(snapshot, slot)
+    assert json.dumps(snapshot, sort_keys=True) == before
+    assert "검증된 calibrated" not in message and "검증 중 추정치" in message
+    assert "고가가 그만큼" in message and "저가가 그만큼" in message
+    assert "안전 보장 아님" in message and "현재 체결가격 아님" in message
+    assert "진입 09:00 open" not in message
+    assert "-3% 손절(SL) / +5% 익절(TP)" in message
+    assert "≥5% 42% · ≥10% 21% · ≥20% 8%" in message
+    assert "≤-5% 17% · ≤-10% 3% · E[하방] -2.4%" in message
+    assert message.index("#1 T1") < message.index("#2 T2") < message.index("#3 T3")
+    if slot == "open":
+        assert message.count("09:00 참고가격 ≈ 123.5") == 3
+    else:
+        assert "개장 후 확정" in message and "123.5" not in message

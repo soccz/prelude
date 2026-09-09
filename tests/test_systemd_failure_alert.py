@@ -47,6 +47,7 @@ def test_every_operational_service_has_onfailure():
         "prelude-close.service",
         "prelude-distribution.service",
         "prelude-heartbeat.service",
+        "prelude-microstructure.service",
         "prelude-preopen-close.service",
         "prelude-preopen.service",
         "prelude-publish-dashboard.service",
@@ -67,6 +68,8 @@ def test_installer_rejects_active_prelude_cron_before_enabling_timers():
     text = Path("deploy/install_systemd.sh").read_text()
 
     guard = text.index("ERROR: active prelude cron found")
-    first_enable = text.index('enable "${TIMER_UNITS[@]}"')
+    transaction = text.index("TRANSACTION_ACTIVE=1")
+    activation = text.index('for unit in "${AFFECTED_TIMERS[@]}"; do', transaction)
+    first_enable = text.index('"$SYSTEMCTL_BIN" enable "$unit"', activation)
     assert "reject_legacy_cron" in text
     assert guard < first_enable

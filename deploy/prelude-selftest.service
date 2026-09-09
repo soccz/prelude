@@ -1,10 +1,10 @@
 [Unit]
 Description=prelude full test-suite selftest daily 07:30 KST (아침 사이클 전 회귀 검출)
 Wants=network-online.target
-After=network-online.target prelude-close.service prelude-preopen-close.service
-# ^ 부팅 캐치업 직렬화(2026-08-03) — 07:30 평시엔 무영향. 수집기와의 CPU/IO
-#   경합으로 스위트가 느려지거나 충돌하는 것을 피한다.
-Before=prelude-preopen.service prelude-distribution.service
+After=network-online.target
+# 2026-08-03 catch-up exposed production DB access in tests; conftest now
+# rejects it. Keep CPU/IO contention bounded without ordering R1 behind pytest.
+# No deferred sleep/skip: every timer activation still runs the full suite.
 RequiresMountsFor=/home/soccz/22tb/prelude
 OnFailure=prelude-failure-alert@%n.service
 
@@ -13,10 +13,17 @@ Type=oneshot
 User=soccz
 UMask=0077
 NoNewPrivileges=true
-Nice=10
+# Initial budgets; review full-suite runtime/peak memory after deployment.
+# I/O priority is not a guaranteed bandwidth limit or zero-contention promise.
+Nice=19
+CPUQuota=50%
+CPUWeight=10
+IOSchedulingClass=idle
+IOWeight=10
+MemoryMax=4G
 WorkingDirectory=/home/soccz/22tb/prelude
 # PRELUDE_FORBID_TELEGRAM 은 conftest 가 이미 강제하지만 유닛 수준 이중 봉쇄.
-Environment=TZ=Asia/Seoul TMPDIR=/home/soccz/22tb/tmp PRELUDE_FORBID_TELEGRAM=1
+Environment=TZ=Asia/Seoul TMPDIR=/home/soccz/22tb/tmp PRELUDE_FORBID_TELEGRAM=1 PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
 ExecStart=/home/soccz/22tb/prelude/venv/bin/python -m pytest -q -p no:cacheprovider
 TimeoutStartSec=2700
 StandardOutput=journal

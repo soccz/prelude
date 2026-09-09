@@ -301,6 +301,7 @@ def test_champion_absolute_gate_requires_positive_cost_deducted_forward_net(
             path_complete_col="path_complete",
         ),
         predict_ref="test:predict",
+        challenger_only=False,
     )
 
     metric = selector.compute_metric(spec, pd.Timestamp("2026-07-26"))
@@ -310,6 +311,51 @@ def test_champion_absolute_gate_requires_positive_cost_deducted_forward_net(
     assert metric.gate_pass is expected_gate
     if not expected_gate:
         assert "비용차감 forward net_mean" in metric.reason
+
+
+def test_new_model_is_challenger_by_default_even_with_positive_forward(tmp_path):
+    from dataclasses import replace
+
+    ledger = tmp_path / "new_model.csv"
+    pd.DataFrame([
+        {
+            "date": str(day.date()), "status": "closed", "realized_pct": 2.0,
+            "path_min_pct": -1.0, "path_complete": True,
+        }
+        for day in pd.date_range("2026-06-26", periods=30, freq="D")
+    ]).to_csv(ledger, index=False)
+    spec = ModelSpec(
+        id="unapproved-new-model", name="new model", ledger_path=str(ledger),
+        slots=["open"], predict_ref="test:predict",
+        metric=MetricSource(
+            status_col="status", closed_value="closed", date_col="date",
+            realized_pct_col="realized_pct", downside_pct_col="path_min_pct",
+            path_complete_col="path_complete",
+        ),
+    )
+    metric = selector.compute_metric(spec, pd.Timestamp("2026-07-26"))
+    assert spec.challenger_only is True
+    assert not metric.gate_pass
+    assert "challenger_only" in metric.reason
+    # Explicitly eligible fixtures retain the old, positive-net gate behavior.
+    eligible = selector.compute_metric(
+        replace(spec, challenger_only=False), pd.Timestamp("2026-07-26")
+    )
+    assert eligible.gate_pass
+
+
+def test_existing_registry_flags_are_explicit_and_unchanged():
+    from signals.model_registry import MODELS
+
+    assert {spec.id: spec.challenger_only for spec in MODELS} == {
+        "recommend_r1_open": False,
+        "recommend_r2_open": True,
+        "recommend_r1_sustain_open": True,
+        "pump_hunter": True,
+        "pump_hunter_v2": True,
+        "recommend_r1_preopen": True,
+        "distribution_engine": True,
+    }
 
 
 def test_champion_metric_excludes_same_day_closed_row(tmp_path):

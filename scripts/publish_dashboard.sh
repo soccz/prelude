@@ -40,9 +40,11 @@ mkdir -p "$(dirname "$LOG")"
 LOCK_EXEC="$PROJ_ROOT/deploy/lock_exec.py"
 LOCK_FILE="$PROJ_ROOT/output/.publish_dashboard.lock"
 if [[ -v PRELUDE_PUBLISH_LOCK_FD ]]; then
+    # This script does not use errexit: reject an invalid inherited guard
+    # explicitly before environment parsing, builds, alerts, or git access.
     /usr/bin/python3 "$LOCK_EXEC" verify \
         --lock-file "$LOCK_FILE" \
-        --fd "$PRELUDE_PUBLISH_LOCK_FD"
+        --fd "$PRELUDE_PUBLISH_LOCK_FD" || exit "$?"
 else
     exec /usr/bin/python3 "$LOCK_EXEC" run \
         --lock-file "$LOCK_FILE" \

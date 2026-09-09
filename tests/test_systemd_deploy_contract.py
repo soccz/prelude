@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import configparser
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -25,6 +26,7 @@ SERVICE_UNITS = (
     "prelude-backup.service",
     "prelude-heartbeat.service",
     "prelude-selftest.service",
+    "prelude-microstructure.service",
     "prelude-failure-alert@.service",
 )
 TIMER_UNITS = (
@@ -36,6 +38,7 @@ TIMER_UNITS = (
     "prelude-backup.timer",
     "prelude-heartbeat.timer",
     "prelude-selftest.timer",
+    "prelude-microstructure.timer",
 )
 ALL_UNITS = SERVICE_UNITS + TIMER_UNITS
 
@@ -133,6 +136,25 @@ def _fake_install_env(tmp_path: Path, *, systemctl_exit: int = 0) -> dict[str, s
         "    exit 70\n"
         "  fi\n"
         "fi\n"
+        "if [ -n \"${FAKE_SYSTEMCTL_STATE_ROOT:-}\" ]; then\n"
+        "  unit_name=${key#*:}\n"
+        "  state_file=\"$FAKE_SYSTEMCTL_STATE_ROOT/$unit_name\"\n"
+        "  case \"$1\" in\n"
+        "    is-enabled|is-active)\n"
+        "      suffix=enabled; fallback=not-found; wanted=enabled\n"
+        "      if [ \"$1\" = is-active ]; then suffix=active; fallback=inactive; wanted=active; fi\n"
+        "      state=$fallback\n"
+        "      if [ -f \"$state_file.$suffix\" ]; then read -r state < \"$state_file.$suffix\"; fi\n"
+        "      [ \"${2:-}\" = --quiet ] || printf '%s\\n' \"$state\"\n"
+        "      [ \"$state\" = \"$wanted\" ]; exit $? ;;\n"
+        "    enable|disable)\n"
+        "      state=enabled; [ \"$1\" = enable ] || state=disabled\n"
+        "      printf '%s\\n' \"$state\" > \"$state_file.enabled\"; exit 0 ;;\n"
+        "    start|restart|stop)\n"
+        "      state=active; [ \"$1\" != stop ] || state=inactive\n"
+        "      printf '%s\\n' \"$state\" > \"$state_file.active\"; exit 0 ;;\n"
+        "  esac\n"
+        "fi\n"
         "case \"$1\" in\n"
         "  list-unit-files)\n"
         "    printf '%s' \"${FAKE_SYSTEMCTL_UNIT_FILES:-}\"\n"
@@ -226,6 +248,7 @@ def _run_installer(
     env: dict[str, str],
     *,
     check_only: bool = True,
+    add_microstructure: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     args = ["bash", str(INSTALLER)]
     if check_only:
@@ -233,6 +256,8 @@ def _run_installer(
     else:
         env = env.copy()
         env["PRELUDE_INSTALL_FIXTURE"] = "1"
+        if add_microstructure:
+            args.append("--add-microstructure")
     return subprocess.run(
         args,
         cwd=ROOT,
@@ -254,6 +279,18 @@ def _fixture_repo_for_installer(
         "deploy/run_pipeline_stage.sh",
         "ops/backup_manifest.py",
         "ops/runtime_env.py",
+        "data/collector_upbit_microstructure.py",
+        "data/upbit_microstructure.py",
+        "scripts/capture_recommend_microstructure.py",
+        "signals/recommend_microstructure.py",
+        "signals/recommend_microstructure_trial.py",
+        "scripts/evaluate_recommend_microstructure_trial.py",
+        "signals/recommend_trade_shortlist.py",
+        "signals/recommend_trade_shortlist_trial.py",
+        "signals/recommend_trade_shortlist_eval.py",
+        "scripts/evaluate_recommend_trade_shortlist_trial.py",
+        "ops/recommend_microstructure_status.py",
+        "ops/recommend_trade_shortlist_status.py",
         "scripts/daily_run_distribution.sh",
         "scripts/daily_close_distribution.sh",
         "scripts/daily_run_preopen.sh",
@@ -282,7 +319,7 @@ def test_all_services_pin_kst_network_and_failure_contracts() -> None:
     services = sorted(DEPLOY.glob("prelude-*.service"))
     operational = [path for path in services if "failure-alert@" not in path.name]
 
-    assert len(operational) == 8
+    assert len(operational) == 9
     for path in services:
         unit = _unit(path)
         assert unit["Service"]["Type"] == "oneshot"
@@ -309,10 +346,8 @@ def test_all_services_pin_kst_network_and_failure_contracts() -> None:
         assert unit["Service"]["StandardError"] == "journal"
 
 
-def test_selftest_unit_runs_full_suite_before_morning_cycle() -> None:
-    """07:30 selftest 계약: 아침 사이클(08:50 preopen) 전에 전수 스위트를
-    돌려 회귀를 라이브 이전에 경보로 승격한다. 테스트가 실 발송을 만들 수
-    없도록 유닛 수준에서도 텔레그램을 봉쇄한다."""
+def test_selftest_runs_full_suite_without_ordering_recommendations_after_it() -> None:
+    """Keep the 07:30 full-suite alarm, but never queue R1 behind a late test."""
     unit = _unit(DEPLOY / "prelude-selftest.service")
     command = unit["Service"]["ExecStart"]
     assert "/venv/bin/python -m pytest" in command
@@ -321,10 +356,8 @@ def test_selftest_unit_runs_full_suite_before_morning_cycle() -> None:
     assert "TMPDIR=/home/soccz/22tb/tmp" in environment
     assert int(unit["Service"]["TimeoutStartSec"]) >= 1800
     assert unit["Unit"]["OnFailure"] == "prelude-failure-alert@%n.service"
-    assert {
-        "prelude-preopen.service",
-        "prelude-distribution.service",
-    } <= set(unit["Unit"]["Before"].split())
+    assert "Before" not in unit["Unit"]
+    assert unit["Unit"]["After"].split() == ["network-online.target"]
 
 
 def test_postopen_pipeline_is_serialized_and_ordered() -> None:
@@ -366,6 +399,7 @@ def test_timer_calendar_and_catchup_contracts_are_explicit_kst() -> None:
         ),
         "prelude-heartbeat.timer": ("*-*-* 10:30:00 Asia/Seoul", "true"),
         "prelude-selftest.timer": ("*-*-* 07:30:00 Asia/Seoul", "true"),
+        "prelude-microstructure.timer": ("*-*-* 08:45:00 Asia/Seoul", "false"),
     }
 
     timers = sorted(DEPLOY.glob("prelude-*.timer"))
@@ -1065,3 +1099,247 @@ def test_first_install_failure_removes_every_new_unit(tmp_path: Path) -> None:
     assert not any((unit_dir / unit).exists() for unit in ALL_UNITS)
     assert not list(unit_dir.glob(".prelude-install.*"))
     assert not list(unit_dir.glob(".prelude-backup.*"))
+
+
+MICROSTRUCTURE_TIMER = "prelude-microstructure.timer"
+MICROSTRUCTURE_UNITS = ("prelude-microstructure.service", MICROSTRUCTURE_TIMER)
+ORIGINAL_TIMERS = tuple(name for name in TIMER_UNITS if name != MICROSTRUCTURE_TIMER)
+ORIGINAL_UNITS = tuple(name for name in ALL_UNITS if name not in MICROSTRUCTURE_UNITS)
+
+
+def _stateful_fixture(env: dict[str, str], *, omit_collector: bool = True) -> Path:
+    state_root = Path(env["PRELUDE_INSTALL_CRON_ROOT"]) / "timer-state"
+    state_root.mkdir()
+    env["FAKE_SYSTEMCTL_STATE_ROOT"] = str(state_root)
+    for timer in TIMER_UNITS:
+        if omit_collector and timer == MICROSTRUCTURE_TIMER:
+            continue
+        (state_root / f"{timer}.enabled").write_text("enabled\n")
+        (state_root / f"{timer}.active").write_text("active\n")
+    if omit_collector:
+        for unit in MICROSTRUCTURE_UNITS:
+            (Path(env["PRELUDE_INSTALL_UNIT_DIR"]) / unit).unlink()
+    return state_root
+
+
+def _unit_identities(env: dict[str, str], names=ORIGINAL_UNITS) -> dict:
+    root = Path(env["PRELUDE_INSTALL_UNIT_DIR"])
+    return {
+        name: ((root / name).stat().st_ino, (root / name).stat().st_mode, (root / name).read_bytes())
+        for name in names
+    }
+
+
+def _mutations(env: dict[str, str]) -> list[str]:
+    return [
+        line for line in Path(env["FAKE_SYSTEMCTL_LOG"]).read_text().splitlines()
+        if line.split(":", 1)[0] in {"enable", "disable", "start", "stop", "restart"}
+    ]
+
+
+def test_collector_service_is_bounded_public_record_only_and_independent() -> None:
+    unit = _unit(DEPLOY / "prelude-microstructure.service")
+    section = unit["Service"]
+    assert unit["Unit"]["After"].split() == ["network-online.target"]
+    assert "Before" not in unit["Unit"]
+    assert "Requires" not in unit["Unit"]
+    assert "BindsTo" not in unit["Unit"]
+    command = shlex.split(section["ExecStart"])
+    assert command[:3] == [
+        "/home/soccz/22tb/prelude/venv/bin/python", "-B",
+        "/home/soccz/22tb/prelude/scripts/capture_recommend_microstructure.py",
+    ]
+    assert dict(zip(command[3::2], command[4::2], strict=True)) == {
+        "--orderbook-depth": "1",
+        "--max-wait-seconds": "2400",
+        "--required-warmup-seconds": "600",
+        "--max-raw-bytes-per-channel": "536870912",
+    }
+    assert "PRELUDE_FORBID_TELEGRAM=1" in section["Environment"].split()
+    assert "EnvironmentFile" not in section
+    for key, expected in {
+        "Restart": "no", "Nice": "15", "IOSchedulingClass": "best-effort",
+        "IOSchedulingPriority": "7", "CPUQuota": "50%", "MemoryMax": "2G",
+        "TimeoutStartSec": "2700", "TimeoutStopSec": "90", "KillMode": "control-group",
+    }.items():
+        assert section[key] == expected
+    assert _unit(DEPLOY / MICROSTRUCTURE_TIMER)["Timer"]["RandomizedDelaySec"] == "0"
+    assert _unit(DEPLOY / MICROSTRUCTURE_TIMER)["Timer"]["AccuracySec"] == "5s"
+    for name in ORIGINAL_UNITS:
+        assert "prelude-microstructure" not in (DEPLOY / name).read_text()
+
+
+@pytest.mark.parametrize("enabled,active", [("enabled", "active"), ("disabled", "inactive"), ("disabled", "active"), ("enabled", "inactive")])
+def test_add_only_preserves_original_eight_files_and_states(tmp_path, enabled, active):
+    env = _fake_install_env(tmp_path)
+    state_root = _stateful_fixture(env)
+    for index, timer in enumerate(ORIGINAL_TIMERS):
+        if index % 2:
+            (state_root / f"{timer}.enabled").write_text(f"{enabled}\n")
+            (state_root / f"{timer}.active").write_text(f"{active}\n")
+    units_before = _unit_identities(env)
+    states_before = {p.name: p.read_bytes() for p in state_root.iterdir()}
+    result = _run_installer(env, check_only=False, add_microstructure=True)
+    assert result.returncode == 0, result.stderr
+    assert _unit_identities(env) == units_before
+    for name, payload in states_before.items():
+        assert (state_root / name).read_bytes() == payload
+    assert _mutations(env) == [f"enable:{MICROSTRUCTURE_TIMER}", f"restart:{MICROSTRUCTURE_TIMER}"]
+    for unit in MICROSTRUCTURE_UNITS:
+        assert (Path(env["PRELUDE_INSTALL_UNIT_DIR"]) / unit).read_bytes() == (DEPLOY / unit).read_bytes()
+
+
+@pytest.mark.parametrize("failure,occurrence", [
+    ("daemon-reload", 1), (f"enable:{MICROSTRUCTURE_TIMER}", 1),
+    (f"restart:{MICROSTRUCTURE_TIMER}", 1),
+    ("show:prelude-microstructure.service", 1),
+    (f"is-enabled:{MICROSTRUCTURE_TIMER}", 2),
+    (f"is-active:{MICROSTRUCTURE_TIMER}", 1),
+    ("list-timers:--no-pager", 1),
+])
+def test_add_only_failure_rolls_back_only_collector(tmp_path, failure, occurrence):
+    env = _fake_install_env(tmp_path)
+    state_root = _stateful_fixture(env)
+    (state_root / "prelude-distribution.timer.enabled").write_text("disabled\n")
+    (state_root / "prelude-distribution.timer.active").write_text("inactive\n")
+    before = _unit_identities(env)
+    states_before = {p.name: p.read_bytes() for p in state_root.iterdir()}
+    env["FAKE_SYSTEMCTL_FAIL_MATCH"] = failure
+    env["FAKE_SYSTEMCTL_FAIL_OCCURRENCE"] = str(occurrence)
+    result = _run_installer(env, check_only=False, add_microstructure=True)
+    assert result.returncode != 0
+    assert "Previous systemd configuration restored." in result.stderr
+    assert _unit_identities(env) == before
+    assert all(line.endswith(f":{MICROSTRUCTURE_TIMER}") for line in _mutations(env))
+    for name, payload in states_before.items():
+        assert (state_root / name).read_bytes() == payload
+    unit_root = Path(env["PRELUDE_INSTALL_UNIT_DIR"])
+    assert not any((unit_root / name).exists() for name in MICROSTRUCTURE_UNITS)
+    assert not list(unit_root.glob(".prelude-install.*"))
+    assert not list(unit_root.glob(".prelude-backup.*"))
+
+
+@pytest.mark.parametrize("damage", ["changed", "missing", "symlink", "mode"])
+def test_add_only_refuses_original_unit_repairs_without_mutation(tmp_path, damage):
+    env = _fake_install_env(tmp_path)
+    _stateful_fixture(env)
+    path = Path(env["PRELUDE_INSTALL_UNIT_DIR"]) / "prelude-close.service"
+    if damage == "changed":
+        path.write_text("[Unit]\nDescription=old\n")
+    elif damage == "missing":
+        path.unlink()
+    elif damage == "symlink":
+        path.unlink()
+        path.symlink_to(DEPLOY / path.name)
+    else:
+        path.chmod(0o600)
+    before = _unit_identities(env, tuple(name for name in ORIGINAL_UNITS if name != path.name))
+    result = _run_installer(env, check_only=False, add_microstructure=True)
+    assert result.returncode != 0
+    assert not _mutations(env)
+    assert "daemon-reload" not in Path(env["FAKE_SYSTEMCTL_LOG"]).read_text()
+    assert _unit_identities(env, tuple(name for name in ORIGINAL_UNITS if name != path.name)) == before
+    assert not (path.parent / MICROSTRUCTURE_TIMER).exists()
+
+
+@pytest.mark.parametrize("add_only", [False, True])
+def test_identical_active_install_never_rearms_existing_timers(tmp_path, add_only):
+    env = _fake_install_env(tmp_path)
+    _stateful_fixture(env, omit_collector=False)
+    before = _unit_identities(env, ALL_UNITS)
+    result = _run_installer(env, check_only=False, add_microstructure=add_only)
+    assert result.returncode == 0, result.stderr
+    assert not _mutations(env)
+    assert _unit_identities(env, ALL_UNITS) == before
+
+
+@pytest.mark.parametrize("changed_unit", ["prelude-close.service", "prelude-close.timer"])
+def test_full_install_rearms_only_changed_timer_pair(tmp_path, changed_unit):
+    env = _fake_install_env(tmp_path)
+    _stateful_fixture(env, omit_collector=False)
+    path = Path(env["PRELUDE_INSTALL_UNIT_DIR"]) / changed_unit
+    path.write_text(path.read_text() + "\n# old definition\n")
+    untouched = tuple(name for name in ALL_UNITS if name != changed_unit)
+    before = _unit_identities(env, untouched)
+    result = _run_installer(env, check_only=False)
+    assert result.returncode == 0, result.stderr
+    assert _mutations(env) == ["enable:prelude-close.timer", "restart:prelude-close.timer"]
+    assert _unit_identities(env, untouched) == before
+
+
+def test_changed_collector_rollback_restores_only_its_files_and_timer_state(tmp_path):
+    env = _fake_install_env(tmp_path)
+    state_root = _stateful_fixture(env, omit_collector=False)
+    path = Path(env["PRELUDE_INSTALL_UNIT_DIR"]) / MICROSTRUCTURE_UNITS[0]
+    old = b"[Unit]\nDescription=old capture unit\n"
+    path.write_bytes(old)
+    path.chmod(0o640)
+    (state_root / f"{MICROSTRUCTURE_TIMER}.enabled").write_text("disabled\n")
+    (state_root / f"{MICROSTRUCTURE_TIMER}.active").write_text("inactive\n")
+    before = _unit_identities(env)
+    env["FAKE_SYSTEMCTL_FAIL_MATCH"] = f"restart:{MICROSTRUCTURE_TIMER}"
+    result = _run_installer(env, check_only=False, add_microstructure=True)
+    assert result.returncode != 0
+    assert "Previous systemd configuration restored." in result.stderr
+    assert path.read_bytes() == old
+    assert path.stat().st_mode & 0o777 == 0o640
+    assert _unit_identities(env) == before
+    assert all(line.endswith(f":{MICROSTRUCTURE_TIMER}") for line in _mutations(env))
+    assert (state_root / f"{MICROSTRUCTURE_TIMER}.enabled").read_text() == "disabled\n"
+    assert (state_root / f"{MICROSTRUCTURE_TIMER}.active").read_text() == "inactive\n"
+
+
+def test_nine_timer_check_only_has_no_file_or_runtime_mutations(tmp_path):
+    env = _fake_install_env(tmp_path)
+    state_root = _stateful_fixture(env, omit_collector=False)
+    before = _unit_identities(env, ALL_UNITS)
+    states_before = {p.name: p.read_bytes() for p in state_root.iterdir()}
+    result = _run_installer(env)
+    assert result.returncode == 0, result.stderr
+    assert "prelude systemd preflight: OK" in result.stdout
+    assert _unit_identities(env, ALL_UNITS) == before
+    assert {p.name: p.read_bytes() for p in state_root.iterdir()} == states_before
+    assert not _mutations(env)
+    assert "daemon-reload" not in Path(env["FAKE_SYSTEMCTL_LOG"]).read_text()
+    assert not list(Path(env["PRELUDE_INSTALL_UNIT_DIR"]).glob(".prelude-*"))
+
+
+def test_add_only_preserves_disabled_but_global_check_reports_it(tmp_path):
+    env = _fake_install_env(tmp_path)
+    state_root = _stateful_fixture(env)
+    (state_root / "prelude-distribution.timer.enabled").write_text("disabled\n")
+    first = _run_installer(env, check_only=False, add_microstructure=True)
+    assert first.returncode == 0, first.stderr
+    second = _run_installer(env)
+    assert second.returncode != 0
+    assert "timer is not enabled: prelude-distribution.timer" in second.stderr
+
+
+@pytest.mark.parametrize("relative", [
+    "scripts/capture_recommend_microstructure.py",
+    "signals/recommend_microstructure.py",
+    "signals/recommend_microstructure_trial.py",
+    "scripts/evaluate_recommend_microstructure_trial.py",
+    "signals/recommend_trade_shortlist.py",
+    "signals/recommend_trade_shortlist_trial.py",
+    "signals/recommend_trade_shortlist_eval.py",
+    "scripts/evaluate_recommend_trade_shortlist_trial.py",
+    "ops/recommend_microstructure_status.py",
+    "ops/recommend_trade_shortlist_status.py",
+])
+@pytest.mark.parametrize("damage", ["missing", "symlink", "directory"])
+def test_installer_requires_safe_microstructure_wrapper_and_trial_runtimes(tmp_path, relative, damage):
+    env = _fake_install_env(tmp_path)
+    repo = _fixture_repo_for_installer(tmp_path, env)
+    path = repo / relative
+    path.unlink()
+    if damage == "symlink":
+        path.symlink_to(ROOT / relative)
+    elif damage == "directory":
+        path.mkdir()
+    before = _unit_identities(env, ALL_UNITS)
+    result = _run_installer(env, check_only=False, add_microstructure=True)
+    assert result.returncode != 0
+    assert f"microstructure runtime is missing or unsafe: {relative}" in result.stderr
+    assert _unit_identities(env, ALL_UNITS) == before
+    assert not Path(env["FAKE_SYSTEMCTL_LOG"]).exists()

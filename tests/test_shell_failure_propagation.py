@@ -1302,6 +1302,59 @@ def test_backup_refreshes_expired_last_copy_before_retention(tmp_path):
     assert checksum.returncode == 0
 
 
+def test_backup_captures_microstructure_raw_and_trial_publication_together(tmp_path):
+    repo = tmp_path / "repo"
+    scripts = repo / "scripts"
+    scripts.mkdir(parents=True)
+    (repo / "data").mkdir()
+    with sqlite3.connect(repo / "data" / "upbit_d1.db") as connection:
+        connection.execute("CREATE TABLE evidence (value TEXT)")
+        connection.execute("INSERT INTO evidence VALUES ('microstructure')")
+    evidence = {
+        "data/microstructure/upbit/capture/trade.jsonl.gz": b"frozen raw trade",
+        "data/microstructure/upbit/capture/manifest.json": b'{"capture_id":"capture"}',
+        "output/recommend_microstructure_trials/2026-09-08/snapshot/score.json": (
+            b'{"snapshot_id":"snapshot","scores":[0.125]}'
+        ),
+        "output/recommend_microstructure_trials/2026-09-08/snapshot/commit.json": (
+            b'{"snapshot_id":"snapshot","status":"committed"}'
+        ),
+        "output/recommend_trade_shortlist_trials/2026-09-10/r1_top10_trade_imbalance_v1/score.json": (
+            b'{"trial_id":"r1_top10_trade_imbalance_v1","plan":"synthetic-only"}'
+        ),
+        "output/recommend_trade_shortlist_trials/2026-09-10/r1_top10_trade_imbalance_v1/commit.json": (
+            b'{"trial_id":"r1_top10_trade_imbalance_v1","status":"committed"}'
+        ),
+    }
+    for relative, payload in evidence.items():
+        path = repo / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+    script = scripts / "backup_db.sh"
+    script.write_text(_backup_script_source(repo))
+
+    result = subprocess.run(
+        ["bash", str(script)], cwd=repo, text=True, capture_output=True,
+        check=False, timeout=30,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    backup = repo / "backup"
+    manifest_path = backup / f"ledgers_{time.strftime('%Y%m%d')}.manifest"
+    manifest = dict(
+        line.split("=", 1)
+        for line in manifest_path.read_text(encoding="utf-8").splitlines()
+    )
+    archive_path = backup / manifest["archive"]
+    assert hashlib.sha256(archive_path.read_bytes()).hexdigest() == manifest["sha256"]
+    with tarfile.open(archive_path, "r:gz") as archive:
+        for relative, payload in evidence.items():
+            member = archive.extractfile(relative)
+            assert member is not None
+            assert member.read() == payload
+            assert (repo / relative).read_bytes() == payload
+
+
 def test_backup_captures_terminal_verdict_state_and_anchor_in_one_generation(
     tmp_path,
 ):

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Install the single supported prelude scheduler: eight systemd timers.
+# Install the single supported prelude scheduler: nine systemd timers.
 #
 # Production:
 #   sudo bash deploy/install_systemd.sh
+#   sudo bash deploy/install_systemd.sh --add-microstructure  # preserve existing eight
+#   sudo bash deploy/install_systemd.sh --update-selftest  # one service; no timer restart
 #
 # Read-only validation (cron spool inspection still requires root):
 #   sudo bash deploy/install_systemd.sh --check-only
@@ -11,12 +13,17 @@ set -euo pipefail
 umask 077
 
 CHECK_ONLY=0
+ADD_MICROSTRUCTURE=0
+UPDATE_SELFTEST=0
 FIXTURE_INSTALL=0
+[ "$#" -le 1 ] || { echo "ERROR: expected at most one mode" >&2; exit 64; }
 case "${1:-}" in
     "") ;;
     --check-only) CHECK_ONLY=1 ;;
+    --add-microstructure) ADD_MICROSTRUCTURE=1 ;;
+    --update-selftest) UPDATE_SELFTEST=1 ;;
     -h|--help)
-        sed -n '1,9p' "$0"
+        sed -n '1,10p' "$0"
         exit 0
         ;;
     *)
@@ -28,6 +35,17 @@ esac
 die() {
     echo "ERROR: $*" >&2
     exit 1
+}
+
+require_selftest_idle() {
+    local state
+    if ! state=$("$SYSTEMCTL_BIN" show prelude-selftest.service --property=ActiveState --value); then
+        die "cannot determine selftest runtime state"
+    fi
+    case "$state" in
+        inactive|failed) ;;
+        *) die "selftest must be inactive or failed before/after update (found $state)" ;;
+    esac
 }
 
 if [ "${PRELUDE_INSTALL_FIXTURE:-0}" = "1" ]; then
@@ -89,6 +107,7 @@ SERVICE_UNITS=(
     prelude-backup.service
     prelude-heartbeat.service
     prelude-selftest.service
+    prelude-microstructure.service
     prelude-failure-alert@.service
 )
 TIMER_UNITS=(
@@ -100,8 +119,20 @@ TIMER_UNITS=(
     prelude-backup.timer
     prelude-heartbeat.timer
     prelude-selftest.timer
+    prelude-microstructure.timer
 )
 ALL_UNITS=("${SERVICE_UNITS[@]}" "${TIMER_UNITS[@]}")
+MICROSTRUCTURE_UNITS=(prelude-microstructure.service prelude-microstructure.timer)
+INSTALL_UNITS=("${ALL_UNITS[@]}")
+INSTALL_TIMERS=("${TIMER_UNITS[@]}")
+if [ "$ADD_MICROSTRUCTURE" -eq 1 ]; then
+    INSTALL_UNITS=("${MICROSTRUCTURE_UNITS[@]}")
+    INSTALL_TIMERS=(prelude-microstructure.timer)
+fi
+if [ "$UPDATE_SELFTEST" -eq 1 ]; then
+    INSTALL_UNITS=(prelude-selftest.service)
+    INSTALL_TIMERS=()
+fi
 
 if [ "$EUID" -ne 0 ] && [ "$CRON_ROOT" = "/" ]; then
     die "root is required to inspect every user's cron spool (use sudo)"
@@ -286,6 +317,23 @@ validate_repo_contract() {
         [ -r "$REPO/$required_script" ] ||
             die "required runtime is not readable: $required_script"
     done
+    for required_script in \
+        data/collector_upbit_microstructure.py \
+        data/upbit_microstructure.py \
+        scripts/capture_recommend_microstructure.py \
+        signals/recommend_microstructure.py \
+        signals/recommend_microstructure_trial.py \
+        scripts/evaluate_recommend_microstructure_trial.py \
+        signals/recommend_trade_shortlist.py \
+        signals/recommend_trade_shortlist_trial.py \
+        signals/recommend_trade_shortlist_eval.py \
+        scripts/evaluate_recommend_trade_shortlist_trial.py \
+        ops/recommend_microstructure_status.py \
+        ops/recommend_trade_shortlist_status.py; do
+        [ -f "$REPO/$required_script" ] && [ ! -L "$REPO/$required_script" ] &&
+            [ -r "$REPO/$required_script" ] ||
+            die "microstructure runtime is missing or unsafe: $required_script"
+    done
     [ -e "$REPO/deploy/run_pipeline_stage.sh" ] &&
         [ ! -L "$REPO/deploy/run_pipeline_stage.sh" ] &&
         [ -f "$REPO/deploy/run_pipeline_stage.sh" ] &&
@@ -309,6 +357,7 @@ validate_repo_contract() {
 }
 
 validate_installed_contract() {
+    local scope="${1:-all}"
     local fragment_path
     local installed_path
     local installed_mode
@@ -322,6 +371,12 @@ validate_installed_contract() {
         die "systemd unit path is not a directory: $UNIT_DIR"
 
     for unit in "${ALL_UNITS[@]}"; do
+        if [ "$scope" = "existing" ] && [[ "$unit" = prelude-microstructure.* ]]; then
+            continue
+        fi
+        if [ "$scope" = "except-selftest" ] && [ "$unit" = "prelude-selftest.service" ]; then
+            continue
+        fi
         installed_path="$UNIT_DIR/$unit"
         [ -e "$installed_path" ] ||
             die "installed unit missing: $installed_path"
@@ -360,7 +415,16 @@ validate_installed_contract() {
             die "systemd FragmentPath mismatch for $unit: ${fragment_path:-<empty>}"
     done
 
+    [ "$scope" = "all" ] || return 0
     for unit in "${TIMER_UNITS[@]}"; do
+        if { [ "$ADD_MICROSTRUCTURE" -eq 1 ] && [ "$unit" != "prelude-microstructure.timer" ]; } ||
+           [ "$UPDATE_SELFTEST" -eq 1 ]; then
+            read_timer_state "$unit"
+            [ "$CURRENT_ENABLED_STATE" = "${PREVIOUS_ENABLED_STATE[$unit]}" ] &&
+                [ "$CURRENT_ACTIVE_STATE" = "${PREVIOUS_ACTIVE_STATE[$unit]}" ] ||
+                die "existing timer state changed during add-only install: $unit"
+            continue
+        fi
         "$SYSTEMCTL_BIN" is-enabled --quiet "$unit" ||
             die "timer is not enabled: $unit"
         "$SYSTEMCTL_BIN" is-active --quiet "$unit" ||
@@ -505,6 +569,9 @@ ROLLBACK_FAILED=0
 declare -A HAD_ORIGINAL=()
 declare -A PREVIOUS_ACTIVE_STATE=()
 declare -A PREVIOUS_ENABLED_STATE=()
+declare -A CHANGED_UNIT=()
+CHANGED_UNITS=()
+AFFECTED_TIMERS=()
 
 cleanup_temp_tree() {
     local candidate="$1"
@@ -534,7 +601,7 @@ rollback_install() {
     set +e
     # Quiesce definitions from the failed transaction while they still exist,
     # so a first-time install cannot leave active jobs or dangling enablement.
-    for unit in "${TIMER_UNITS[@]}"; do
+    for unit in "${AFFECTED_TIMERS[@]}"; do
         "$SYSTEMCTL_BIN" stop "$unit" || {
             [ "${PREVIOUS_ACTIVE_STATE[$unit]:-unknown}" = "unknown" ] ||
                 ROLLBACK_FAILED=1
@@ -542,7 +609,7 @@ rollback_install() {
         "$SYSTEMCTL_BIN" disable "$unit" || ROLLBACK_FAILED=1
     done
 
-    for unit in "${ALL_UNITS[@]}"; do
+    for unit in "${CHANGED_UNITS[@]}"; do
         if [ "${HAD_ORIGINAL[$unit]:-0}" -eq 1 ]; then
             /usr/bin/mv -f -- "$BACKUP_DIR/$unit" "$UNIT_DIR/$unit" ||
                 ROLLBACK_FAILED=1
@@ -553,7 +620,7 @@ rollback_install() {
     done
 
     "$SYSTEMCTL_BIN" daemon-reload || ROLLBACK_FAILED=1
-    for unit in "${TIMER_UNITS[@]}"; do
+    for unit in "${AFFECTED_TIMERS[@]}"; do
         case "${PREVIOUS_ENABLED_STATE[$unit]:-not-found}" in
             enabled)
                 "$SYSTEMCTL_BIN" enable "$unit" || ROLLBACK_FAILED=1
@@ -582,7 +649,7 @@ rollback_install() {
     fi
 }
 
-snapshot_timer_state() {
+read_timer_state() {
     local enabled_state
     local active_state
     local unit="$1"
@@ -602,10 +669,10 @@ snapshot_timer_state() {
     fi
     case "$enabled_state" in
         enabled)
-            PREVIOUS_ENABLED_STATE["$unit"]="enabled"
+            CURRENT_ENABLED_STATE="enabled"
             ;;
         disabled|not-found)
-            PREVIOUS_ENABLED_STATE["$unit"]="$enabled_state"
+            CURRENT_ENABLED_STATE="$enabled_state"
             ;;
         *)
             die "unsupported prior enabled state for $unit: ${enabled_state:-<empty>}"
@@ -615,8 +682,8 @@ snapshot_timer_state() {
     # 존재하지 않던 신규 timer는 active 상태도 정의되지 않는다. 일부
     # systemd는 is-active를 "inactive"로 답하지만 이를 기억하면 rollback이
     # 파일 제거 후 존재하지 않는 unit에 stop을 호출해 복구를 거짓 실패시킨다.
-    if [ "${PREVIOUS_ENABLED_STATE[$unit]}" = "not-found" ]; then
-        PREVIOUS_ACTIVE_STATE["$unit"]="unknown"
+    if [ "$CURRENT_ENABLED_STATE" = "not-found" ]; then
+        CURRENT_ACTIVE_STATE="unknown"
         return
     fi
 
@@ -630,15 +697,22 @@ snapshot_timer_state() {
     fi
     case "$active_state" in
         active)
-            PREVIOUS_ACTIVE_STATE["$unit"]="active"
+            CURRENT_ACTIVE_STATE="active"
             ;;
         inactive|unknown)
-            PREVIOUS_ACTIVE_STATE["$unit"]="$active_state"
+            CURRENT_ACTIVE_STATE="$active_state"
             ;;
         *)
             die "unsupported prior active state for $unit: ${active_state:-<empty>}"
             ;;
     esac
+}
+
+snapshot_timer_state() {
+    local unit="$1"
+    read_timer_state "$unit"
+    PREVIOUS_ENABLED_STATE["$unit"]="$CURRENT_ENABLED_STATE"
+    PREVIOUS_ACTIVE_STATE["$unit"]="$CURRENT_ACTIVE_STATE"
 }
 
 finish_install() {
@@ -675,7 +749,27 @@ for unit in "${TIMER_UNITS[@]}"; do
     snapshot_timer_state "$unit"
 done
 
-for unit in "${ALL_UNITS[@]}"; do
+if [ "$ADD_MICROSTRUCTURE" -eq 1 ]; then
+    # Add-only is not permission to repair or enable the original scheduler.
+    validate_installed_contract existing
+fi
+if [ "$UPDATE_SELFTEST" -eq 1 ]; then
+    # One-service update is not permission to install/repair/re-arm other units.
+    # Keep all timers, including disabled ones, in their observed state.
+    validate_installed_contract except-selftest
+    selftest_installed="$UNIT_DIR/prelude-selftest.service"
+    [ -f "$selftest_installed" ] && [ ! -L "$selftest_installed" ] ||
+        die "selftest update requires an existing regular service file"
+    [ "$(/usr/bin/stat -c '%a' "$selftest_installed")" = "644" ] ||
+        die "existing selftest service mode must be 0644"
+    if [ "$CRON_ROOT" = "/" ]; then
+        [ "$(/usr/bin/stat -c '%U' "$selftest_installed")" = "root" ] ||
+            die "existing selftest service owner must be root"
+    fi
+    require_selftest_idle
+fi
+
+for unit in "${INSTALL_UNITS[@]}"; do
     installed_path="$UNIT_DIR/$unit"
     if [ -e "$installed_path" ] || [ -L "$installed_path" ]; then
         [ ! -L "$installed_path" ] ||
@@ -686,22 +780,45 @@ for unit in "${ALL_UNITS[@]}"; do
         /usr/bin/cmp -s "$installed_path" "$BACKUP_DIR/$unit" ||
             die "unit backup differs from installed file: $unit"
         HAD_ORIGINAL["$unit"]=1
+        if /usr/bin/cmp -s "$REPO/deploy/$unit" "$installed_path" &&
+           [ "$(/usr/bin/stat -c '%a' "$installed_path")" = "644" ] &&
+           { [ "$CRON_ROOT" != "/" ] || [ "$(/usr/bin/stat -c '%U' "$installed_path")" = "root" ]; }; then
+            continue
+        fi
     else
         HAD_ORIGINAL["$unit"]=0
+    fi
+    CHANGED_UNITS+=("$unit")
+    CHANGED_UNIT["$unit"]=1
+done
+
+for unit in "${INSTALL_TIMERS[@]}"; do
+    service="${unit%.timer}.service"
+    if [ "${CHANGED_UNIT[$unit]:-0}" -eq 1 ] ||
+       [ "${CHANGED_UNIT[$service]:-0}" -eq 1 ] ||
+       [ "${PREVIOUS_ENABLED_STATE[$unit]}" != "enabled" ] ||
+       [ "${PREVIOUS_ACTIVE_STATE[$unit]}" != "active" ]; then
+        AFFECTED_TIMERS+=("$unit")
     fi
 done
 
 TRANSACTION_ACTIVE=1
-for unit in "${ALL_UNITS[@]}"; do
+for unit in "${CHANGED_UNITS[@]}"; do
     /usr/bin/mv -f -- "$STAGE_DIR/$unit" "$UNIT_DIR/$unit"
 done
 
 "$SYSTEMCTL_BIN" daemon-reload
-"$SYSTEMCTL_BIN" enable "${TIMER_UNITS[@]}"
-# daemon-reload updates definitions, but an already-active timer may retain its
-# old next elapse. Restart re-arms all eight calendars; Persistent=true timers
-# may then perform their intended missed-run catch-up.
-"$SYSTEMCTL_BIN" restart "${TIMER_UNITS[@]}"
+if [ "$UPDATE_SELFTEST" -eq 1 ]; then
+    # Detect activation during the transaction, without stopping any timer.
+    # These observations are not an atomic lock against other systemd clients.
+    require_selftest_idle
+fi
+for unit in "${AFFECTED_TIMERS[@]}"; do
+    "$SYSTEMCTL_BIN" enable "$unit"
+    # Only changed/new or explicitly activated timers are re-armed. Identical,
+    # enabled/active timers retain their schedule and never receive stop/start.
+    "$SYSTEMCTL_BIN" restart "$unit"
+done
 validate_installed_contract
 
 echo
@@ -717,7 +834,7 @@ BACKUP_DIR=""
 
 echo
 echo "=== Test ==="
-echo "  sudo systemctl start prelude-distribution.service  # 수동 1회 실행"
+echo "  sudo bash deploy/install_systemd.sh --check-only  # read-only verification"
 echo "  systemctl status prelude-distribution.timer        # 다음 실행 시각 확인"
 echo "  journalctl -u prelude-distribution.service -n 50   # 로그 확인"
 echo
