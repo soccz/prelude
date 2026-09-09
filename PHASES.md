@@ -28,9 +28,9 @@
 
 - [x] 공개 범위·잠금 실패 처리 수리 및 표적 검증. 잘못된 상속 FD4종 RED→16 PASS.
 - [x] 현재 상태 데이터 계약·생성기·검증기·대시보드 연결. 개인 NOTES 생성 경로 제거.
-- [ ] 개발일지 후속 이야기·GitHub 설명·설치 완료 문서 정정. 소개/설치 정정 완료, 원격 About 반영 대기.
+- [x] 개발일지 후속 이야기·GitHub 설명·설치 완료 문서 정정. 원격 About/홈 설명까지 확인.
 - [x] 독립 검토·전수/실화면 검증. **2,915 PASS/436.77초**; 최종 UI CSS 후 양화면 재검사 PASS.
-- [ ] 선별 코드 push·Pages/암호화 데이터 게시·원격 확인.
+- [x] 선별 코드 push·Pages/암호화 데이터 게시·원격 확인. 공유 Pages 작업 폴더 수정 없음.
 
 ### 독립 검토·수리와 공개 경계
 
@@ -63,6 +63,27 @@
 검증 명령: `PRELUDE_FORBID_TELEGRAM=1 venv/bin/python -B -m pytest -q -x -p no:cacheprovider`
 (TMPDIR은허용임시경로, BLAS/OMP단일스레드, bytecode미작성); 선택Python `ruff check`,
 `bash -n scripts/publish_dashboard.sh`, Pages inline script `node --check`, 격리Chrome CDP 가짜상태검사.
+
+### 실제 게시 결과 (2026-09-09)
+
+- 코드 `38fa217`:107파일 선별 commit/push 완료. 정상 pre-push가 **비공개 자료 없는 별도 HEAD**에서
+  변경Python93개 Ruff와 전수 **2,915 PASS/431.07초**를 다시 확인했다. gate 우회/force push는 없다.
+- Pages 화면 `01e131bd1`:홈 prelude설명/공개 소개/대시보드 HTML3파일만 반영했다.
+  [정적 배포 성공](https://github.com/soccz/soccz.github.io/actions/runs/34316875080)을 확인했고,
+  실제 HTTP의3 HTML SHA가 검증한 clone과 정확히 일치했다.
+- 기존 publisher를 `PRELUDE_FORBID_TELEGRAM=1`로 수동1회 실행해 새 암호화 데이터를 게시했다.
+  `9b57aeee4`,14:58:53 완료;[데이터 배포 성공](https://github.com/soccz/soccz.github.io/actions/runs/34317070317).
+  이번 게시 준비가 갱신한 policy/idea 운영 산출물은 코드 commit에서 제외했다.
+- 원격 암호화5파일을 다시 받아 HMAC·스키마·현재 출처·동일세대 검증과 HTTP바이트 일치를 확인했다.
+  세대 `167a3618-4009-4886-85d3-43fa83d5b380`,운영 확인시각09-09 14:58:29 KST.
+  R1 장전/장후 전달 확인, 동점시험 증거불일치, Top10 시작전을 그대로 표시한다. NOTES 제외도 검증했다.
+  PIN은 출력/게시하지 않았고 개인 가상 원장의 평문이나 비공개 중간자료를 public source에 추가하지 않았다.
+- GitHub About은 현재 R1/발송기반평가/별도시험/자동주문없음으로 갱신했고 homepage는 소개 URL로 연결했다.
+  공유 Pages worktree는 후속 읽기에서도 clean이었다. 검증용 로컬 HTTP서버·임시Chrome만 종료했다.
+
+**완료 경계:** 코드·공개 이야기·대시보드 반영 완료. 새 추천우위/09-10 첫정규수집 성공을 뜻하지 않는다.
+대시보드 데이터는 기존10:10 예약 게시가 다음날 갱신하며, 소개 개발일지는 실제 개발·판정이 바뀔 때
+그 근거와 함께 후속 장으로 갱신한다. 이번 작업으로 새 학습/실알림/주문/라벨 규칙을 바꾸지 않았다.
 
 ## 실사용 강화 11차 — 첫 정규 실행 장애 수리·추천 경로 격리 (2026-09-09)
 
