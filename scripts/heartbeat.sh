@@ -344,6 +344,17 @@ else
     WARN "recommend snapshot chain probe FAIL (exit=$probe_rc; details logged)"
 fi
 
+# 2s) A healthy recommendation chain does not prove today's test suite passed.
+# Inspect only the latest systemd execution; never start/reset/retry the unit.
+# This independent heartbeat warning must not block the recommendation timers.
+if /usr/bin/timeout --signal=TERM --kill-after=5s 15s \
+    python -B -m ops.selftest_status --format text >>"$LOG" 2>&1; then
+    echo "  selftest daily completion checked" >> "$LOG"
+else
+    selftest_probe_rc=$?
+    WARN "selftest daily completion probe FAIL (exit=$selftest_probe_rc; details logged)"
+fi
+
 # 2e) Scheduled microstructure evidence: detect a day when the independent
 # timer never ran, without collecting, replaying or changing R1. Calendar and
 # waiting/no-op classification belong to the read-only status CLI, not shell.

@@ -4,7 +4,6 @@ import json
 import hashlib
 import math
 import multiprocessing
-import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +13,7 @@ import pytest
 
 import scripts.pump_detector_v2_today as runner
 from notifier.telegram import TelegramSendResult, TelegramServerMessage
+from process_helpers import isolate_append_child, run_concurrent
 
 
 @pytest.fixture(autouse=True)
@@ -181,7 +181,7 @@ def _run_main(
 def _append_in_child(ledger: str, result: dict, start) -> None:
     # spawn 자식은 이 모듈의 kill-switch-해제 fixture 환경을 물려받는다 —
     # 어떤 코드 경로도 실 텔레그램에 닿지 못하게 자식에서 재봉쇄한다.
-    os.environ["PRELUDE_FORBID_TELEGRAM"] = "1"
+    isolate_append_child()
     start.wait()
     runner.append_ledger(
         result,
@@ -549,7 +549,10 @@ def test_ledger_rejects_invalid_success_timestamp(tmp_path, sent_at):
     assert not ledger.exists()
 
 
-def test_concurrent_same_decision_append_is_idempotent(tmp_path):
+def test_concurrent_same_decision_append_is_idempotent(tmp_path, monkeypatch):
+    # Restore the child guard before spawn imports this module; in-process
+    # mocked transport tests deliberately remove it in their autouse fixture.
+    monkeypatch.setenv("PRELUDE_FORBID_TELEGRAM", "1")
     context = multiprocessing.get_context("spawn")
     ledger = tmp_path / "v2.csv"
     worker_count = 4
@@ -561,18 +564,7 @@ def test_concurrent_same_decision_append_is_idempotent(tmp_path):
         )
         for _ in range(worker_count)
     ]
-    try:
-        for process in processes:
-            process.start()
-        start.wait(timeout=10)
-        for process in processes:
-            process.join(timeout=10)
-            assert process.exitcode == 0
-    finally:
-        for process in processes:
-            if process.is_alive():
-                process.terminate()
-                process.join(timeout=2)
+    run_concurrent(processes, start, operation_timeout=10)
 
     rows = pd.read_csv(ledger)
     assert len(rows) == 1

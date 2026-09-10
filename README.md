@@ -4,13 +4,24 @@
 > KST 08:50·09:05에 알려 주는 개인 트레이딩 보조 레이더.
 > 사용자가 직접 판단·매매하며 **자동 주문은 없다.**
 
-![tests](https://img.shields.io/badge/tests-2915%20passed-brightgreen)
+![tests](https://img.shields.io/badge/tests-3000%20passed-brightgreen)
 ![status](https://img.shields.io/badge/verdict-radar--not--strategy-orange)
 ![evidence](https://img.shields.io/badge/evidence-snapshot%E2%86%92receipt%E2%86%92label-blue)
 ![judgment](https://img.shields.io/badge/v2%20verdict-KILL%20(early%2C%202026--08--05)-red)
 
 **전체 여정(실패 포함) 공개 보고서** → [soccz.github.io/projects/prelude](https://soccz.github.io/projects/prelude/) ·
 **일일 대시보드** → [/dashboard](https://soccz.github.io/projects/prelude/dashboard/) (매일 KST 10:10, PIN 암호화)
+
+**2026-09-10 일일 장애 후속 보완:** 오늘 추천2회와 원장6행은 정상이나 자동 테스트2건이 시간 초과했다.
+동시성 테스트의 spawn 준비와 실제 작업 기한을 분리하고, heartbeat에 당일 selftest 완료 확인을 추가했다.
+양수인1% 미만 추정값은 `0%` 대신 `<1%`로 표시한다. 점수·순위·모델·과거 발송 증거는 그대로다.
+로컬 전수 **3,000 PASS/421.80초** 및 독립 코드 검토를 통과했다. 사용자 실행 후 실제 CPU50%
+서비스에서도 **3,000 PASS/878.74초**, 종료exit0과 종합 점검의 `passed` 상태까지 독립 확인했다.
+**이번 세 가지 수정의 검증은 완료됐으며 추가 설치·수동 검사는 필요 없다.**
+코드·개발일지 공개 준비와 PC/모바일 검증을 마쳤으나 GitHub/Pages에는 아직 게시하지 않았다.
+공개 전 과거 문서의 대시보드 PIN 노출을 발견해 본문에서 제거했고,
+사용자 결정에 따라 **기존 PIN·암호화 데이터는 유지한다.** 기존 Git 이력은 본문 삭제만으로 보호되지 않는다.
+설계·재현 한계·검증·인계는 [PHASES 13차](PHASES.md#실사용-강화-13차--일일-점검-실패확률-표시종합-감시-보완-2026-09-10) 참조.
 
 **2026-09-09 공개 기록 갱신:** 소개 페이지는 아이디어·실패·수리·다음 가설이 이어지는 개발일지다.
 9월의 상방 모델/날짜 정합/확률 보정 비교 미채택과 새 체결정보 기록시험을 추가했다.
@@ -31,7 +42,8 @@ Pages 배포 성공과 공개 HTML/암호화5파일의 바이트 일치·동일 
 systemd 한정 설정도 사용자가 `--update-selftest`로 설치했다. 이후 설치19파일의 일치와
 loaded 순서 의존 제거·자원상한을 읽기 확인했다. **현재 추가 설치는 필요 없다.**
 
-오늘 실패한 원본은 그대로 보존한다. 첫 정상 수집·새 시험의 진입 전 저장·성숙한 비교 결과는 앞으로 확인해야 한다.
+09-09 실패 원본은 그대로 보존한다.09-10 감사에서는 첫 정상 수집과 두 시험의 진입 전 기록을 확인했다.
+성숙한 비교 결과와 실제 추천 개선 여부는 아직 미검증이다.
 상세 근거와 정확한 검증 명령은 [PHASES 11차](PHASES.md#실사용-강화-11차--첫-정규-실행-장애-수리추천-경로-격리-2026-09-09),
 설치 후 읽기 확인은 [OPS](OPS.md#12-단일-scheduler-계약) 참조.
 
@@ -193,10 +205,11 @@ git log --oneline -5
 # 안전한 수동 점검 (기록·발송 없음)
 python scripts/health_check.py --channel recommend --no-telegram
 PYTHONDONTWRITEBYTECODE=1 PRELUDE_FORBID_TELEGRAM=1 python -B scripts/report_recommendation_status.py --format text
+PYTHONDONTWRITEBYTECODE=1 python -B -m ops.selftest_status --format text  # 실제 마지막 일일검사 확인
 sudo bash deploy/install_systemd.sh --check-only      # 설치본-저장소 정합 검사
 
 # 전체 검증
-TMPDIR=/home/soccz/22tb/tmp PYTHONDONTWRITEBYTECODE=1 PRELUDE_FORBID_TELEGRAM=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 python -B -m pytest -q -x -p no:cacheprovider tests/  # 2026-09-07: 2165 passed
+TMPDIR=/home/soccz/22tb/tmp PYTHONDONTWRITEBYTECODE=1 PRELUDE_FORBID_TELEGRAM=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 python -B -m pytest -q -p no:cacheprovider tests/  # 2026-09-10 로컬: 3000 passed
 ```
 
 ---
@@ -216,7 +229,7 @@ prelude/
 ├── notifier/          # Telegram + durable 발송 intent + delivery receipt
 ├── scripts/           # 일일 러너·백테스트·챌린저·감사 평가기
 ├── deploy/            # systemd 19유닛(9타이머) + 한정 교체/복구 지원 installer
-├── tests/             # 2026-09-09 pytest 2852 PASS (warnings=error)
+├── tests/             # 2026-09-10 로컬 pytest 3000 PASS (warnings=error)
 ├── _workspace/        # 연구 노트·설계·독립 재검산 판정서 (negative results 박제)
 └── output/            # 산출물 (증거 아티팩트는 gitignore + versioned backup)
 ```
@@ -246,7 +259,10 @@ prelude/
       부팅폭풍 캐치업 직렬화 · 15m 갭치유(--heal-days) · 상폐 종목 구조적 종결(halted)
 - [ ] forward 표본 축적 (새 계약 하 매일 자동)
 - [x] **v2 동결 판정 — 2026-08-05 조기 KILL 자동 집행** (조기사망 조항 · 기준 무수정 · 판정문 해시 박제)
-- [ ] 신규 시험의 실제 수집·진입 전 저장·성숙한 비교 결과 확인. 모델 변경/실제 추천 승격은 검증 근거와 사용자 승인 필요
+- [x] 09-10 신규 시험의 첫 정상 수집·진입 전 기록 확인(운영 증거, 성능 판정 아님)
+- [ ] 신규 시험의 성숙한 비교 결과 확인. 모델 변경/실제 추천 승격은 검증 근거와 사용자 승인 필요
+- [x] 09-10 selftest 준비/작업 기한 분리·작은 확률 표시·종합 감시 누락 보완(로컬3,000 PASS)
+- [x] 수정본의 실제 CPU50% selftest3,000 PASS/878.74초 및 native 상태passed 확인(추가 설치 없음)
 
 ---
 

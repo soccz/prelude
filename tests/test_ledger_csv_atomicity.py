@@ -11,6 +11,12 @@ import pandas as pd
 import pytest
 
 from ledger import csv_store
+from process_helpers import (
+    isolate_append_child,
+    join_processes,
+    run_concurrent,
+    stop_processes,
+)
 
 
 def _shadow_candidate(coin: str) -> pd.DataFrame:
@@ -32,13 +38,16 @@ def _shadow_append_worker(
     start: Any,
     results: Any,
 ) -> None:
+    isolate_append_child()
     from ledger.shadow import append_shadow_ledger
 
+    candidate = _shadow_candidate(coin)
+    decision_at = pd.Timestamp(f"{date} 09:05:00")
     start.wait()
     try:
         result = append_shadow_ledger(
-            _shadow_candidate(coin),
-            pd.Timestamp(f"{date} 09:05:00"),
+            candidate,
+            decision_at,
             ledger_path,
             "distribution",
         )
@@ -242,16 +251,16 @@ def _atomic_writer_worker(
 
 
 def _join_clean(processes: list[mp.Process]) -> None:
-    for process in processes:
-        process.join(timeout=30)
-        assert not process.is_alive(), f"worker hung: pid={process.pid}"
-        assert process.exitcode == 0
+    try:
+        join_processes(processes, timeout=30)
+    finally:
+        stop_processes(processes)
 
 
 def test_concurrent_shadow_appends_do_not_lose_distinct_snapshots(tmp_path):
     ctx = mp.get_context("spawn")
     path = tmp_path / "shadow.csv"
-    start = ctx.Event()
+    start = ctx.Barrier(7)
     results = ctx.Queue()
     processes = [
         ctx.Process(
@@ -266,10 +275,7 @@ def test_concurrent_shadow_appends_do_not_lose_distinct_snapshots(tmp_path):
         )
         for day in range(1, 7)
     ]
-    for process in processes:
-        process.start()
-    start.set()
-    _join_clean(processes)
+    run_concurrent(processes, start)
 
     outcomes = [results.get(timeout=5) for _ in processes]
     assert outcomes.count(("ok", 1)) == len(processes)
@@ -281,7 +287,7 @@ def test_concurrent_shadow_appends_do_not_lose_distinct_snapshots(tmp_path):
 def test_concurrent_same_snapshot_rechecks_idempotency_inside_lock(tmp_path):
     ctx = mp.get_context("spawn")
     path = tmp_path / "shadow.csv"
-    start = ctx.Event()
+    start = ctx.Barrier(7)
     results = ctx.Queue()
     processes = [
         ctx.Process(
@@ -290,10 +296,7 @@ def test_concurrent_same_snapshot_rechecks_idempotency_inside_lock(tmp_path):
         )
         for index in range(6)
     ]
-    for process in processes:
-        process.start()
-    start.set()
-    _join_clean(processes)
+    run_concurrent(processes, start)
 
     outcomes = [results.get(timeout=5) for _ in processes]
     assert sum(value for status, value in outcomes if status == "ok") == 1

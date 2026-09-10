@@ -116,6 +116,35 @@ Ruff(변경 Python)+전수 pytest gate가 정상 `git push` 경로에서 차단�
 원격에서 절대 강제하려면 별도 CI required check와 branch protection이 필요하며,
 현재 저장소에는 그 원격 정책이 구성되어 있지 않다.
 
+**09-10 selftest 후속 보완:** 아침 실제 실행은2,913 PASS/2 FAIL이며 두 실패는
+spawn 준비와 작업 시간의 혼합 제한(join30초, barrier10초)에서 발생했다. CPU50%는
+그대로 유지하고, 해당 동시성 검사는 전체 자식 준비에 초기90초를 별도로 부여한다.
+모든 자식이 import·격리를 마쳐야 동시에 시작하며, 실제 작업은 기존30초/10초의
+그룹 공통 기한으로 검사한다. 시작/작업 실패 시 terminate→join→kill→join으로 정리한다.
+자식 수·spawn 방식·결과 단언·전체 pytest 실행은 유지한다. 준비 지연 주입으로 취약한
+제한 결합을 확인했다. `systemd-run --user` 임시 작업은 이 서버에서 CPU 제한이 실효 적용되지 않아
+대체 증거로 쓰지 않았다. 이후 사용자가 실제 system service를 실행해 **3,000 PASS/878.74초**를
+확인했다.14:47 KST 읽기 검증에서도 CPUQuota500ms/1s 유지,14:27:21→14:42:03 정상exit0,
+native `ops.selftest_status`의 `passed`/exit0을 확인했다. 이번 운영 검증은 완료 상태다.
+
+10:30 heartbeat는 `ops.selftest_status`로 실제 systemd 최신 실행도 조회한다.
+**KST 오늘 시작·종료한 정상 exit0**만 통과하며 실패·미실행·전일 성공·실행 중·조회 오류는
+기존 경고 묶음에 포함한다. 내부8초/외부15초 제한으로 후속 점검을 무한히 막지 않는다.
+나중에 당일 재실행이 성공하면 최신 상태는 정상으로 돌아오지만 이전 실패 경보·journal은 남는다.
+이는 마지막 실행 상태 검사이지 현재 코드 리비전 인증이나 추천 성능 평가가 아니다.
+서비스/타이머 정의 변경이 없으므로 **설치·daemon-reload는 필요 없다**.
+
+```bash
+# 읽기 전용: 실패/미완료/조회 불능은 exit1
+PYTHONDONTWRITEBYTECODE=1 venv/bin/python -B -m ops.selftest_status --format text
+# 수정본의 실제 CPU50% 환경 전수검증이 필요할 때, 기존 selftest가 실행 중이 아닌지 확인 후
+sudo systemctl start prelude-selftest.service
+journalctl -u prelude-selftest.service -n 80 --no-pager
+```
+
+코드 수정만으로 failed 상태를 지우거나 성공으로 바꾸지 않는다.09-10에는 실제 후속 성공이
+확인돼 정상으로 돌아왔으며 추가 수동 검사는 필요 없다. 이후07:30 예약 전수검사는 계속 실행된다.
+
 **2026-07-29 반영 상태:** 8개 timer를 포함한 저장소 unit과
 `/etc/systemd/system` 설치본을 동기화했다. 설치 후에도 위 `--check-only`를
 통과해야 적용 완료로 간주한다.
@@ -139,6 +168,11 @@ Ruff(변경 Python)+전수 pytest gate가 정상 `git push` 경로에서 차단�
   과거 암호화 세대는 호환하며 새 화면은 현재 상태 필드가 없으면 미제공이라고 표시한다.
 - 상속 `PRELUDE_PUBLISH_LOCK_FD` 검증 실패는 즉시 종료한다. 인증된5파일·동일세대·출처 검사를
   통과한 임시 clone의 data만 게시하며 공유 Pages 작업 폴더를 덮어쓰지 않는다.
+
+**09-10 공개 준비 중 보안 발견:** 과거 공개 문서에 현재 대시보드 PIN과 같은 리터럴이 있었다.
+로컬 문서의 값은 제거했으나 Git 이력 노출은 남는다. 이를 안내한 뒤 사용자가 현재 문서의
+값만 제거하고 기존 PIN은 유지하라고 결정했다. runtime PIN·암호화5파일·예약 작업·Git 이력은
+변경하지 않고 공개 반영을 진행한다. 기밀성 회복 조치가 아니며 진행 상태는 PHASES13차 참조.
 
 **09-08 16:01 당시 확인:** 사용자 설치 완료.9개 timer loaded/enabled/active,
 설치파일19개와 저장소 SHA 일치. 새 timer는 **09-09 08:45 KST** 첫 실행을 기다린다.
@@ -350,6 +384,9 @@ PYTHONDONTWRITEBYTECODE=1 PRELUDE_FORBID_TELEGRAM=1 venv/bin/python -B scripts/r
 
 - 사용자 승인에 따라 알림 확률은 **검증 중 추정치**, 09:00 가격은 **현재 체결가격이 아닌 참고가격**으로
   정정한다. 기존 종목·순위·확률값·TP/SL은 변경하지 않는다. 이미 보낸 메시지를 수정·재발송하지 않는다.
+- 09-10 승인된 표시 보완: `0 < p < 0.01`은 `<1%`, 실제0은 `0%`, 1% 이상은 기존 정수
+  표시를 유지한다. NaN/무한대/범위 밖/잘못된 값은 `—`다. 예전0% 메시지의 receipt/journal은
+  원본 해시로 계속 검증하며 새 formatter로 재발송하지 않는다. 수치·순위·모델은 바꾸지 않는다.
 - 새 `ModelSpec`의 기본값은 `challenger_only=True`다. 기존 7개 명시 등록 설정은 그대로다.
   기본 잠금이 별도 승인·모델 버전별 forward 검증 체계 전체를 대체하지는 않는다.
 - 이번 변경은 저장소 Python 코드이며 systemd unit 설치/재시작은 필요 없다. 다음 정규 실행이 새 코드를

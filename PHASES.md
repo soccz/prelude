@@ -4,6 +4,102 @@
 
 ---
 
+## 실사용 강화 13차 — 일일 점검 실패·확률 표시·종합 감시 보완 (2026-09-10)
+
+오늘 Telegram 기반 읽기 감사에서 추천2회·원장6행은 정상이나 selftest2건 실패를 확인했다.
+사용자가 세 가지 보완(테스트 제한시간,0% 오해,heartbeat 누락)에 `오케이 진행해`로 승인했다.
+모델·추천 순위·확률값·라벨·연구 동결 자료·과거 영수증·운영 output8개 dirty 변경은 건드리지 않는다.
+
+### 설계·완료 경계
+
+1. CPU50%·타이머·전수검사·결과 단언을 유지한다. spawn/import 준비와 실제 동시쓰기 기한을
+   분리하고, 부분 시작 실패/준비 실패/작업 정체에서도 자식을 유한 시간 안에 정리한다.
+2. `0<p<1%`만 `<1%`로 표시한다. 실제0/기존1% 이상 표시는 유지하고 잘못된 값은 `—`로 둔다.
+   기존 성공 영수증과 발송 저널은 그대로이며, 새 포맷 때문에 재발송하거나 점수를 다시 계산하지 않는다.
+3. heartbeat는 systemd selftest 최신 실행을 읽어 KST 오늘 시작·종료한 exit0만 정상으로 인정한다.
+   실패/전일 성공/미실행/진행 중/조회 오류를 경고하고 기존 추천·다른 점검의 실행을 막지 않는다.
+4. 표적 회귀·시간 지연/실패 주입·독립 검토·전수 pytest·Ruff/셸 검사 후 보고한다.
+   sudo 비밀번호 없이 실제 서비스 재검증은 불가하며 로컬 PASS와 운영 제한 환경 PASS를 구분한다.
+
+- [x] 실제 오늘 실패 journal과 설치 CPUQuota500ms/1s 재확인. 제한 환경 성공으로 위장하지 않음.
+- [x] 테스트 준비90초와 작업30초/10초 분리, 공동 출발/공통 종료기한, 실패 cleanup·자식 격리.
+- [x] 확률 표시26개 회귀와 과거 영수증/저널 byte 보존·중복발송 방지 확인.
+- [x] selftest 읽기 검사 및 heartbeat 연결. 실제 오늘 failed를 exit1로 검출.
+- [x] 최종 전수3,000 PASS/421.80초, 독립 검토 차단급 결함 없음. Ruff·셸 검사 통과.
+- [x] 수정본의 실제 CPU50% service 전수통과 확인 — 사용자 수동 실행3,000 PASS/878.74초, 종료exit0 및 native 상태passed 독립 확인.
+
+### 실측·검증 기록
+
+- 오늘 자동 테스트는2,913 PASS/2 FAIL/1059.91초. 실패는 6개 spawn의 join30초와4개 spawn의
+  barrier10초로, 수치 결과 불일치 단언 전에 발생했다. CPU 사용496.88초/벽시간약1063초.
+- `systemd-run --user` 임시 unit으로2개 PASS/3.44초였지만 CPU7.99초/벽시간5.26초여서50% 제한
+  재현 증거가 아니다. system transient 재현은 `sudo -n ...`가 비밀번호 필요로 거부됐다.
+- 시간 주입에서40초 준비가 옛10초 barrier에 실패하는 경로를 확인하고, 새 준비/작업 분리에서는
+  통과함을 검증했다. 준비90초 초과·작업정체·자식 비정상종료·부분 spawn실패·terminate 무시도 검사한다.
+- 준비 예산90초는 초기값이며 실제 서비스의 cold-start와 부하를 관측해 조정한다.
+  자동 재시도·skip·xfail·worker 축소·fork 전환·CPU 제한 해제는 없다.
+- 표적: 확률/영수증/상태/Telegram192 PASS, heartbeat 확장194 PASS 및 최종83 PASS,
+  worker harness/CSV 원장/v2 전달70 PASS. 마지막 전수 결과는 아래 최종 검증에 기록한다.
+- `ops.selftest_status`는8초 bounded query,heartbeat hook은15초(+TERM 후5초)다.
+  최신 당일 정상 재실행만 상태를 회복시킨다. reset-failed나 기존 실패 지우기는 하지 않는다.
+- 미래 R1 알림에만 `<1%`가 반영된다. 이미 보낸 메시지·원장·snapshot·receipt는 바꾸지 않는다.
+  GitHub/Pages 게시·systemd 설치·실발송·모델 재학습은 이번 변경에 포함하지 않았다.
+
+### 최종 검증·인계
+
+```bash
+PRELUDE_FORBID_TELEGRAM=1 PYTHONDONTWRITEBYTECODE=1 TMPDIR=/home/soccz/22tb/tmp OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 venv/bin/python -B -m pytest -q -p no:cacheprovider
+# 3000 passed in 421.80s (85개 신규, 실제 CPU50% 서비스 실행 결과가 아님)
+ruff check --no-cache scripts/recommend_send.py ops/selftest_status.py tests/process_helpers.py tests/test_process_helpers.py tests/test_recommend_send_format.py tests/test_selftest_status.py tests/test_heartbeat_selftest.py tests/test_heartbeat_microstructure.py tests/test_ledger_csv_atomicity.py tests/test_pump_detector_v2_delivery.py
+bash -n scripts/heartbeat.sh
+```
+
+작업 파일은 `scripts/recommend_send.py`, `scripts/heartbeat.sh`, `ops/selftest_status.py`,
+`tests/process_helpers.py` 및 관련 회귀7파일, `OPS.md`/`PHASES.md`/`README.md`다.
+새 helper2파일 최종 Black 정렬은 전후AST 동등으로 기능 불변을 확인했다.
+정렬 후 관련12개 테스트 파일354 PASS/29.00초, Ruff·Black6파일·셸문법·diff-check 모두 통과했다.
+14:25 KST 최종 읽기 검사에서도 오늘 두 R1 발송의 원래 서버수락 상태와 시각이 유지됐다.
+기존 운영 output8개와 비공개 연구자료는 그대로 보존하고 commit/push하지 않는다.
+초기 인계 때 실제 service 재검증은 sudo 비밀번호를 처리할 수 없어 남겨 두었다.
+이후 사용자가 `sudo systemctl start prelude-selftest.service`를 실행했고,14:42:01 journal에
+**3,000 PASS/878.74초(14분38초)**가 기록됐다.14:47 KST 독립 읽기 검사에서 다음을 확인했다.
+
+- 실제 시작14:27:21→종료14:42:03, `Result=success`, `ExecMainCode=1`, `ExecMainStatus=0`,
+  `ActiveState=inactive`/`SubState=dead`. oneshot의 정상 종료이며 계속 실행 중이어야 하는 서비스가 아니다.
+- `CPUQuotaPerSecUSec=500ms` 유지, CPU사용385.959초. 실제 제한을 풀어 얻은 통과가 아니다.
+- `venv/bin/python -B -m ops.selftest_status --format json`: exit0, `state=passed`,
+  `attention_required=false`, 당일 시작/종료시각 일치. 실패 지우기나 재발송 없이 최신 성공으로 회복했다.
+- journal 끝부분을 `--since '2026-09-10 14:40:00' --until '2026-09-10 14:43:00'`로 직접 조회해
+  사용자 제공 로그와 전수통과가 일치함도 확인했다.
+
+**이번 세 가지 수정의 구현·로컬 검증·실제 service 검증은 완료됐다. 추가 설치/수동 검사는 필요 없다.**
+다음 정규 실행부터 새 표시·heartbeat 감시를 사용한다. 한 번의 전수통과가 미래 무장애나 추천 성능을
+보장하지 않으므로 매일 검사는 계속한다.
+
+### 후속 공개 준비·PIN 유지 결정 (2026-09-10)
+
+사용자의 후속 `마무리 다 하고 말해` 요청으로 GitHub·개발일지 Pages 공개를 준비했다.
+코드14파일만 stage했고 기존 운영 output8개와 비공개 자료는 제외했다. 별도 Pages clone
+`_workspace/pages_release_20260910`의 `projects/prelude/index.html`에 실패→수리→실제 서버
+재검증 흐름을 추가했다. 기존 실패 기록은 유지하며 추천 성능 개선과 운영 정상화를 구분했다.
+
+- 독립 검토: staged allowlist14개 일치, 본문과 새 HTML의 실제 runtime 비밀값 직접일치0건.
+- HTML·내부 링크32개·중복 ID·inline JS·diff 검사 통과. PC1440/모바일390 화면을 확인했고
+  가로 넘침·미처리 JS 예외가 없었다. 대시보드 검사는 가짜 상태만 사용했다.
+  브라우저는 HTTP 확인 본문을 격리 렌더링했고 외부 글꼴 대신 로컬 대체 글꼴을 사용했다.
+- 현재 공개 암호화5파일은09-10 동일 생성 세대·native 인증/출처 검증을 통과하고 공개본과
+  SHA가 일치했다. 이는 데이터 형식/일관성 검사이지 아래 노출된 키의 기밀성 보장이 아니다.
+- 공개 전 검사에서 과거 공개 문서의 PIN 리터럴이 현재 runtime 값과 같음을 발견했다.
+  현재 PHASES 본문의 리터럴은 제거했으나 과거 Git 기록에도 있어 삭제만으로 비밀이 되지 않는다.
+- **사용자 결정:** 노출 사실과 과거 Git 기록의 한계를 안내한 뒤 사용자가 현재 문서에서
+  지울 수 있는 값만 지우고 PIN은 유지하라고 명시했다. 이 범위로 공개 준비를 재개한다.
+  `.env`·PIN·암호화5파일·과거 Git 이력은 변경하지 않는다. 기밀성이 회복됐다고 주장하지 않는다.
+  값 자체는 로그·채팅·새 문서에 기록하지 않는다.
+- **다음 단계:** 코드의 clean-worktree pre-push 전수검사와 GitHub/Pages 배포·공개본 대조를
+  완료한다. 소개 HTML만 갱신하며 기존 대시보드 데이터는 재생성하지 않는다.
+
+---
+
 ## 실사용 강화 12차 — 개발일지·현재 대시보드·GitHub 공개 반영 (2026-09-09)
 
 사용자가 공개 소개를 아이디어→가설→시도→검증→성공/실패→다음 질문이 이어지는 개발일지로
@@ -1607,7 +1703,7 @@ radar 로 배선 — 정직 고지 (자동 net 음수) 포함.
 
 **라이브 첫 결과 (28 closed dist + 24 closed preopen)**: 누적 가상 PnL 둘 다 음수 (dist -12.97%, preopen -13.47%). avg_max +6.82% / avg_min -5.94% (dist) — 변동성은 크지만 5% TP 룰 + 비용으로 누적은 깎임. 라이브 paper 데이터 더 쌓이면서 calibration 트랙 (사용자 NOTES + dashboard) 으로 룰 조정.
 
-**Tear sheet 강화 (2026-05-07 추가)**: pyfolio / quantstats / Bailey & Lopez de Prado (2014) 표준까지 cover. 추가된 metric (총 22+) — Volatility / Skew / Kurt / VaR / CVaR / Tail Ratio / Recovery Factor / Ulcer Index / Common Sense Ratio / W-L streak / **PSR / DSR / MinTRL** / Information Ratio / Beta / Tracking Error vs BTC HODL / Top 5 Drawdowns / Underwater plot / Rolling Sharpe (30d ann) / Monthly returns heatmap / Best & Worst trades / Stratification (regime/setup/score) / Score×PnL scatter / CSV download. PIN 9963 PBKDF2+AES 암호화 + papers viewer 와 동일 패턴.
+**Tear sheet 강화 (2026-05-07 추가)**: pyfolio / quantstats / Bailey & Lopez de Prado (2014) 표준까지 cover. 추가된 metric (총 22+) — Volatility / Skew / Kurt / VaR / CVaR / Tail Ratio / Recovery Factor / Ulcer Index / Common Sense Ratio / W-L streak / **PSR / DSR / MinTRL** / Information Ratio / Beta / Tracking Error vs BTC HODL / Top 5 Drawdowns / Underwater plot / Rolling Sharpe (30d ann) / Monthly returns heatmap / Best & Worst trades / Stratification (regime/setup/score) / Score×PnL scatter / CSV download. PIN 기반 PBKDF2+AES 암호화 + papers viewer 와 동일 패턴.
 
 **Methodology 출처 1:1**: Sharpe (1966) / Sortino & Price (1994) / Young 1991 / Martin 1987 / Rockafellar & Uryasev 2000 / Treynor & Black 1973 / Bailey & Lopez de Prado 2014 / Efron 1979 / pyfolio / quantstats — chip sub + about-card + References 3중 표기.
 

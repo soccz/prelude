@@ -310,14 +310,20 @@ def _regime_kr(regime: str) -> str:
 
 
 def _pct(x) -> str:
-    """0~1 확률 → 정직 % 표기. None/NaN 은 '—'."""
+    """0~1 확률 → % 표기. 양수인 1% 미만은 '<1%', 잘못된 값은 '—'."""
+    if isinstance(x, bool):
+        return "—"
     try:
         v = float(x)
-        if v != v:  # NaN
-            return "—"
-        return f"{v * 100:.0f}%"
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return "—"
+    if not 0 <= v <= 1:  # Also rejects NaN and both infinities.
+        return "—"
+    if v == 0:
+        return "0%"
+    if v < 0.01:
+        return "<1%"
+    return f"{v * 100:.0f}%"
 
 
 def _signed_pct(x) -> str:
