@@ -95,8 +95,26 @@ bash -n scripts/heartbeat.sh
   지울 수 있는 값만 지우고 PIN은 유지하라고 명시했다. 이 범위로 공개 준비를 재개한다.
   `.env`·PIN·암호화5파일·과거 Git 이력은 변경하지 않는다. 기밀성이 회복됐다고 주장하지 않는다.
   값 자체는 로그·채팅·새 문서에 기록하지 않는다.
-- **다음 단계:** 코드의 clean-worktree pre-push 전수검사와 GitHub/Pages 배포·공개본 대조를
-  완료한다. 소개 HTML만 갱신하며 기존 대시보드 데이터는 재생성하지 않는다.
+- 추가 current-tree 감사에서 테스트 fixture2곳도 같은 문자열을 쓰고 있어 별도의 합성4자리
+  값으로 교체했다. `test_dashboard_passphrase_accepts_four_digit_pin`의4자리 허용 검증은
+  그대로다. 실제 `.env` 전후 byte 동일, 공개 범위395파일의 runtime 비밀값 일치0건을 확인했다.
+
+### 공개 반영 결과 (2026-09-10)
+
+- 코드 `192f182`:14파일을 정상 push했다. clean-worktree pre-push에서 변경 Python10파일
+  Ruff와 전수 **3,000 PASS/465.88초**를 통과했다. 로컬 dirty 산출물에 의존하지 않는 커밋 검사다.
+- 소개 `4b82349`: `projects/prelude/index.html`1파일만 정상 push했다.
+  [Pages run34444170422](https://github.com/soccz/soccz.github.io/actions/runs/34444170422)가
+  **15:12:32 KST success**로 끝났다. 사이트 공유 worktree·다른 프로젝트는 수정하지 않았다.
+- `_workspace/release_checks_20260910/verify_published.py`로 공개 소개·대시보드 HTML2개와
+  암호화 JSON5개의HTTP200·SHA 일치,09-10 동일 생성 세대, native 인증/출처 검증을 통과했다.
+  기존 PIN과5파일은 재생성/재암호화하지 않았다. 개인 NOTES 제외·자동 주문/승격 없음도 유지한다.
+- 테스트 fixture 후속 정리는 해당 파일 **9 PASS/1.85초**, Ruff 통과 후 이 공개 결과 기록과
+  함께 별도 커밋으로 반영한다. 후속 커밋도 기존 clean-worktree 전수 pre-push를 생략하지 않는다.
+- 15:16 KST native selftest 읽기 검사도 `passed`/`attention_required=false`/exit0였다.
+  실제 서비스 재시작·추론·재발송·재학습·새 systemd 설치는 이번 공개 작업에서 실행하지 않았다.
+- **운영 수리와 공개 반영을 마무리했으며 추가 사용자 설치는 없다.** 과거 Git 기록은 사용자
+  결정대로 유지하고, 추천 우위 검증은 기존 forward 기록 절차를 계속 따른다.
 
 ---
 

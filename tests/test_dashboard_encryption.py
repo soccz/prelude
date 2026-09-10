@@ -85,9 +85,10 @@ def test_dashboard_passphrase_rejects_weak_or_ambiguous_values(
 
 def test_dashboard_passphrase_accepts_four_digit_pin(monkeypatch):
     # 2026-07-28 사용자 명시 승인 — 최소 길이 12 → 4 완화 계약 고정.
-    monkeypatch.setenv("PRELUDE_DASHBOARD_PIN", "9963")
+    synthetic_pin = "3147"  # 합성 테스트 값이며 운영 설정을 읽지 않는다.
+    monkeypatch.setenv("PRELUDE_DASHBOARD_PIN", synthetic_pin)
 
-    assert resolve_dashboard_passphrase() == "9963"
+    assert resolve_dashboard_passphrase() == synthetic_pin
 
 
 def test_dashboard_passphrase_accepts_explicit_or_environment_secret(
