@@ -60,6 +60,7 @@ from ops.champion_selector import (  # noqa: E402
     load_champion_state_artifact,
 )
 from ops.dashboard_current import build_current_system  # noqa: E402
+from ops.dashboard_research import build_research_progress  # noqa: E402
 from scripts.idea_validation_report import (
     IdeaArtifactError,
     build_input_manifest as build_idea_input_manifest,
@@ -2179,6 +2180,7 @@ def main():
         "asof_timezone": "Asia/Seoul",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "current_system": build_current_system(asof=asof.date().isoformat()),
+        "research_progress": build_research_progress(asof=asof.date().isoformat()),
         "channels": {
             "distribution": compute_distribution_summary(
                 df_dist,

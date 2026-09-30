@@ -205,6 +205,23 @@ def test_five_authenticated_current_assets_pass(tmp_path):
     assert actual == expected
 
 
+@pytest.mark.parametrize("private_field", [False, True])
+def test_research_projection_is_checked_after_authenticated_decryption(tmp_path, private_field):
+    from ops.dashboard_research import _empty
+
+    payloads = _payloads()
+    payloads["summary.json"]["research_progress"] = _empty(ASOF.isoformat(), NOW)
+    if private_field:
+        payloads["summary.json"]["research_progress"]["private_reason"] = "must not publish"
+    directory = tmp_path / "assets"
+    _write_encrypted_assets(directory, payloads)
+    if private_field:
+        with pytest.raises(DashboardAssetError, match="research_progress invalid"):
+            _validate(directory)
+    else:
+        assert _validate(directory)["summary.json"]["research_progress"]["status"] == "unavailable"
+
+
 def test_plaintext_asset_is_rejected(tmp_path):
     asset_dir = tmp_path / "assets"
     _write_encrypted_assets(asset_dir, _payloads())

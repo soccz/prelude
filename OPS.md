@@ -304,6 +304,21 @@ PRELUDE_FORBID_TELEGRAM=1 PYTHONDONTWRITEBYTECODE=1 venv/bin/python -B -m ops.re
 
 #### 시장 상태별 정책 사전 기록 (09-30 준비, 10-01 open 시작)
 
+**09-30 추가: 웹에서 누적 진행 상황 확인.** 기존 dashboard build가
+`ops.dashboard_research`를20초 제한으로 호출해 검증된 post-label review 집계를
+`summary.research_progress`에 넣는다. 두 native 시험의 비교일/실제 교체/제외·대기와
+상승·하락 경험률/기존net/paired 날짜 block CI, 국면 사전 기록의 적격·마감일/교체 수를
+PIN 뒤 `#researchProgressSection`에 표시한다. 기록 시점과 결과 마감 시점을 구분한다.
+실시간 상태가 아니라 게시 시점 확인본이며 국면 정책별 성과/자동 채택 패널은 아니다.
+오래된/없는/시간초과 보고서는0건 대신 확인 불가,0비교일 성과와5일 미만 CI는 미제공이다.
+연구 실패가 기존 실알림 상태 카드를 숨기지 않으며 새로운 수집/원장/일정/설치는 없다.
+직접 읽기 점검은 `venv/bin/python -B -m ops.dashboard_research --probe --now <timezone포함시각>`이다.
+
+09-30 기존 백업 추가 읽기 감사에서는 실제 archive2,136항목 구조/전체SHA,
+최근 immutable24파일의 현재 원본 일치, 일봉·15분봉 DB SHA/integrity를 확인했다.
+새 체결 raw와 두 시험도 보관돼 있었다. 아직 생성 전인10-01 국면 기록의 백업 성공,
+실제 복원 훈련 또는 별도 물리 장치 사본을 확인한 것은 아니다. 상세는 PHASES22차다.
+
 기존 capture가 두 시험의 점수와 native 아침 평가를 보존한 뒤
 `ops.recommend_regime_forward.record_forward`를 호출한다. 결과는
 `output/recommend_regime_forward/YYYY-MM-DD/r1_regime_forward_v1/{score,commit}.json`에

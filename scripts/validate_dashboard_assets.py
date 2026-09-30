@@ -38,6 +38,7 @@ from ops.champion_selector import (  # noqa: E402
     load_champion_state_artifact,
 )
 from ops.dashboard_current import validate_current_system  # noqa: E402
+from ops.dashboard_research import validate_research_progress  # noqa: E402
 from ops.policy_competition import (  # noqa: E402
     PolicyArtifactError,
     load_policy_artifact,
@@ -353,6 +354,13 @@ def _validate_summary(
             )
         except (ValueError, TypeError, KeyError) as exc:
             raise DashboardAssetError("summary.current_system invalid") from exc
+    if "research_progress" in payload:
+        try:
+            validate_research_progress(
+                payload["research_progress"], asof=expected_asof.isoformat(), now=now,
+            )
+        except (ValueError, TypeError, KeyError) as exc:
+            raise DashboardAssetError("summary.research_progress invalid") from exc
     channels = _require_object(payload, "channels", context="summary")
     if set(channels) != {"distribution", "preopen", "recommend"}:
         raise DashboardAssetError("summary.channels schema mismatch")

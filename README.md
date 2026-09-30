@@ -4,13 +4,24 @@
 > KST 08:50·09:05에 알려 주는 개인 트레이딩 보조 레이더.
 > 사용자가 직접 판단·매매하며 **자동 주문은 없다.**
 
-![tests](https://img.shields.io/badge/tests-3300%20passed-brightgreen)
+![tests](https://img.shields.io/badge/tests-full%20suite%20pre--push%20gate-brightgreen)
 ![status](https://img.shields.io/badge/verdict-radar--not--strategy-orange)
 ![evidence](https://img.shields.io/badge/evidence-snapshot%E2%86%92receipt%E2%86%92label-blue)
 ![judgment](https://img.shields.io/badge/v2%20verdict-KILL%20(early%2C%202026--08--05)-red)
 
 **전체 여정(실패 포함) 공개 보고서** → [soccz.github.io/projects/prelude](https://soccz.github.io/projects/prelude/) ·
 **일일 대시보드** → [/dashboard](https://soccz.github.io/projects/prelude/dashboard/) (매일 KST 10:10, PIN 암호화)
+
+**2026-09-30 후속: 연구 진행 상황을 대시보드의 자동 갱신 경로에 연결했다.**
+고정 개발일지와 별도로, 두 시험의 비교 날짜·실제 교체 수·제외/대기·상승/하락 경험·비용 차감 결과·
+신뢰구간을 [연구 진행 패널](https://soccz.github.io/projects/prelude/dashboard/#researchProgressSection)에 표시한다.
+국면 선택의 진입 전 적격 기록일과 결과까지 완결된 비교일도 분리한다. 게시된 확인본이지 실시간 조회가 아니다.
+자료가 없거나 오래됐으면0건·0수익 대신 확인 불가로 표시한다. 자동 승격·실알림 변경·주문은 없다.
+기존 timer 연결과 실제 백업/DB를 읽기 확인했고, 새 projection36개 및 관련 회귀·모바일 표시를 검증했다.
+기존 운영 출력8개를 보존한 새 암호화5파일도 인증/현재 원본 검사했다. 새 설치는 필요 없다.
+남은 첫10-01 사전 기록·10-02 결과/백업 관측, 추천 우위 검증과 권한 경계는
+[PHASES 22차](PHASES.md#실사용-강화-22차--남은-연결검증공개-작업-묶음-2026-09-30)에 정리했다.
+**기록·공개 연결 완료와 더 좋은 추천의 입증은 다르다.**
 
 **2026-09-30 후속: 이제 수집된 호가 자료도 확인했다.** 매수·매도 가격 간격이 좁으면
 하방을 줄이면서 상승 기회를 유지할 수 있을까? 전체100후보·20일에서 거래대금/변동성 구간을
