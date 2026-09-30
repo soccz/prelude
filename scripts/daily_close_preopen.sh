@@ -234,6 +234,13 @@ else
 fi
 
 echo "[4/5] train_recommendation_meta (shadow-gated)" >> "$LOG"
+# Separate pre-entry L1 cohort; no frozen replay/collector or live changes.
+if run_research_step python -m ops.recommend_book_forward --refresh >> "$LOG" 2>&1; then
+    :
+else
+    echo "  [DEGRADED] L1 forward review failed (exit=$?) — core close continues" >> "$LOG"
+fi
+
 if run_research_step python scripts/train_recommendation_meta.py >> "$LOG" 2>&1; then
     :
 else

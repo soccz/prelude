@@ -419,6 +419,15 @@ else
     WARN "regime forward publication probe FAIL (exit=$regime_probe_rc; details logged)"
 fi
 
+# 3g) L1 pre-entry publication and execution review, read-only.
+if /usr/bin/timeout --signal=TERM --kill-after=5s 30s \
+    python -m ops.recommend_book_forward --format text >>"$LOG" 2>&1; then
+    echo "  L1 forward readiness checked" >> "$LOG"
+else
+    book_forward_rc=$?
+    WARN "L1 forward readiness probe FAIL (exit=$book_forward_rc; details logged)"
+fi
+
 # 3a) 오늘 04:00 evidence backup의 terminal manifest와 실제 archive/checksum
 #     SHA-256 결합을 검증한다. 어제 산출물만 남은 경우 오늘 백업 성공으로
 #     오인하지 않는다.

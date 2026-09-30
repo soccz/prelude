@@ -338,6 +338,22 @@ def test_asset_symlink_is_rejected(tmp_path):
         _validate(asset_dir)
 
 
+@pytest.mark.parametrize("private_field", [False, True])
+def test_forward_projection_checked_after_authenticated_decryption(tmp_path, private_field):
+    from ops.dashboard_book_forward import empty
+    directory = tmp_path / "assets"
+    payloads = _payloads()
+    payloads["summary.json"]["book_forward"] = empty(ASOF.isoformat(), NOW)
+    if private_field:
+        payloads["summary.json"]["book_forward"]["private_path"] = "must not publish"
+    _write_encrypted_assets(directory, payloads)
+    if private_field:
+        with pytest.raises(DashboardAssetError, match="book_forward invalid"):
+            _validate(directory)
+    else:
+        assert _validate(directory)["summary.json"]["book_forward"]["status"] == "unavailable"
+
+
 def test_extra_asset_is_rejected(tmp_path):
     asset_dir = tmp_path / "assets"
     _write_encrypted_assets(asset_dir, _payloads())

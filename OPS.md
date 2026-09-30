@@ -25,6 +25,7 @@ scripts/daily_run_distribution.sh
    ├─ D1 update + recommend gate: D-1 PIT Top100 + 당일 exact D1
    │  └─ 첫 실패면 current-boundary 결손만 gate별 1회 재수집 후 동일 gate 재검증
    ├─ immutable R1 snapshot → Telegram receipt → 전용 ledger
+   ├─ 고정 L1 진입 전 별도 기록 (총120초 제한, R1 발송 이후, 실패해도 core 계속)
    ├─ 4h update + exact closed-boundary gate → legacy distribution record-only
    ├─ R2 / A1 / pump v1 record-only
    └─ pump-v2 terminal KILL 검증 → 정상 no-op
@@ -51,6 +52,32 @@ KST 10:10 dashboard publish → KST 10:30 heartbeat
 - 모델·정렬·라벨·알림 문구·사이징 변경은 사용자 승인 후
 
 ---
+
+## 0.1 실사용 검증 준비: L1 사전 기록부터 판정표까지 (26차, 2026-09-30)
+
+`ops.recommend_book_forward`는 동결된25차 사후 재생과 별개다. 기존09:05 shell에서 R1 발송·
+원장 다음에 실행하며 원 수집기의 완성 파일을 최대45초 기다린다. 전체120초(초기 운영 예산)를
+넘기면 종료하고 기존4h/후속 작업을 계속한다. **R1 발송 자체는 기다리지 않는다.** 같은 작업의
+후속 record-only 단계는 최대130초 늦어질 수 있다. 새 프로세스를 떼어 두지 않는다.
+
+- `output/recommend_book_forward/design.json`: 시작 전 소스27개·선택·R1 버전·검토 기준 고정.
+- `scores/YYYY-MM-DD/{score,commit}.json`: 당일 후보·인과 입력·국면·영수증 기반 진입 시각과
+  score fsync 완료 관측. 진입과 동시/이후는late, score만 있으면uncertain이며 나중에 수리해 승격하지 않는다.
+- `YYYY-MM-DD.json`: 다음날 canonical24h/진입 지연 진단 완결 후 불변 캐시. 미완결은 재시도하고
+  새 완료 캐시를 실행당 최대2일 생성한다. 전체 작업은 기존300초 제한 안에서 실행한다.
+- `report.json`: 캐시/원본 identity·선택·결과/산술을 재검증한 파생 판정표. 조회는 생성/수리하지 않는다.
+  입력 무결성 오류는 차단하며, 누락/늦음은0수익이 아니라 커버리지와 운영 경고로 남긴다.
+- 기존10:05 close의 canonical 라벨 이후 자동 집계,10:30 heartbeat의30초 읽기 점검,
+  새벽 archive 백업과 암호화 dashboard `book_forward` 필드에 연결된다. 기존9개 timer 그대로다.
+
+실제 설치된 distribution/preopen-close/heartbeat/backup의 ExecStart가 수정한 shell을 가리키는
+것을 read-only로 확인했다. `/etc` 설치·재시작·새 스케줄·알림 문구 변경은 필요 없다.
+조회는 `venv/bin/python -B -m ops.recommend_book_forward --format text`다. `--record`는 당일
+아침 자동 경로용이고 누락한 과거 날짜를 채우는 도구가 아니다. source 변경은 조용히 재봉인하지 않는다.
+
+이 증거는 로컬 불변 파일·해시·산술 확인이다. 외부 timestamp 서명이나 관리자가 원호가와
+캐시를 함께 악의적으로 다시 쓰는 상황의 증명은 아니다. 지연 경로는 읽기 전용 SQLite 단일
+transaction에서 계산하고 내용 hash를 보존한다. 실제 체결비용/슬리피지를 측정한 것은 아니다.
 
 ## 1. systemd 스케줄 (deploy/)
 

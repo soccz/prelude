@@ -212,7 +212,7 @@ def test_deadline_applies_only_to_research_with_no_runtime_override(shell):
     bounded = [line.strip() for line in source.splitlines() if "if run_research_step" in line]
     expected = COMMON_RESEARCH + (PREOPEN_RESEARCH if shell == SHELLS[1] else ())
     if shell == SHELLS[1]:
-        expected += ("-m ops.recommend_book_validation --refresh",)
+        expected += ("-m ops.recommend_book_validation --refresh", "-m ops.recommend_book_forward --refresh")
     assert len(bounded) == len(expected)
     for command in expected:
         assert any(f"run_research_step python {command} >>" in line for line in bounded)

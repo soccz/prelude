@@ -12,6 +12,17 @@
 **전체 여정(실패 포함) 공개 보고서** → [soccz.github.io/projects/prelude](https://soccz.github.io/projects/prelude/) ·
 **일일 대시보드** → [/dashboard](https://soccz.github.io/projects/prelude/dashboard/) (매일 KST 10:10, PIN 암호화)
 
+**2026-09-30 · 이제 실제 실사용 데이터로 검증하는 준비까지 연결했다.**
+같은 L1 후보를 **진입 전에 불변 저장**하고, 다음날 기존 R1과 하방·상방·net을 비교한다.
+0/15/30분 지연 진입·추가 비용·국면·기간별 일관성을 자동 확인하는 판정표도 연결했다.
+자료 대기/관찰 연장/채택 검토/현재 후보 비채택을 구분하며30일만으로 채택하지 않는다.
+기존 서버 스케줄·경보·백업·암호화 대시보드를 사용하므로 추가sudo 설치는 없다.
+**실추천·라벨·학습·주문은 그대로다. 실제 새 표본0일이며 추천 우위는 아직 입증되지 않았다.**
+다음 실제 기록과 성능 판정만 미래 증거로 남긴다.25차 사후 재생/과거 개발20일과 섞지 않는다.
+설계·검증은 [PHASES26차](PHASES.md),
+[개발일지의 다음 단계](https://soccz.github.io/projects/prelude/#book-forward-evidence),
+[실사용 검증 준비 패널](https://soccz.github.io/projects/prelude/dashboard/#bookForwardSection)에서 확인한다.
+
 **2026-09-30 · 고정한 선택을 새 날짜에서 자동 검증하도록 연결했다.**
 앞 비교의 규칙을 다시 튜닝하지 않고10-01~30 open을 별도로 평가한다. 시작 전 소스·R1 버전을
 봉인했으며, 기존 서버 마감 작업이 결과를 붙이고 누락/훼손은 상태 점검과 대시보드에 드러낸다.

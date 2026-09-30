@@ -1375,6 +1375,11 @@ def test_backup_captures_microstructure_raw_and_trial_publication_together(tmp_p
         "output/recommend_book_validation/design.json": b'{"design":"synthetic-only"}',
         "output/recommend_book_validation/2026-10-01.json": b'{"cache":"synthetic-only"}',
         "output/recommend_book_validation/report.json": b'{"report":"synthetic-only"}',
+        "output/recommend_book_forward/design.json": b'{"design":"synthetic-only"}',
+        "output/recommend_book_forward/scores/2026-10-01/score.json": b'{"score":"synthetic-only"}',
+        "output/recommend_book_forward/scores/2026-10-01/commit.json": b'{"commit":"synthetic-only"}',
+        "output/recommend_book_forward/2026-10-01.json": b'{"cache":"synthetic-only"}',
+        "output/recommend_book_forward/report.json": b'{"report":"synthetic-only"}',
     }
     for relative, payload in evidence.items():
         path = repo / relative

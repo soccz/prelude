@@ -179,6 +179,19 @@ if [ "$RECOMMEND_HEALTH_OK" -eq 1 ]; then
     fi
 fi
 
+# Independent fixed L1 shadow publication, only AFTER R1 delivery/ledger.
+# Initial 120s total bound (45s readiness wait + raw scan). Research failure
+# never changes R1 delivery or the critical exit status. No detached process.
+echo "[3b/10] L1 pre-entry research record (no live change)" >> "$LOG"
+if [ "$RECOMMEND_HEALTH_OK" -eq 1 ]; then
+    if /usr/bin/timeout --signal=TERM --kill-after=10s 120s \
+        python -m ops.recommend_book_forward --record --format text >> "$LOG" 2>&1; then
+        :
+    else
+        echo "  [DEGRADED] L1 pre-entry record failed (exit=$?) — R1 unchanged" >> "$LOG"
+    fi
+fi
+
 # 4h ALL coins (close-out 이 모든 alert coin 의 어제 4h 봉 필요).
 # --days 2 로 incremental (1-2 페이지/코인, 252 × ~0.5s ≈ 2분).
 echo "[4/10] data update — 4h all" >> "$LOG"

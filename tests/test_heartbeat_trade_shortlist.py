@@ -63,7 +63,7 @@ def test_new_hook_is_readonly_and_separately_bounded():
     source = (ROOT / "scripts/heartbeat.sh").read_text()
     assert source.count(PROBE) == 1
     assert source.count(OLD_PROBE) == 1
-    assert source.count(TIMEOUT) == 4
+    assert source.count(TIMEOUT) == 5
     hook = source.split("# 3s)", 1)[1].split("# 3r)", 1)[0]
     assert hook.count(PROBE) == hook.count(TIMEOUT) == 1
     assert '>>"$LOG" 2>&1' in hook

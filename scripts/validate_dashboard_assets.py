@@ -39,6 +39,7 @@ from ops.champion_selector import (  # noqa: E402
 )
 from ops.dashboard_current import validate_current_system  # noqa: E402
 from ops.dashboard_book_validation import validate_book_validation  # noqa: E402
+from ops.dashboard_book_forward import validate_book_forward  # noqa: E402
 from ops.dashboard_research import validate_research_progress  # noqa: E402
 from ops.policy_competition import (  # noqa: E402
     PolicyArtifactError,
@@ -362,6 +363,11 @@ def _validate_summary(
             )
         except (ValueError, TypeError, KeyError) as exc:
             raise DashboardAssetError("summary.research_progress invalid") from exc
+    if "book_forward" in payload:
+        try:
+            validate_book_forward(payload["book_forward"], asof=expected_asof.isoformat(), now=now)
+        except (ValueError, TypeError, KeyError) as exc:
+            raise DashboardAssetError("summary.book_forward invalid") from exc
     if "book_validation" in payload:
         try:
             validate_book_validation(payload["book_validation"], asof=expected_asof.isoformat(), now=now)

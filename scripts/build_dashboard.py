@@ -61,6 +61,7 @@ from ops.champion_selector import (  # noqa: E402
 )
 from ops.dashboard_current import build_current_system  # noqa: E402
 from ops.dashboard_book_validation import build_book_validation  # noqa: E402
+from ops.dashboard_book_forward import build_book_forward  # noqa: E402
 from ops.dashboard_research import build_research_progress  # noqa: E402
 from scripts.idea_validation_report import (
     IdeaArtifactError,
@@ -2183,6 +2184,7 @@ def main():
         "current_system": build_current_system(asof=asof.date().isoformat()),
         "research_progress": build_research_progress(asof=asof.date().isoformat()),
         "book_validation": build_book_validation(asof=asof.date().isoformat()),
+        "book_forward": build_book_forward(asof=asof.date().isoformat()),
         "channels": {
             "distribution": compute_distribution_summary(
                 df_dist,
@@ -2219,8 +2221,6 @@ def main():
         "pump_hunter_v2": pump_hunter_v2,  # 🎯 v2 radar (Binance volsurge) — watchlist + capture
         "champion_gate": champion_gate,  # 슬롯별 forward 검증 진행률 (n_days/MIN_CLOSED)
     }
-    _write_json(out_dir / "summary.json", summary, passphrase=pin)
-    log.info(f"saved summary.json (idea_validation={bool(idea_validation)}, meta_model={bool(meta_model)})")
 
     # 2) history.json
     history = {
@@ -2327,6 +2327,13 @@ def main():
     )
     _write_json(out_dir / "idea_validation.json", idea_payload, passphrase=pin)
     log.info(f"saved idea_validation.json ({idea_payload.get('n_candidates', 0)} candidates)")
+    # Use the freshly recomputed, source-validated report in BOTH assets. A
+    # same-day cached report can be older than the publication freshness limit;
+    # renewing only its timestamp would be dishonest and writing it back would
+    # overwrite operational evidence. Keep the fresh projection in memory.
+    summary["idea_validation"] = idea_payload
+    _write_json(out_dir / "summary.json", summary, passphrase=pin)
+    log.info(f"saved summary.json (fresh idea_validation=True, meta_model={bool(meta_model)})")
 
     # quick stdout summary
     print()
