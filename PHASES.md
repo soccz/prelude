@@ -30,13 +30,14 @@ semivol/safe-up/first-passage 등 이미 기각한 축을 신규 아이디어로
 
 - [x] 분석 구현·원본/시각 검증
 - [x] 실측·독립 검산·한계 포함 판정
-- [ ] 회귀 검사·GitHub/웹 공개 반영
+- [x] 회귀 검사·GitHub/웹 공개 반영
 
 ### 실측 — 좁은 스프레드만으로 저하방·고상방을 함께 얻지 못함
 
 `signals/recommend_spread_diagnostics.py`·`scripts/review_recommend_spread.py`와 테스트2개를
 추가했다. `_workspace/recommend_spread_design_20260930_v1.json`으로 계산 전 소스·입력을
-고정했고 결과는 별도 `_workspace/recommend_spread_review_20260930_v1.json`이다.
+고정했고 최초 결과는 별도 `_workspace/recommend_spread_review_20260930_v1.json`이다.
+아래 재현성 보완 후 **정본은 design/review의 `_20260930_v2.json`**이며 수치·비교 규칙은 같다.
 20일/2,000후보 모두 적격, 제외 날짜0개. 총927쌍(앞466/뒤461), 홀수 셀의 가운데146행이
 설계대로 남았고 spread 동률 제외0쌍이다.927쌍을927독립 날짜로 취급하지 않는다.
 
@@ -68,14 +69,45 @@ semivol/safe-up/first-passage 등 이미 기각한 축을 신규 아이디어로
   날짜별 쌍 수가50/1로 달라도 날짜 동일가중임과 사분위 간 비교 금지를 추가 검사해 최종 표적27 PASS/3.76초.
   처음 실제 입력 점검에서 잘못 연결한 trial 검사 함수와 canonical loader 인자를 찾아 수리했다.
   실자료 설계 고정은 수리 후에 했으며, 합성 원본 체인 회귀 검사도 추가했다.
-- 수동 재현: `venv/bin/python -B scripts/review_recommend_spread.py --design _workspace/recommend_spread_design_20260930_v1.json`.
+- 수동 재현: `venv/bin/python -B scripts/review_recommend_spread.py --design _workspace/recommend_spread_design_20260930_v2.json`.
   기본 실행은 읽기 전용이다. 저장은 새 프로젝트 내 JSON만 허용하고 원본/설계/기존 결과 덮어쓰기는 차단한다.
 - 연구 모듈을 import하지 않는 `_workspace/release_checks_20260930/audit_spread.py`로
   원본20일 호가 스트림을 읽고2,000개 실제 cutoff 직전 spread/age를 재계산했다.
   927쌍·양쪽 일별 결과·3기간의9개 요약/IID·block CI·날짜 제거 결과 일치 PASS,
   210개 묶인 파일의 전후 SHA 일치 PASS. 원15m봉에서 outcome label을 재구축한 검산은 아니다.
 - Python4파일 Ruff·diff-check PASS. 단순 평균/동률/미래 결과 불변과 전체 날짜 분모를 검증했다.
-  정상 pre-push 전수와 Pages 공개 확인은 별도 마감 조건이다. 운영 파일·기존 연구 소스는 수정하지 않는다.
+  정상 pre-push 전수와 Pages 공개 확인은 별도 마감 조건으로 아래까지 확인했다.
+
+### 실제 공개·재현성 마감
+
+- 코드 `c2337ee`의7파일을 정상 commit/push했다. pre-push는 개인 자료가 없는 격리 HEAD에서
+  변경Python4파일 Ruff와 전수 **3,300 PASS/543.64초**를 통과했다.
+  명령은 기존 게이트의 `python -B -m pytest -q -p no:cacheprovider`, Telegram 금지·BLAS1이다.
+  GitHub main과 공개 원본7파일의 byte 일치·runtime 비밀값 일치0건을 확인했다.
+- 소개·대시보드는 별도 clone의 HTML2개만 게시했다(`21a3aca`). 공유 사이트 폴더는 수정하지 않았다.
+  동시 게시된 다른 프로젝트의 변경 때문에 첫 push가 거절돼 정상 rebase로 보존한 뒤 게시했다.
+  [Pages run36690190690](https://github.com/soccz/soccz.github.io/actions/runs/36690190690) success,
+  공개 HTML3개+암호화5파일의 검증본 byte 일치와 인증/현재 원본/동일 세대 검사 PASS.
+  데이터는20차의16:26 세대 `e2623e80-e296-4540-b200-d5b746048c17` 그대로이며 새로 만들지 않았다.
+- HTML3개·내부 링크44개·inline JS3개 PASS. 과거4개 서술 구간과 대시보드 JS는 byte 동일하다.
+  전용 임시 프로필에서1440/1024/390px 화면·새 앵커·가로 넘침0·uncaught0·가짜 운영상태/
+  누락 fallback을 확인했다. 실제 PIN/원장을 screenshot에 노출하지 않았다. 전용 프로세스만 종료했다.
+- 마지막 재현성 점검에서 최초 설계가 매일 갱신되는 `output/recommend_trial_review.json`을
+  직접 묶은 점을 보완했다. 같은 payload를 **새 고정 입력**
+  `_workspace/recommend_spread_source_review_20260930_v1.json`에 보존하고 기존 `--input`으로
+  design/review v2를 새로 생성했다. v1은 삭제·덮어쓰지 않았다. v1/v2 분석 전체가 정확히 같고,
+  원/복사 review payload 동일·나머지209입력 동일·v2의210파일 SHA 재검증 PASS다.
+  일일 report가 다음날 바뀌어도 이번 입력본은 남는다. 소스/원본 변조 시 차단하는 계약은 유지한다.
+- 재발 방지: 일일 파생 report를 연구 설계에 묶을 때는 공개되지 않는 **고정 입력 사본**부터 만들고,
+  운영 report의 미래 갱신을 과거 연구 입력의 갱신으로 취급하지 않는다.
+- 이번 추가분은 코드/테스트4개·핵심 문서3개·비공개 JSON 고정본과 웹 HTML2개다.
+  기존 dirty output8개·사용자 이미지·이전 연구 원본은 보존했고, 모델·순위·알림·label·자동 학습·
+  자동 시험·서비스/다른 터미널·주문은 변경하지 않았다. 추가 설치나 수동 게시가 필요하지 않다.
+
+**완료 경계:** 호가 입력의 새 관찰 검증·독립 원본 검산·회귀·GitHub/Pages 공개는 완료했다.
+더 좋은 추천의 입증은 아직 미완료다. 좁은 spread의 효과를 영구 부정하거나 유리한 cutoff를
+다시 찾는 근거로 쓰지 않는다. 기존10-01 사전 기록 시험의 새 관측과 별도 예측 정보의 검증이
+남아 있으며, 미래 정규 실행의 성공을 이번 코드 테스트로 대신하지 않는다.
 
 ## 실사용 강화 20차 — 누락된 GitHub·소개·대시보드 공개 반영 (2026-09-30)
 

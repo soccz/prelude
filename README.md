@@ -4,7 +4,7 @@
 > KST 08:50·09:05에 알려 주는 개인 트레이딩 보조 레이더.
 > 사용자가 직접 판단·매매하며 **자동 주문은 없다.**
 
-![tests](https://img.shields.io/badge/tests-3273%20passed-brightgreen)
+![tests](https://img.shields.io/badge/tests-3300%20passed-brightgreen)
 ![status](https://img.shields.io/badge/verdict-radar--not--strategy-orange)
 ![evidence](https://img.shields.io/badge/evidence-snapshot%E2%86%92receipt%E2%86%92label-blue)
 ![judgment](https://img.shields.io/badge/v2%20verdict-KILL%20(early%2C%202026--08--05)-red)
@@ -20,6 +20,9 @@
 한 입력의 관찰 진단이지 R1 Top3 대비 전략 성과나 실제 체결비용 검증이 아니다.
 수동 분석기·결과 전 비교 쌍 고정·새 JSON 전용 출력·테스트를 추가했으며, 원호가2,000개 값과
 927쌍/통계를 독립 검산하고 관련158개 테스트를 통과했다. 모델·순위·알림·스케줄은 그대로다.
+추가 경계 검사 후 새 표적27개, 정상 pre-push 격리 전수 **3,300개 통과**. 코드7파일과
+소개·대시보드2개 HTML의 게시·Pages 성공·공개본 일치도 확인했다. 매일 갱신되는 report는
+별도 고정 입력본으로 보존해 v2로 재실행했고 분석 결과가 완전히 같았다. 추가 설치는 없다.
 설계·수치·한계·검증/공개 경계는 [PHASES 21차](PHASES.md#실사용-강화-21차--수집된-호가의-추가-정보-검증-2026-09-30),
 수동 재현 명령은 `scripts/review_recommend_spread.py --help`를 참조한다.
 
