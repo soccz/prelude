@@ -222,6 +222,23 @@ def test_research_projection_is_checked_after_authenticated_decryption(tmp_path,
         assert _validate(directory)["summary.json"]["research_progress"]["status"] == "unavailable"
 
 
+@pytest.mark.parametrize("private_field", [False, True])
+def test_book_validation_checked_after_authenticated_decryption(tmp_path, private_field):
+    from ops.dashboard_book_validation import _empty
+
+    payloads = _payloads()
+    payloads["summary.json"]["book_validation"] = _empty(ASOF.isoformat(), NOW)
+    if private_field:
+        payloads["summary.json"]["book_validation"]["private_path"] = "must not publish"
+    directory = tmp_path / "assets"
+    _write_encrypted_assets(directory, payloads)
+    if private_field:
+        with pytest.raises(DashboardAssetError, match="book_validation invalid"):
+            _validate(directory)
+    else:
+        assert _validate(directory)["summary.json"]["book_validation"]["status"] == "unavailable"
+
+
 def test_plaintext_asset_is_rejected(tmp_path):
     asset_dir = tmp_path / "assets"
     _write_encrypted_assets(asset_dir, _payloads())

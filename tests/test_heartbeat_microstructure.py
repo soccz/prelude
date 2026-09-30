@@ -47,7 +47,7 @@ def _run(
     for name in ("upbit_d1.db", "policy_competition.db"):
         (data / name).write_bytes(b"fixture-only; never opened as SQLite")
     source = (ROOT / "scripts/heartbeat.sh").read_text()
-    assert source.count(TIMEOUT) == 3
+    assert source.count(TIMEOUT) == 4
     assert source.count(SELFTEST_TIMEOUT) == 1
     # Production deadline stays fixed; shorten only this copied fixture.
     source = source.replace(TIMEOUT, TIMEOUT.replace("5s 30s", "0.2s 0.3s"))
@@ -81,6 +81,7 @@ if [ "$*" = "-m ops.recommend_microstructure_status --format text" ] || \
    [ "$*" = "-m ops.recommend_trade_shortlist_status --format text" ] || \
    [ "$*" = "-m ops.recommend_trial_review --format text" ] || \
    [ "$*" = "-m ops.recommend_regime_forward --format text" ] || \
+   [ "$*" = "-m ops.recommend_book_validation --format text" ] || \
    [ "$*" = "-B -m ops.selftest_status --format text" ]; then
     exit 0
 fi

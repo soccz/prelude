@@ -1372,6 +1372,9 @@ def test_backup_captures_microstructure_raw_and_trial_publication_together(tmp_p
         "output/recommend_regime_forward/2026-10-01/r1_regime_forward_v1/commit.json": (
             b'{"trial_id":"r1_regime_forward_v1","status":"committed"}'
         ),
+        "output/recommend_book_validation/design.json": b'{"design":"synthetic-only"}',
+        "output/recommend_book_validation/2026-10-01.json": b'{"cache":"synthetic-only"}',
+        "output/recommend_book_validation/report.json": b'{"report":"synthetic-only"}',
     }
     for relative, payload in evidence.items():
         path = repo / relative

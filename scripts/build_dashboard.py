@@ -60,6 +60,7 @@ from ops.champion_selector import (  # noqa: E402
     load_champion_state_artifact,
 )
 from ops.dashboard_current import build_current_system  # noqa: E402
+from ops.dashboard_book_validation import build_book_validation  # noqa: E402
 from ops.dashboard_research import build_research_progress  # noqa: E402
 from scripts.idea_validation_report import (
     IdeaArtifactError,
@@ -2181,6 +2182,7 @@ def main():
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "current_system": build_current_system(asof=asof.date().isoformat()),
         "research_progress": build_research_progress(asof=asof.date().isoformat()),
+        "book_validation": build_book_validation(asof=asof.date().isoformat()),
         "channels": {
             "distribution": compute_distribution_summary(
                 df_dist,

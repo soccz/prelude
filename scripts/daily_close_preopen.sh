@@ -223,6 +223,16 @@ else
     record_critical_failure "$?" "post-label trial review"
 fi
 
+# Independent new-date L1 replay. A research failure must not suppress the
+# existing recommendation/publication path; heartbeat checks the saved report.
+echo "[2d/5] fixed L1 new-date validation (post-label replay only)" >> "$LOG"
+if run_research_step python -m ops.recommend_book_validation --refresh >> "$LOG" 2>&1; then
+    :
+else
+    book_validation_rc=$?
+    echo "[DEGRADED] fixed L1 validation failed (exit=$book_validation_rc); core continues" >> "$LOG"
+fi
+
 echo "[4/5] train_recommendation_meta (shadow-gated)" >> "$LOG"
 if run_research_step python scripts/train_recommendation_meta.py >> "$LOG" 2>&1; then
     :

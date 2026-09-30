@@ -319,6 +319,37 @@ PIN 뒤 `#researchProgressSection`에 표시한다. 기록 시점과 결과 마�
 연구 실패가 기존 실알림 상태 카드를 숨기지 않으며 새로운 수집/원장/일정/설치는 없다.
 직접 읽기 점검은 `venv/bin/python -B -m ops.dashboard_research --probe --now <timezone포함시각>`이다.
 
+**09-30 추가(25차): 고정 L1의 새 날짜 검증.** 기존 `daily_close_preopen.sh`의 라벨 생성과
+native review 뒤 `python -m ops.recommend_book_validation --refresh`가 실행된다.
+새 규칙/모델 학습이나 오전 추천 변경은 없다. 기존 연구300초 제한을 사용하며 신규 raw 파싱은
+실행당 최대2일이다. 새 단계 실패는 `[DEGRADED]`와 exit를 기록하되 기존 연구/게시 흐름은 계속한다.
+기존 다른 연구 단계의 critical 실패 정책까지 바꾼 것은 아니다. heartbeat는30초 제한으로
+읽기 전용 조회해 누락·불완전·낡음·훼손을 경고한다. 새 timer나 `/etc` 설치는 필요 없다.
+
+`output/recommend_book_validation/design.json`은10-01 전에 한 번만 만들어 소스18파일·R1 기준
+snapshot·평가 설정을 고정한다. 동일 경로 재초기화나 시작 이후 초기화는 실패한다.
+완료 날짜는 `YYYY-MM-DD.json`에 write-once로 기록한다. `report.json`만 파생 집계로 원자 갱신한다.
+한 실행만 이 namespace의 lock을 가지며 실추천 lock은 잡지 않는다. 저장 실패 뒤 재시도는 이미
+완료한 날짜를 재파싱하지 않는다. 해시·원 선택·산술을 매번 검증하되 조회가 캐시를 수리하지 않는다.
+raw에서 추출한 입력은 최초 검증 후 해시로 결합해 재사용하며, 이 해시가 외부 서명이나
+악의적인 원본/캐시 동시 재작성까지 막는 보안 보증은 아니다. 오류가 나면 자동 재봉인하지 않는다.
+
+보고서는6시간 freshness와10:10 이후 당일 생성 여부를 확인한다. 없음/훼손은 확인 불가,
+미성숙/누락은 pending, 예산 제한은 deferred, 전체 라벨 결측은 excluded로 남긴다.
+`ops.dashboard_book_validation`는30초 제한의 읽기 검사를 거쳐 공개-safe 집계만
+`summary.book_validation`에 싣는다. 경로/종목/영수증/오류 원문은 내보내지 않는다.
+PIN 뒤 `#bookValidationSection`에서 비교 수와 R1 대비 net/up10/dn5·CI·매칭 기준을 확인한다.
+0일은 성과 없음,5일 미만은 CI 없음이며 성과 우위나 자동 채택 표시가 아니다.
+새 namespace는 기존 evidence 백업 대상에 추가했으며 합성 archive 검증을 통과했다.
+실제 첫 백업 성공/10-02 첫 평가 성공은 향후 실행 뒤에만 확인할 수 있다.
+
+```bash
+# 읽기 전용: raw 재파싱·학습·알림·수정 없음
+PRELUDE_FORBID_TELEGRAM=1 venv/bin/python -B -m ops.recommend_book_validation --format text
+# 기존 close가 자동 실행한다. 복구 점검 때만 단독 실행 가능(전용 연구 결과만 갱신).
+PRELUDE_FORBID_TELEGRAM=1 venv/bin/python -B -m ops.recommend_book_validation --refresh
+```
+
 09-30 기존 백업 추가 읽기 감사에서는 실제 archive2,136항목 구조/전체SHA,
 최근 immutable24파일의 현재 원본 일치, 일봉·15분봉 DB SHA/integrity를 확인했다.
 새 체결 raw와 두 시험도 보관돼 있었다. 아직 생성 전인10-01 국면 기록의 백업 성공,

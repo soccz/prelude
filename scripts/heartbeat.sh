@@ -401,6 +401,15 @@ else
     WARN "post-label trial review probe FAIL (exit=$review_probe_rc; details logged)"
 fi
 
+# 3b) Fixed L1 new-date replay. Read-only cache/integrity check, never raw reparse.
+if /usr/bin/timeout --signal=TERM --kill-after=5s 30s \
+    python -m ops.recommend_book_validation --format text >>"$LOG" 2>&1; then
+    echo "  fixed L1 validation checked" >> "$LOG"
+else
+    book_probe_rc=$?
+    WARN "fixed L1 validation probe FAIL (exit=$book_probe_rc; details logged)"
+fi
+
 # 3f) Independent pre-entry regime policy records; read-only and launch-aware.
 if /usr/bin/timeout --signal=TERM --kill-after=5s 30s \
     python -m ops.recommend_regime_forward --format text >>"$LOG" 2>&1; then

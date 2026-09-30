@@ -76,6 +76,7 @@ output/close_terminal_skip/
 output/recommend_microstructure_trials/
 output/recommend_trade_shortlist_trials/
 output/recommend_regime_forward/
+output/recommend_book_validation/
 output/recommend_trial_review.json
 output/recommend_regime_failures_*.json
 
