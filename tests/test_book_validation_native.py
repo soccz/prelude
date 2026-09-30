@@ -1,6 +1,7 @@
 """Native synthetic raw capture → canonical receipt/label → L1 comparison."""
 
 from copy import deepcopy
+import json
 
 import pytest
 
@@ -114,3 +115,27 @@ def test_native_corruption_and_mixed_model_are_blocked(tmp_path, monkeypatch, fa
     path.write_bytes(path.read_bytes() + b"corrupt")
     with pytest.raises(ValueError):
         extract(paths)
+
+
+@pytest.mark.parametrize(
+    "fault", ["receipt_missing", "label_incomplete", "label_late", "not_forward"]
+)
+def test_unavailable_metadata_never_consumes_raw_budget(tmp_path, monkeypatch, fault):
+    paths = inputs(tmp_path, monkeypatch)
+    if fault == "receipt_missing":
+        (paths[3] / "2026-10-01/open_r1.json").unlink()
+    else:
+        path = paths[4] / "2026-10-01/open_r1.json"
+        document = json.loads(path.read_text())
+        if fault == "label_incomplete":
+            document["artifact_status"] = "incomplete"
+        elif fault == "label_late":
+            document["labeled_at"] = "2026-10-03T12:00:00+09:00"
+        else:
+            document["forward_eligible"] = False
+        document["label_payload_sha256"] = io._artifact_digest(document)
+        path.write_text(json.dumps(document))
+    with pytest.raises(io.EvidenceUnavailable):
+        extract(
+            paths, before_raw=lambda: pytest.fail("unavailable day consumed raw budget")
+        )

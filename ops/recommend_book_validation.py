@@ -16,6 +16,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from data.upbit_microstructure import iter_raw_records
+from notifier.delivery_receipt import DeliveryReceiptError, read_delivery_receipt
 from ops.artifact_provenance import (
     canonical_json_bytes,
     file_identity,
@@ -31,6 +32,7 @@ from signals import recommend_microstructure as raw
 from signals import recommend_microstructure_trial as native
 from signals import recommend_trade_shortlist_trial as trial
 from signals.recommend_regime_replay import version_from_snapshot
+from signals.recommend_score_labels import FORWARD_PROVENANCE_COHORT, _artifact_digest
 from signals.recommend_snapshot import load_snapshot
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -194,8 +196,45 @@ def extract_day(
     )
     if feature["feature_evidence_valid"] is not True:
         raise EvidenceUnavailable("capture_evidence_invalid")
+    # Check availability metadata before spending the scarce raw budget. Do not
+    # inspect outcome values or pass them to selection. Canonical label joining
+    # still follows the outcome-blind plan below. Otherwise two permanently
+    # unavailable early dates could starve every later date on every refresh.
+    label_root = label_root or ROOT / "output/recommend_score_labels"
+    receipt_root = receipt_root or ROOT / "output/recommend_receipts"
+    label_path = Path(label_root) / day / "open_r1.json"
+    receipt_path = Path(receipt_root) / day / "open_r1.json"
+    readiness_inputs = [file_identity(p, root=ROOT) for p in (label_path, receipt_path)]
+    if not readiness_inputs[0]["exists"]:
+        raise EvidenceUnavailable("label_missing")
+    try:
+        receipt = read_delivery_receipt(snapshot, root=Path(receipt_root))
+    except DeliveryReceiptError as exc:
+        raise ValueError("receipt readiness check failed") from exc
+    if receipt is None or receipt["delivery_ok"] is not True:
+        raise EvidenceUnavailable("receipt_not_confirmed_success")
+    native._require(not label_path.is_symlink(), "label is symlink")
+    metadata = strict_json_object(label_path)
+    native._require(
+        metadata.get("label_payload_sha256") == _artifact_digest(metadata),
+        "label metadata checksum mismatch",
+    )
+    if "round_trip_cost_fraction" not in metadata or "label_code" not in metadata:
+        raise EvidenceUnavailable("legacy_label_contract")
+    if metadata["artifact_status"] != "complete":
+        raise EvidenceUnavailable("label_not_complete")
+    if (
+        metadata.get("provenance_cohort") != FORWARD_PROVENANCE_COHORT
+        or metadata.get("forward_eligible") is not True
+    ):
+        raise EvidenceUnavailable("not_forward_observed")
+    if max(native._time(metadata[k]) for k in ("path_window_end", "labeled_at")) > now:
+        raise EvidenceUnavailable("label_not_available_as_of_now")
+    del metadata  # No result values are used to create the plan.
+    _verify(readiness_inputs)
     items = _identities(
         [
+            *readiness_inputs,
             *record["trial_artifacts"],
             *record["source_inputs"],
             *feature["provenance"]["files"],
@@ -250,8 +289,8 @@ def extract_day(
     )
     evidence = load_recommendation_evidence(
         _path(record["source_inputs"][0]["path"]),
-        label_root=label_root or ROOT / "output/recommend_score_labels",
-        receipt_root=receipt_root or ROOT / "output/recommend_receipts",
+        label_root=label_root,
+        receipt_root=receipt_root,
         now=now,
     )
     label = evidence["label"]

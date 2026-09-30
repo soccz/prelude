@@ -82,6 +82,7 @@ output/recommend_regime_failures_*.json
 
 # Private row-level research bundles and local status evidence
 /_workspace/recommend_*.json
+/_workspace/recommend_book_validation_initial_*/
 /_workspace/recommendation_status_*.txt
 
 # Isolated Pages checkout and release previews (never publish via code repo)

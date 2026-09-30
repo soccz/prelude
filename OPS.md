@@ -329,7 +329,9 @@ native review 뒤 `python -m ops.recommend_book_validation --refresh`가 실행�
 `output/recommend_book_validation/design.json`은10-01 전에 한 번만 만들어 소스18파일·R1 기준
 snapshot·평가 설정을 고정한다. 동일 경로 재초기화나 시작 이후 초기화는 실패한다.
 완료 날짜는 `YYYY-MM-DD.json`에 write-once로 기록한다. `report.json`만 파생 집계로 원자 갱신한다.
-한 실행만 이 namespace의 lock을 가지며 실추천 lock은 잡지 않는다. 저장 실패 뒤 재시도는 이미
+한 실행만 이 namespace의 lock을 가지며 실추천 lock은 잡지 않는다. 이용 불가 영수증/라벨의
+메타데이터는 raw 예산 소비 전에 검사해 과거 두 실패일이 뒤 날짜를 영구 차단하지 않게 한다.
+성과값은 선택에 사용하지 않는다. 저장 실패 뒤 재시도는 이미
 완료한 날짜를 재파싱하지 않는다. 해시·원 선택·산술을 매번 검증하되 조회가 캐시를 수리하지 않는다.
 raw에서 추출한 입력은 최초 검증 후 해시로 결합해 재사용하며, 이 해시가 외부 서명이나
 악의적인 원본/캐시 동시 재작성까지 막는 보안 보증은 아니다. 오류가 나면 자동 재봉인하지 않는다.
