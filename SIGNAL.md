@@ -93,6 +93,26 @@ R1 Top3 대비 성능이 아니며 기존 비용0.15% 가정의 현실성이나 
 호가·체결 원본/소스/영수증/라벨의210파일 해시를 묶고, 신규 JSON만 출력한다.
 이미 본20일의 관찰 진단이지 독립 holdout/자동 학습/새 전향 시험이 아니다. 상세는 PHASES21차.
 
+### L1 대기 잔량 정보 점검 (23차, offline)
+
+`signals/recommend_book_pressure.py`·`scripts/review_recommend_book_pressure.py`는 기존
+체결대금 불균형과 별개인 **최우선 매수/매도 호가대금의 불균형**을 조사한다. depth1 raw에서
+event/receive 시각 모두 추천 결정 시작 전인 마지막 수신 상태를 복원한다.19자리 ns는 정수로
+유지하며 같은 거래소 timestamp의 후속 잔량 변경도 보존한다. 전체 잔량 total_*는 쓰지 않는다.
+잔량은 취소 가능한 대기 주문이지 체결 매수·확정 수요·전체 호가 깊이가 아니다.
+
+기존21차의 동결 input design을 읽어 별도 design에 소스/원본 해시를 결합하고, 기존 자료를
+덮어쓰지 않는 수동 CLI로만 실행한다. 전체100후보의 ATR/거래대금 사분위 안에서 높은 쪽−낮은 쪽을
+비교하며 결과를 보고 방향·cutoff·창 길이를 고르지 않는다. 기존 추천/피처/자동 수집/시험 경로는
+변하지 않는다.20일927쌍의 높은 쪽−낮은 쪽은 up10+1.527%p, dn5−1.857%p,
+EOD net+0.180%p였으나 앞/뒤10일 net−0.320/+0.681%p와 CI[−0.485,+0.984]%p로
+**운영 미채택·연구 단서 유지**다. R1 Top3 우위로 읽지 않는다. 설계·실측·검산 정본은 PHASES23차다.
+
+```bash
+venv/bin/python -B scripts/review_recommend_book_pressure.py \
+  --design _workspace/recommend_book_pressure_design_20260930_v2.json
+```
+
 ## 0.2 시장 상태별 실패 진단·전환 재생 (offline, 2026-09-30)
 
 `signals/recommend_regime_replay.py`는 R1을 학습/교체하는 모듈이 아니라,

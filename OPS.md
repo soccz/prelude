@@ -309,7 +309,12 @@ PRELUDE_FORBID_TELEGRAM=1 PYTHONDONTWRITEBYTECODE=1 venv/bin/python -B -m ops.re
 `summary.research_progress`에 넣는다. 두 native 시험의 비교일/실제 교체/제외·대기와
 상승·하락 경험률/기존net/paired 날짜 block CI, 국면 사전 기록의 적격·마감일/교체 수를
 PIN 뒤 `#researchProgressSection`에 표시한다. 기록 시점과 결과 마감 시점을 구분한다.
-실시간 상태가 아니라 게시 시점 확인본이며 국면 정책별 성과/자동 채택 패널은 아니다.
+실시간 상태가 아니라 게시 시점 확인본이다.23차 v2는 fixed R1/최근/동일 상태 선택의
+동일 날짜 net·up10·dn5와 R1 대비 차이·각 차이의 block CI까지 표시한다. 자동 채택은 하지 않는다.
+기존 v1은 진행 수만 읽고 정책 성과 미제공으로 표시한다. 새 projection은 기존 native inspector와
+동일 SHA의 보고서를 읽고, 저장된 정책 선택/일별6지표/분모/평균/CI를 정본 계산과 대조한 뒤
+공개3지표만 내보낸다. raw 재평가·수집·재학습·정책 재선택은 하지 않는다.0일은 성과 null,
+1~4일은 CI null,0교체는 효과 미관측이다. 일별 원본이 오기 전에는 합성 테스트로만 경계를 검증한다.
 오래된/없는/시간초과 보고서는0건 대신 확인 불가,0비교일 성과와5일 미만 CI는 미제공이다.
 연구 실패가 기존 실알림 상태 카드를 숨기지 않으며 새로운 수집/원장/일정/설치는 없다.
 직접 읽기 점검은 `venv/bin/python -B -m ops.dashboard_research --probe --now <timezone포함시각>`이다.

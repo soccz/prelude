@@ -35,7 +35,12 @@ def source():
         "through_date": "2026-09-29", "reason": "PRIVATE", "path": "/private/snapshot",
         "summary": {name: copy.deepcopy(row) for name in ("boundary", "shortlist")},
         "forward": {"prospective_policy_records": 0, "paired_dates": 0,
-                    "historical_exclusions": [], "changed_picks": dict.fromkeys(research.POLICIES, 0)},
+                    "historical_exclusions": [], "changed_picks": dict.fromkeys(research.POLICIES, 0),
+                    "policies": {name: {
+                        "n_dates": 0, "changed_dates": 0, "no_op_dates": 0, "changed_picks": 0,
+                        "picks_per_arm": 0, "effect_status": "no_effect_observations",
+                        "metrics": None, "minus_fixed_r1": None, "difference_block_ci95": None,
+                    } for name in research.POLICIES}},
     }
 
 
@@ -135,7 +140,7 @@ def test_probe_failure_is_bounded_redacted_and_nonblocking(monkeypatch, fault):
 
 
 def test_child_uses_native_inspector_without_refresh(source, monkeypatch, capsys):
-    monkeypatch.setattr(review, "inspect_review", lambda **kw: source)
+    monkeypatch.setattr(research, "read_review", lambda **kw: source)
     monkeypatch.setattr(review, "build_review", lambda **kw: pytest.fail("refresh forbidden"))
     assert research.main(["--probe", "--now", NOW.isoformat()]) == 0
     result = json.loads(capsys.readouterr().out)
@@ -147,6 +152,12 @@ def test_october_records_are_counted_separately_from_mature_comparisons(source):
     source.update(checked_at=now.isoformat(), generated_at="2026-10-03T10:20:00+09:00", through_date="2026-10-02")
     source["forward"].update(prospective_policy_records=3, paired_dates=2)
     source["forward"]["changed_picks"]["recent"] = 3
+    for name, row in source["forward"]["policies"].items():
+        row.update(n_dates=2, changed_dates=1 if name == "recent" else 0,
+                   no_op_dates=1 if name == "recent" else 2, changed_picks=3 if name == "recent" else 0,
+                   picks_per_arm=6, metrics=dict.fromkeys(research.METRICS, 0),
+                   minus_fixed_r1=dict.fromkeys(research.METRICS, 0),
+                   effect_status="descriptive_forward_effect" if name == "recent" else "no_effect_observations")
     result = research.project_review(source, asof="2026-10-03", now=now)
     assert result["forward"]["ready_records"] == 3
     assert result["forward"]["paired_dates"] == 2
