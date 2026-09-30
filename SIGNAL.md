@@ -113,6 +113,30 @@ venv/bin/python -B scripts/review_recommend_book_pressure.py \
   --design _workspace/recommend_book_pressure_design_20260930_v2.json
 ```
 
+### L1 단서의 Top3 추가 기여 (24차, offline)
+
+`signals/recommend_book_top3.py`·`scripts/compare_recommend_book_top3.py`는23차 관찰 단서를
+**실제3종목 선택**으로 검증하는 별도 수동 경로다. 원100후보의 거래대금·ATR 사분위16칸에서
+원 R1 Top3가 고른 칸별 개수를 지키며, 같은 칸의 높은 L1 pressure 순으로 비중복 선택한다.
+동률은 원 Top3 유지→원순위 순이다. 전체100개에서 선택하므로 Top10 밖도 가능하다.
+라벨을 보기 전에 선택하며 결측 종목을 지운 뒤 다시 고르지 않는다. 기존 순위/모델과 연결하지 않는다.
+
+고정20일·60픽에서49픽 교체,40픽이 원Top10 밖이었다. R1/L1의 dn5는28.333/21.667%,
+up10은23.333/21.667%, safe-up은21.667/21.667%,24h 말 net는+1.586/+1.959%다.
+같은 칸·개수 무작위 선택의 정확한 기대 평균(net+1.088%)보다 높지만,
+뒤10일에는 R1 대비 net−0.197%p·up10−6.667%p다. 전체 net 차이 CI[−1.916,+2.315]%p와
+하루 제거 시 부호 반전도 남았다. **후속 검증 후보 유지, 운영 교체 보류**이며 상방 개선 입증이 아니다.
+
+입력/기존 endpoint/소스217파일을 고정하고 원 R1 선택·일별 지표의 native 일치도 확인한다.
+원본 추출을 다시 하지 않고23차 검증된 endpoint를 사용한다. 신규 JSON만 출력하며 기존 보고서는
+덮어쓰지 않는다. 같은 개발 자료에서 정한 규칙이지 독립 holdout/새 forward/WF 통과가 아니다.
+가상 바스켓은 연속 비중첩24h가 검증된 경우만 계산하고, 실계좌/장중 낙폭과 구분한다. 상세는 PHASES24차다.
+
+```bash
+venv/bin/python -B scripts/compare_recommend_book_top3.py \
+  --design _workspace/recommend_book_top3_design_20260930_v2.json
+```
+
 ## 0.2 시장 상태별 실패 진단·전환 재생 (offline, 2026-09-30)
 
 `signals/recommend_regime_replay.py`는 R1을 학습/교체하는 모듈이 아니라,
