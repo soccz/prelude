@@ -91,6 +91,7 @@ def _run_with_fake_python(
     close_plan_fault: str = "",
     close_plan_mode: str = "close",
     close_plan_modes: dict[str, str] | None = None,
+    finish_plan_before_capture: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], str, str]:
     """운영 shell 을 격리 복사하고 모든 Python command 를 빠른 fake 로 대체."""
     repo = tmp_path / "repo"
@@ -99,6 +100,15 @@ def _run_with_fake_python(
     scripts.mkdir(parents=True)
     fake_bin.mkdir()
     shutil.copy2(Path("scripts") / script_name, scripts / script_name)
+    if finish_plan_before_capture:
+        source = (scripts / script_name).read_text()
+        capture = "    plan_pid=$!"
+        assert source.count(capture) == 1
+        # The tiny fake plan fits in the pipe. Force child completion before
+        # parent state capture without relying on sleeps/scheduler timing.
+        (scripts / script_name).write_text(
+            source.replace(capture, '    wait "$!" || :\n' + capture)
+        )
 
     fake_python = fake_bin / "python"
     fake_python.write_text(
@@ -115,6 +125,14 @@ if [[ "$*" == "-m ops.close_input_gate --through-asof $(date -d yesterday +%F) -
             ;;
         missing_sentinel)
             printf '%s\\0close\\0' "$target"
+            exit 0
+            ;;
+        unterminated_sentinel)
+            printf '%s\\0close\\0__PRELUDE_CLOSE_PLAN_V1_OK__' "$target"
+            exit 0
+            ;;
+        trailing_partial_record)
+            printf '%s\\0close\\0__PRELUDE_CLOSE_PLAN_V1_OK__\\0partial' "$target"
             exit 0
             ;;
         bad_mode)
@@ -968,6 +986,8 @@ def test_close_shells_bind_each_closer_to_a_validated_decision_date(tmp_path):
     [
         "empty",
         "missing_sentinel",
+        "unterminated_sentinel",
+        "trailing_partial_record",
         "bad_mode",
         "duplicate",
         "unsorted",
@@ -994,6 +1014,27 @@ def test_close_shell_rejects_malformed_or_incomplete_gate_plan(
     assert "scripts/close_recommend_ledger.py" not in calls
     assert "evidence gate" in logs
     assert "[critical]" in logs
+
+
+@pytest.mark.parametrize(
+    "script_name", ["daily_close_distribution.sh", "daily_close_preopen.sh"]
+)
+@pytest.mark.parametrize("fault", ["", "valid_output_nonzero"])
+def test_close_plan_survives_producer_exit_before_parent_capture(
+    tmp_path, script_name, fault,
+):
+    result, calls, logs = _run_with_fake_python(
+        tmp_path,
+        script_name,
+        fail_exact="never",
+        fail_rc=99,
+        close_plan_fault=fault,
+        finish_plan_before_capture=True,
+    )
+
+    assert result.returncode == (7 if fault else 0), result.stderr + logs
+    assert ("scripts/close_recommend_ledger.py" in calls) is (not fault)
+    assert "unbound variable" not in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -1324,6 +1365,12 @@ def test_backup_captures_microstructure_raw_and_trial_publication_together(tmp_p
         ),
         "output/recommend_trade_shortlist_trials/2026-09-10/r1_top10_trade_imbalance_v1/commit.json": (
             b'{"trial_id":"r1_top10_trade_imbalance_v1","status":"committed"}'
+        ),
+        "output/recommend_regime_forward/2026-10-01/r1_regime_forward_v1/score.json": (
+            b'{"trial_id":"r1_regime_forward_v1","plan":"synthetic-only"}'
+        ),
+        "output/recommend_regime_forward/2026-10-01/r1_regime_forward_v1/commit.json": (
+            b'{"trial_id":"r1_regime_forward_v1","status":"committed"}'
         ),
     }
     for relative, payload in evidence.items():

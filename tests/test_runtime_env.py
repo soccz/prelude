@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -239,3 +240,97 @@ def test_production_shell_scripts_never_source_dotenv_as_code() -> None:
     ]
 
     assert offenders == []
+
+
+def _run_shell_protocol(
+    tmp_path: Path,
+    payload: bytes,
+    *,
+    producer_rc: int = 0,
+    finish_before_capture: bool = False,
+    expected_value: str = "unchanged",
+) -> subprocess.CompletedProcess[str]:
+    """Exercise the production loader with synthetic, never live secrets."""
+    env_path = _private_env(tmp_path / ".env", "# synthetic protocol test\n")
+    parser = tmp_path / "parser"
+    parser.write_text(
+        f"#!{sys.executable}\n"
+        "import os, sys\n"
+        f"os.write(1, {payload!r})\n"
+        f"sys.exit({producer_rc})\n",
+        encoding="utf-8",
+    )
+    parser.chmod(0o700)
+    loader = ROOT / "deploy/load_runtime_env.sh"
+    if finish_before_capture:
+        source = loader.read_text()
+        capture = "    parser_pid=$!"
+        assert source.count(capture) == 1
+        loader = tmp_path / "loader.sh"
+        # Tiny fixture output fits in the pipe: complete the producer first,
+        # deterministically reproducing a parent descheduled before capture.
+        loader.write_text(source.replace(capture, '    wait "$!" || :\n' + capture))
+    env = os.environ.copy()
+    env.update(TELEGRAM_CHAT_ID="unchanged", EXPECTED_TEST_VALUE=expected_value)
+    return subprocess.run(
+        [
+            "/bin/bash", "-c",
+            'set -euo pipefail; source "$1"; '
+            'if load_prelude_runtime_env "$2" "$3"; then '
+            'test "$TELEGRAM_CHAT_ID" = "$EXPECTED_TEST_VALUE"; '
+            'else rc=$?; test "$TELEGRAM_CHAT_ID" = unchanged || exit 99; '
+            'exit "$rc"; fi',
+            "runtime-env-protocol-test", str(loader), str(env_path), str(parser),
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize("finish_before_capture", [False, True])
+def test_shell_loader_preserves_literal_newlines_and_metacharacters(
+    tmp_path: Path, finish_before_capture: bool,
+) -> None:
+    marker = tmp_path / "must-not-execute"
+    value = f"first\n$(touch {marker})\\literal\nlast\n"
+    result = _run_shell_protocol(
+        tmp_path,
+        b"TELEGRAM_CHAT_ID\0" + value.encode() + b"\0__PRELUDE_RUNTIME_ENV_V1_OK__\0",
+        finish_before_capture=finish_before_capture,
+        expected_value=value,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("finish_before_capture", [False, True])
+@pytest.mark.parametrize(
+    ("payload", "producer_rc"),
+    [
+        (b"", 0),
+        (b"TELEGRAM_CHAT_ID\0changed\0", 0),
+        (b"TELEGRAM_CHAT_ID\0changed\0__PRELUDE_RUNTIME_ENV_V1_OK__", 0),
+        (b"TELEGRAM_CHAT_ID\0changed\0__PRELUDE_RUNTIME_ENV_V1_OK__\0tail", 0),
+        (b"TELEGRAM_CHAT_ID\0__PRELUDE_RUNTIME_ENV_V1_OK__\0", 0),
+        (b"TELEGRAM_CHAT_ID\0changed\0PATH\0unsafe\0__PRELUDE_RUNTIME_ENV_V1_OK__\0", 0),
+        (b"TELEGRAM_CHAT_ID\0changed\0__PRELUDE_RUNTIME_ENV_V1_OK__\0", 7),
+    ],
+)
+def test_shell_loader_rejects_partial_failed_or_unsafe_protocol_atomically(
+    tmp_path: Path, payload: bytes, producer_rc: int, finish_before_capture: bool,
+) -> None:
+    result = _run_shell_protocol(
+        tmp_path,
+        payload,
+        producer_rc=producer_rc,
+        finish_before_capture=finish_before_capture,
+    )
+    assert result.returncode == 2, result.stderr
+    assert result.stdout == ""
+    assert "changed" not in result.stderr
+    assert "unbound variable" not in result.stderr

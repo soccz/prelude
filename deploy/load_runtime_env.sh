@@ -10,6 +10,7 @@ load_prelude_runtime_env() {
     local export_fd
     local parser_pid
     local parser_rc
+    local record
     local sentinel="__PRELUDE_RUNTIME_ENV_V1_OK__"
     local key
     local last_index
@@ -25,21 +26,22 @@ load_prelude_runtime_env() {
         return 2
     fi
 
-    coproc PRELUDE_RUNTIME_ENV_EXPORT {
+    # A parent-owned fd survives immediate producer exit; named coproc fd/PID
+    # variables do not. Capture $! before starting any other asynchronous work.
+    exec {export_fd}< <(
         "$python_bin" -m ops.runtime_env "$env_file" --export-nul
-    }
-    export_fd="${PRELUDE_RUNTIME_ENV_EXPORT[0]}"
-    parser_pid="$PRELUDE_RUNTIME_ENV_EXPORT_PID"
-    if ! mapfile -d '' -t records <&"$export_fd"; then
-        records=()
-    fi
+    )
+    parser_pid=$!
+    while IFS= read -r -d '' record; do
+        records+=("$record")
+    done <&"$export_fd"
+    exec {export_fd}<&-
     if wait "$parser_pid"; then
         parser_rc=0
     else
         parser_rc=$?
     fi
-    unset PRELUDE_RUNTIME_ENV_EXPORT PRELUDE_RUNTIME_ENV_EXPORT_PID
-    if [ "$parser_rc" -ne 0 ] ||
+    if [ "$parser_rc" -ne 0 ] || [ -n "$record" ] ||
        [ "${#records[@]}" -lt 1 ] ||
        [ "${records[${#records[@]} - 1]}" != "$sentinel" ]; then
         echo "runtime environment validation/export failed: $env_file" >&2
@@ -54,14 +56,18 @@ load_prelude_runtime_env() {
 
     for ((index = 0; index < ${#records[@]}; index += 2)); do
         key="${records[index]}"
-        value="${records[index + 1]}"
         case "$key" in
             PRELUDE_DASHBOARD_PIN|TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID) ;;
             *)
-                echo "runtime environment parser returned unsafe key: $key" >&2
+                echo "runtime environment parser returned unsafe key" >&2
                 return 2
                 ;;
         esac
+    done
+    # Validate the complete key set before mutating the caller's environment.
+    for ((index = 0; index < ${#records[@]}; index += 2)); do
+        key="${records[index]}"
+        value="${records[index + 1]}"
         printf -v "$key" '%s' "$value"
         export "$key"
     done

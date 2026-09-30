@@ -15,6 +15,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 TIMEOUT = "/usr/bin/timeout --signal=TERM --kill-after=5s 30s"
 SELFTEST_TIMEOUT = "/usr/bin/timeout --signal=TERM --kill-after=5s 15s"
+REVIEW_TIMEOUT = "/usr/bin/timeout --signal=TERM --kill-after=5s 20s"
 PROBE = "-m ops.recommend_microstructure_status --format text"
 WARNING = "microstructure scheduled evidence probe FAIL"
 
@@ -46,13 +47,15 @@ def _run(
     for name in ("upbit_d1.db", "policy_competition.db"):
         (data / name).write_bytes(b"fixture-only; never opened as SQLite")
     source = (ROOT / "scripts/heartbeat.sh").read_text()
-    assert source.count(TIMEOUT) == 2
+    assert source.count(TIMEOUT) == 3
     assert source.count(SELFTEST_TIMEOUT) == 1
     # Production deadline stays fixed; shorten only this copied fixture.
     source = source.replace(TIMEOUT, TIMEOUT.replace("5s 30s", "0.2s 0.3s"))
     source = source.replace(
         SELFTEST_TIMEOUT, SELFTEST_TIMEOUT.replace("5s 15s", "0.2s 0.3s")
     )
+    assert source.count(REVIEW_TIMEOUT) == 1
+    source = source.replace(REVIEW_TIMEOUT, REVIEW_TIMEOUT.replace("5s 20s", "0.2s 0.3s"))
     script = scripts / "heartbeat.sh"
     script.write_text(source)
     commands = {
@@ -76,6 +79,8 @@ if [ "$*" = "$SELECTED_PROBE" ]; then
 fi
 if [ "$*" = "-m ops.recommend_microstructure_status --format text" ] || \
    [ "$*" = "-m ops.recommend_trade_shortlist_status --format text" ] || \
+   [ "$*" = "-m ops.recommend_trial_review --format text" ] || \
+   [ "$*" = "-m ops.recommend_regime_forward --format text" ] || \
    [ "$*" = "-B -m ops.selftest_status --format text" ]; then
     exit 0
 fi

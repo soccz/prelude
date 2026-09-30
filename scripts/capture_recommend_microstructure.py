@@ -30,6 +30,7 @@ from signals.recommend_microstructure_trial import (  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_TRIAL_ROOT = ROOT / "output" / "recommend_microstructure_trials"
 SHORTLIST_START = date(2026, 9, 10)
+REGIME_START = date(2026, 10, 1)
 
 
 def record_trade_shortlist(*args, **kwargs):
@@ -43,6 +44,13 @@ def evaluate_trade_shortlist(*args, **kwargs):
     from signals.recommend_trade_shortlist_eval import evaluate_trade_shortlist_trials
 
     return evaluate_trade_shortlist_trials(*args, **kwargs)
+
+
+def record_regime_forward(*args, **kwargs):
+    # Isolated lazy import: a new record-only policy cannot break original scores.
+    from ops.recommend_regime_forward import record_forward
+
+    return record_forward(*args, **kwargs)
 
 
 def capture_storage_preflight(
@@ -99,6 +107,7 @@ def run_session(
     *,
     trial_root: Path = DEFAULT_TRIAL_ROOT,
     shortlist_root: Path | None = None,
+    regime_root: Path | None = None,
 ) -> dict:
     if config.cutoff_slot != "open":
         raise ValueError("scheduled feature session requires the real open snapshot")
@@ -107,6 +116,7 @@ def run_session(
     )
     asof = config.asof or datetime.now(ZoneInfo("Asia/Seoul")).date()
     shortlist_due = asof >= SHORTLIST_START
+    regime_due = asof >= REGIME_START
     shortlist_root = (
         shortlist_root or Path(trial_root).parent / "recommend_trade_shortlist_trials"
     )
@@ -134,6 +144,8 @@ def run_session(
         "shortlist_due": shortlist_due,
         "shortlist_trial": None,
         "shortlist_evaluation_path": None,
+        "regime_due": regime_due,
+        "regime_trial": None,
         "research_errors": research_errors,
     }
     source = capture.manifest.get("cutoff_source") or {}
@@ -200,6 +212,21 @@ def run_session(
             report["research_errors"].append(
                 f"shortlist_evaluation:{type(exc).__name__}:{exc}"
             )
+    if regime_due:
+        if report["shortlist_evaluation_path"] is None:
+            report["research_errors"].append("regime_missing_native_evaluation")
+        else:
+            try:
+                report["regime_trial"] = record_regime_forward(
+                    Path(report["shortlist_evaluation_path"]),
+                    shortlist_root=shortlist_root,
+                    output_root=regime_root or Path(trial_root).parent / "recommend_regime_forward",
+                )
+                result = report["regime_trial"]
+                if result["status"] != "committed" or result["eligibility"] not in {"ready", "unavailable"}:
+                    report["research_errors"].append("regime_publication_unconfirmed_or_late")
+            except Exception as exc:
+                report["research_errors"].append(f"regime_publication:{type(exc).__name__}:{exc}")
     return report
 
 
@@ -214,6 +241,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--trial-root", type=Path, default=DEFAULT_TRIAL_ROOT)
     parser.add_argument("--shortlist-root", type=Path)
+    parser.add_argument("--regime-root", type=Path)
     parser.add_argument(
         "--orderbook-depth", type=int, choices=(1, 5, 15, 30), default=1
     )
@@ -261,7 +289,8 @@ def main(argv: list[str] | None = None) -> int:
             universe_observed_at_ns=observed,
         )
         report = run_session(
-            config, trial_root=args.trial_root, shortlist_root=args.shortlist_root
+            config, trial_root=args.trial_root, shortlist_root=args.shortlist_root,
+            regime_root=args.regime_root,
         )
     except (OSError, ValueError, RuntimeError, KeyError) as exc:
         logging.error("microstructure session failed: %s: %s", type(exc).__name__, exc)
@@ -279,6 +308,11 @@ def main(argv: list[str] | None = None) -> int:
                 (report.get("shortlist_trial") or {}).get("status") == "committed"
                 and report.get("shortlist_evaluation_path") is not None
             )
+        )
+        and (
+            not report.get("regime_due")
+            or ((report.get("regime_trial") or {}).get("status") == "committed"
+                and (report.get("regime_trial") or {}).get("eligibility") in {"ready", "unavailable"})
         )
     )
     return 0 if complete else 1

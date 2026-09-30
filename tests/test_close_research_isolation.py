@@ -18,6 +18,8 @@ COMMON_RESEARCH = (
     "scripts/build_idea_validation_html.py",
 )
 EVALUATOR = "scripts/evaluate_recommend_score_labels.py"
+TRIAL_REVIEW = "-m ops.recommend_trial_review --refresh"
+PREOPEN_RESEARCH = (EVALUATOR, TRIAL_REVIEW)
 BUDGET_COMMAND = "/usr/bin/timeout --signal=TERM --kill-after=10s 300s"
 
 
@@ -124,17 +126,18 @@ def test_core_finishes_before_legacy_and_research(tmp_path, shell):
     assert result.returncode == 0, result.stdout + result.stderr + logs
     legacy = "scripts/close_paper_ledger.py" if shell == SHELLS[0] else "scripts/close_preopen_ledger.py"
     _assert_core_precedes(calls, shell, legacy)
-    for command in COMMON_RESEARCH + ((EVALUATOR,) if shell == SHELLS[1] else ()):
+    for command in COMMON_RESEARCH + (PREOPEN_RESEARCH if shell == SHELLS[1] else ()):
         _assert_core_precedes(calls, shell, command)
 
 
 @pytest.mark.parametrize(
     ("shell", "command"),
     [(shell, command) for shell in SHELLS for command in COMMON_RESEARCH]
-    + [(SHELLS[1], EVALUATOR)],
+    + [(SHELLS[1], command) for command in PREOPEN_RESEARCH],
 )
 def test_research_error_is_loud_after_core_completion(tmp_path, shell, command):
-    result, calls, logs, _, _ = _run(tmp_path, shell, fail_command=command)
+    fail_command = "-m ops.recommend_trial_review" if command == TRIAL_REVIEW else command
+    result, calls, logs, _, _ = _run(tmp_path, shell, fail_command=fail_command)
     assert result.returncode == 43
     _assert_core_precedes(calls, shell, command)
     assert "[critical]" in logs
@@ -207,9 +210,21 @@ def test_deadline_applies_only_to_research_with_no_runtime_override(shell):
     source = (ROOT / "scripts" / shell).read_text()
     assert source.count(BUDGET_COMMAND) == 1
     bounded = [line.strip() for line in source.splitlines() if "if run_research_step" in line]
-    expected = COMMON_RESEARCH + ((EVALUATOR,) if shell == SHELLS[1] else ())
+    expected = COMMON_RESEARCH + (PREOPEN_RESEARCH if shell == SHELLS[1] else ())
     assert len(bounded) == len(expected)
     for command in expected:
         assert any(f"run_research_step python {command} >>" in line for line in bounded)
     assert "still block" in source
     assert "not complete research/publish isolation" in source
+
+
+@pytest.mark.parametrize(("ignore_term", "expected_rc"), [(False, 124), (True, 137)])
+def test_trial_review_timeout_is_loud_after_labels(tmp_path, ignore_term, expected_rc):
+    result, calls, logs, _, _ = _run(
+        tmp_path, SHELLS[1], hang_command="-m ops.recommend_trial_review",
+        ignore_term=ignore_term,
+    )
+    assert result.returncode == expected_rc
+    _assert_core_precedes(calls, SHELLS[1], TRIAL_REVIEW)
+    assert "CALL:scripts/idea_validation_report.py" in calls
+    assert f"post-label trial review failed (exit={expected_rc})" in logs

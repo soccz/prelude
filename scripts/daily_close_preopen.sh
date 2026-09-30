@@ -70,35 +70,37 @@ close_validated_preopen_r1() {
     local plan_fd
     local plan_pid
     local plan_rc
+    local plan_record
     local rc
     local seen_target=0
     local sentinel="__PRELUDE_CLOSE_PLAN_V1_OK__"
     local -a plan_records=()
 
-    coproc PRELUDE_CLOSE_PLAN {
+    # Keep a parent-owned descriptor: Bash unsets named coproc variables when
+    # a fast producer exits, even before the parent can copy its fd/PID.
+    exec {plan_fd}< <(
         python -m ops.close_input_gate \
             --through-asof "$TARGET_DECISION_DATE" \
             --cohort r1-preopen \
             --output-format nul 2>>"$LOG"
-    }
-    plan_fd="${PRELUDE_CLOSE_PLAN[0]}"
-    plan_pid="$PRELUDE_CLOSE_PLAN_PID"
-    if ! mapfile -d '' -t plan_records <&"$plan_fd"; then
-        plan_records=()
-    fi
+    )
+    plan_pid=$!
+    while IFS= read -r -d '' plan_record; do
+        plan_records+=("$plan_record")
+    done <&"$plan_fd"
+    exec {plan_fd}<&-
     if wait "$plan_pid"; then
         plan_rc=0
     else
         plan_rc=$?
     fi
-    unset PRELUDE_CLOSE_PLAN PRELUDE_CLOSE_PLAN_PID
     if [ "$plan_rc" -ne 0 ]; then
         record_critical_failure "$plan_rc" \
             "R1 preopen recommend close evidence gate process failed"
         return
     fi
     count=${#plan_records[@]}
-    if [ "$count" -lt 3 ] ||
+    if [ -n "$plan_record" ] || [ "$count" -lt 3 ] ||
        [ "${plan_records[$((count - 1))]}" != "$sentinel" ]; then
         record_critical_failure 2 \
             "R1 preopen recommend close evidence gate incomplete/empty plan"
@@ -210,6 +212,15 @@ if run_research_step python scripts/evaluate_recommend_score_labels.py >> "$LOG"
     :
 else
     record_critical_failure "$?" "full-universe score evaluation"
+fi
+
+# Morning write-once evaluations predate the previous day's completed labels.
+# Refresh a separate derived review only after core close/label work is done.
+echo "[2c/5] post-label trial review (record-only; no promotion)" >> "$LOG"
+if run_research_step python -m ops.recommend_trial_review --refresh >> "$LOG" 2>&1; then
+    :
+else
+    record_critical_failure "$?" "post-label trial review"
 fi
 
 echo "[4/5] train_recommendation_meta (shadow-gated)" >> "$LOG"

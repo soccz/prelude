@@ -391,6 +391,25 @@ else
     WARN "shortlist scheduled evidence probe FAIL (exit=$shortlist_probe_rc; details logged)"
 fi
 
+# 3r) Collection success does not prove yesterday's trial outcomes were reviewed.
+# Read the derived post-label report only; never re-evaluate or promote here.
+if /usr/bin/timeout --signal=TERM --kill-after=5s 20s \
+    python -m ops.recommend_trial_review --format text >>"$LOG" 2>&1; then
+    echo "  post-label trial review checked" >> "$LOG"
+else
+    review_probe_rc=$?
+    WARN "post-label trial review probe FAIL (exit=$review_probe_rc; details logged)"
+fi
+
+# 3f) Independent pre-entry regime policy records; read-only and launch-aware.
+if /usr/bin/timeout --signal=TERM --kill-after=5s 30s \
+    python -m ops.recommend_regime_forward --format text >>"$LOG" 2>&1; then
+    echo "  regime forward publication checked" >> "$LOG"
+else
+    regime_probe_rc=$?
+    WARN "regime forward publication probe FAIL (exit=$regime_probe_rc; details logged)"
+fi
+
 # 3a) 오늘 04:00 evidence backup의 terminal manifest와 실제 archive/checksum
 #     SHA-256 결합을 검증한다. 어제 산출물만 남은 경우 오늘 백업 성공으로
 #     오인하지 않는다.

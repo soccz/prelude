@@ -169,6 +169,12 @@ journalctl -u prelude-selftest.service -n 80 --no-pager
 - 상속 `PRELUDE_PUBLISH_LOCK_FD` 검증 실패는 즉시 종료한다. 인증된5파일·동일세대·출처 검사를
   통과한 임시 clone의 data만 게시하며 공유 Pages 작업 폴더를 덮어쓰지 않는다.
 
+**09-30 공개 화면 후속:** 별도 `researchCheckpoint`는09-30에 검증한 Top10 공통20일,
+선별안D/E 미채택, 시즌별 사전 기록 준비를 날짜 고정 개발 요약으로 표시한다.
+이는 일일 자동 효과 집계가 아니며 이후 표본 수를 자동 갱신하지 않는다. 기존 운영 카드·
+암호화5파일 스키마·PIN·복호화 JavaScript는 유지하고 자세한 개발일지와 연결한다.
+일일 상태와 연구 효능을 혼동하지 않는 표시 변경이며 실알림/실험 정책 변경은 없다.
+
 **09-10 공개 준비 중 보안 발견:** 과거 공개 문서에 현재 대시보드 PIN과 같은 리터럴이 있었다.
 현재 문서와 테스트 예시의 같은 값은 제거했으나 Git 이력 노출은 남는다. 이를 안내한 뒤
 사용자가 제거 가능한 본문만 정리하고 기존 PIN은 유지하라고 결정했다. runtime PIN·암호화5파일·
@@ -258,6 +264,77 @@ NTP yes는 정밀 시각 오차의 증명은 아니며, 같은 호스트의 OnFa
 ```bash
 PRELUDE_FORBID_TELEGRAM=1 PYTHONDONTWRITEBYTECODE=1 venv/bin/python -B -m ops.recommend_trade_shortlist_status --format text
 PRELUDE_FORBID_TELEGRAM=1 PYTHONDONTWRITEBYTECODE=1 venv/bin/python -B scripts/evaluate_recommend_trade_shortlist_trial.py
+```
+
+#### 결과 마감 후 별도 실험 평가 (2026-09-30)
+
+아침의 immutable 평가에는 전일24시간 결과가 아직 없을 수 있다. 기존 preopen-close가
+원장·라벨·score 평가를 마친 뒤 두 native trial을 다시 평가하고
+`output/recommend_trial_review.json`만 원자적으로 갱신한다. 원본 capture 평가/score/commit은 보존한다.
+성능 비교, 실제 교체 날짜/픽 수, 교체로 들어온/빠진 종목 결과, 당시 BTC 국면별 결과를 포함한다.
+실제 추천에는 국면 전환 규칙을 적용하지 않는다. 과거 성과의 아침 가용성은 라벨 기록 시각까지 검사한다.
+09-30의15차부터 `adaptive_replay`에 고정R1/최근 성과 선택/같은 시장 상태 선택의
+과거 정보 전용 가상 재생을 포함한다. 결정 시각은 양쪽 점수 저장 이후·진입봉 이전이고,
+미완결 전일 결과는 과거 이력에 넣지 않는다. 초기10관측일/최소5일·하방/상방 보호 기준은
+SIGNAL §0.2와 PHASES 15차에 명시했다. 일별 선택/유지 사유·이력 날짜·전환 횟수·paired CI를
+기록하지만 **실제 전환·자동 승격·새 학습은 없다**. 재생 자체는 결정 전 정책 기록이 아니며,
+16차에서 준비한 별도 사전 기록 시험은 아래를 따른다.
+원본20일 재생에서 두 정책의 실질 교체는0회였으므로0차이 CI를 효과 검증으로 해석하지 않는다.
+
+heartbeat의 별도20초 probe는 보고서 무결성·소스 버전·당일 갱신·직전 마감일 상태만 검사한다.
+오늘 결과 대기는 정상, 어제 결과 누락은 경고이며, 수익 부진은 운영 실패가 아니다.
+초기 유예10:25는 close 소요시간으로 조정할 운영값이다. raw 과거 전체 재검증은 refresh만 수행한다.
+refresh는 기존300초 연구 제한/실패 전파를 따른다. 추가 timer/설치/실발송/모델 변경은 없다.
+09-30의20일 실제 원본을 재검증한 첫 실행은211.23초/exit0, 최종 재실행은81.86초/exit0이었다. 누적 해시 비용은 날짜와 함께
+증가하므로 일일 소요시간을 관찰하고, 상한에 가까워지면 무결성을 보존하는 증분 평가를 별도 설계한다.
+시간초과를 정상으로 숨기거나, 검증을 생략하거나, 상한을 자동으로 늘리지는 않는다.
+15차 전환 재생 포함 최종 갱신은67.12초/exit0, 읽기 probe는0.58초/exit0으로 확인했다.
+이는 로컬 직접 실행 검증이며 다음 정규 예약 회차까지 이미 완료됐다는 뜻은 아니다.
+
+```bash
+# 읽기 전용 최신 상태와 효과 요약
+PRELUDE_FORBID_TELEGRAM=1 PYTHONDONTWRITEBYTECODE=1 venv/bin/python -B -m ops.recommend_trial_review --format text
+# 수동 재평가: 기존 증거는 읽기만, 전용 파생 보고서만 갱신
+PRELUDE_FORBID_TELEGRAM=1 PYTHONDONTWRITEBYTECODE=1 venv/bin/python -B -m ops.recommend_trial_review --refresh
+```
+
+09-29 selftest에서 확인한 close-plan coproc 경합도 두 close와 env loader에서 수정한다.
+부모 소유 FD와 자식 종료코드를 유지하고 미종결 NUL/불완전 sentinel은 거부한다.
+환경 변수는 전체 허용 키 검사가 끝나야 export되며 `.env`를 셸 코드로 실행하지 않는다.
+
+#### 시장 상태별 정책 사전 기록 (09-30 준비, 10-01 open 시작)
+
+기존 capture가 두 시험의 점수와 native 아침 평가를 보존한 뒤
+`ops.recommend_regime_forward.record_forward`를 호출한다. 결과는
+`output/recommend_regime_forward/YYYY-MM-DD/r1_regime_forward_v1/{score,commit}.json`에
+단 한 번 저장한다. 원래 R1 고정·최근 성과 선택·같은 상태 성과 선택의 종목/사유/이력을 함께 남긴다.
+별도 timer·설치·실발송은 없고 기존 추천 경로에 새 정책을 적용하지 않는다.
+새 기록 디렉터리는 Git 제외이며 기존 evidence 백업에 원본 capture·두 시험과 함께 포함한다.
+이는 같은 서버의 기존 백업 확장이며 별도 물리 장치 백업을 추가한 것이 아니다.
+
+- 실제 계획/score fsync 후 관찰 시각을 사용한다. 검증된 성공 receipt 뒤 다음15분봉보다
+  늦거나 같으면 `late`이며 정상 성과 표본에 넣지 않는다. 오전 평가가 늦어지면 소급하지 않는다.
+- score만 남은 중단은 `uncertain`; 재실행해도 commit을 보충하거나 기존 score를 바꾸지 않는다.
+  구조적으로 후보가 없었던 `unavailable`은 기록 정상/효과 미관측이며, 누락·손상과 구별한다.
+- 다음날 기존 post-label review의 `forward_evaluation`이 **당시 저장된 선택**만 채점한다.
+  미완결·누락은0수익으로 채우지 않고, 적격일/실제 교체일·픽 수를 분리한다.
+  raw를 매 정책일마다 중복 검사하지 않고 새 native 평가와 합쳐 중복 제거한 입력 집합을 검증한다.
+- heartbeat는30초 제한으로 원본 아침 평가/score/receipt/라벨과 선택의 결합을 읽기 검사한다.
+  **원본 raw 내용 전체 검사는 아니다.** 전체 검증은 발행과 post-label native 평가에서 수행한다.
+  09:20 KST부터 당일 기록, 이전에는 전일을 기대한다. 최초10-01 09:20 전에는 시작 전 정상이다.
+  오늘 시작 전/늦은 기록/원본 결손을 혼동하지 않으며, 이상은 기존 heartbeat 경고 묶음에 전달한다.
+  결과 리뷰의 운영 경고는 최신 마감일 기준이다. 과거 결손은 날짜별 제외 이력에 계속 남기되,
+  복구할 수 없는 하루 때문에 이후 정상일에도 매일 실패로 판정하지 않는다. 소급 보충은 금지한다.
+- 누적 raw 평가의 장기 소요시간은 계속 관찰해야 한다.300초 연구 제한 초과를 정상으로 숨기거나
+  자동으로 제한을 늘리지 않는다. 실제 첫 정규 발행·다음날 평가와 추천 우위는 아직 미검증이다.
+
+09-30 최종 실제 보고서 갱신은68.59초/exit0이었다. 원본 두 시험의20일 비교는 유지됐고
+새 정책 사전 기록/완결 비교는0건이다. 읽기 probe는 프로세스 전체 약0.39초/exit0이었다.
+정책 자체의 가벼운 연결 검사 범위는 raw 전체 검증과 구분하며, raw 변조는 실제 성과 평가에서 거부한다.
+
+```bash
+# 읽기 전용: 정책 누락·연결 상태만 검사, 파일 생성/복구/학습/발송 없음
+PRELUDE_FORBID_TELEGRAM=1 PYTHONDONTWRITEBYTECODE=1 venv/bin/python -B -m ops.recommend_regime_forward --format text
 ```
 
 #### 수집 미실행·중간 중단 감시 (2026-09-08 추가)
