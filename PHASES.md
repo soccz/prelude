@@ -29,7 +29,7 @@
 
 - [x] 공개 범위 선별·개발일지·대시보드 반영
 - [x] 코드/공개 안전성/화면 검증
-- [ ] GitHub push·Pages 배포·공개 HTTP 검증
+- [x] GitHub push·Pages 배포·공개 HTTP 검증
 
 ### 게시 전 검증
 
@@ -48,9 +48,40 @@
 - 사이트의 기존 암호화5파일은09-30 10:17:57 KST 생성본이며 인증·스키마·현재 원본·동일세대
   `cefba2aa-ec96-471e-96ef-4123b0f7f1cc` 검증 PASS. 두 R1은 `delivered_candidates`,
   동점시험 `complete_noop`, Top10 `complete_changed`다. 이는 운영 상태이며 효능 판정이 아니다.
-  개인 NOTES 제외도 확인했다. 이미 최신 유효본이므로 PIN/5파일을 다시 생성하거나 게시하지 않는다.
+  개인 NOTES 제외도 확인했다. 당시에는 기존 유효본 유지로 계획했으나, 아래 최종 검사에서
+  6시간 신선도 한계를 넘겨 기존 게시 절차로 새 암호화 세대를 생성했다. PIN은 유지했다.
 - 재현: 기존5종 pytest 파일, `_workspace/release_checks_20260930/check_site.py`,
   같은 폴더 `browser.cjs`의 격리 모의검사. 로컬 검증 완료와 원격 게시 완료는 구분한다.
+
+### 실제 공개 반영 결과
+
+- 코드 `71abee5`:37파일 정상 commit/push 완료. 정상 pre-push의 격리 HEAD에서 변경Python27개
+  Ruff와 전수 **3,273 PASS/553.52초**를 통과했다. GitHub main 일치와 공개 원본37파일의
+  커밋 byte 일치·현재 비밀값 일치0건을 HTTP로 확인했다. GitHub About/홈 연결도 현재 목적과 일치한다.
+- 웹 화면 `36bc968`:홈 prelude 설명·소개·대시보드 HTML3개만 게시했다.
+  [Pages run36683189595](https://github.com/soccz/soccz.github.io/actions/runs/36683189595)
+  success와 공개 HTML3개의 byte 일치를 확인했다. 다른 프로젝트의 원격 변경은 별도 clone에서
+  정상 rebase해 보존했으며 공유 사이트 폴더를 수정/정리하지 않았다.
+- 오전 암호화 세대는 첫 검사 때 유효했지만 최종 검사 시 생성 후6시간을 넘겨
+  `summary.generated_at_utc is stale`로 차단됐다. 신선도 기준을 낮추거나 검사 시계를 과거로
+  바꾸지 않고 기존 `scripts/publish_dashboard.sh`를 `PRELUDE_FORBID_TELEGRAM=1`로 한 번 실행했다.
+  게시기의 전체 사이트 Git 이력 복제에 시간이 걸렸으며16:27:05 정상 종료했다.
+- 데이터 `4c444f8f1`:기존 암호화5파일만 정상 게시했다. 새 세대는
+  `e2623e80-e296-4540-b200-d5b746048c17`, 운영 관측시각09-30 **16:26:33 KST**다.
+  로컬 인증·스키마·신선도·현재 원본·동일세대 검증 PASS. 장전/장후 전달과 연구 상태는
+  오전과 같고, 개인 NOTES 제외/자동 주문 없음/자동 승격 없음도 유지한다.
+  [Pages run36683757253](https://github.com/soccz/soccz.github.io/actions/runs/36683757253)의
+  deploy 성공과 공개 HTML3개+암호화5파일의 검증본 byte 일치를 확인했다.
+  `_workspace/release_checks_20260930/verify_published.py --site-sha 4c444f8f1 --code-sha 71abee5`
+  읽기 검사로 코드37개·웹8파일의 공개본을 확인했으며 비밀값이나 복호화 원장은 출력하지 않았다.
+- `.env`·NOTES·champion state·v2 scoreboard·기존 모델/실알림은 변경하지 않았다.
+  정상 게시 준비가 갱신한 파생물은 `output/idea_validation_summary.json`과
+  `output/policy_competition_summary.{csv,json}`3파일이며 코드 커밋에서 제외했다.
+  기존 dirty output8개·사용자 이미지·연구 원본은 보존한다. 전용 미리보기 서버/Chrome만 종료했다.
+
+**완료 경계:** 이번 요청의 코드·개발일지·대시보드·최신 암호화 데이터 공개 및 원격 검증을
+마쳤다. 사용자 추가 설치/수동 게시가 필요하지 않다. 추천 우위 미입증과10-01 이후 정책
+사전 기록의 미래 검증은 별도이며, 공개 완료를 추천 품질 목표 달성이라고 부르지 않는다.
 
 ## 실사용 강화 19차 — 원 추천 점수 예산 안의 전체 후보 조합 (2026-09-30)
 
