@@ -205,6 +205,36 @@ def test_five_authenticated_current_assets_pass(tmp_path):
     assert actual == expected
 
 
+@pytest.mark.parametrize("mutation", [None, "private", "wrong_basis", "bool", "string", "range", "nesting"])
+def test_stored_prediction_contract_checked_after_decryption(tmp_path, mutation):
+    from scripts.build_dashboard import _recommend_prediction_evidence
+
+    payloads = _payloads()
+    evidence = _recommend_prediction_evidence(dict(p_up10=.2, p_dn5=.1, p_dn10=.05, rr_ratio=2))
+    if mutation == "private":
+        evidence["snapshot_path"] = "private"
+    elif mutation == "wrong_basis":
+        evidence["basis"] = "post_send_24h"
+    elif mutation == "bool":
+        evidence["p_up10"] = True
+    elif mutation == "string":
+        evidence["p_up10"] = "0.2"
+    elif mutation == "range":
+        evidence["p_up10"] = 1.1
+    elif mutation == "nesting":
+        evidence["p_dn10"] = .3
+    payloads["summary.json"]["channels"]["recommend"]["latest_radar"] = [
+        {"coin": "EXAMPLE", "rank": 1, "prediction_evidence": evidence}
+    ]
+    asset_dir = tmp_path / "assets"
+    _write_encrypted_assets(asset_dir, payloads)
+    if mutation:
+        with pytest.raises(DashboardAssetError, match="prediction evidence"):
+            _validate(asset_dir)
+    else:
+        assert _validate(asset_dir) == payloads
+
+
 @pytest.mark.parametrize("private_field", [False, True])
 def test_research_projection_is_checked_after_authenticated_decryption(tmp_path, private_field):
     from ops.dashboard_research import _empty

@@ -48,6 +48,7 @@ from ops.policy_competition import (  # noqa: E402
 from scripts.build_dashboard import (  # noqa: E402
     MIN_DASHBOARD_PASSPHRASE_LENGTH,
     PBKDF2_ITERATIONS,
+    _recommend_prediction_evidence,
     resolve_dashboard_passphrase,
 )
 from scripts.idea_validation_report import (  # noqa: E402
@@ -400,6 +401,17 @@ def _validate_summary(
         raise DashboardAssetError(
             "summary.channels.recommend.channel must be recommend"
         )
+    for row in channels["recommend"].get("latest_radar", []):
+        if "prediction_evidence" not in row:
+            continue  # Legacy generations remain readable.
+        evidence = row["prediction_evidence"]
+        if not isinstance(evidence, dict):
+            raise DashboardAssetError("recommend prediction evidence must be an object")
+        numeric_keys = ("p_up10", "p_dn5", "p_dn10", "rr_ratio")
+        if (any(evidence.get(k) is not None and type(evidence[k]) not in (int, float)
+                for k in numeric_keys)
+                or evidence != _recommend_prediction_evidence(evidence)):
+            raise DashboardAssetError("recommend prediction evidence invalid")
     for key in (
         "idea_validation",
         "policy_competition",

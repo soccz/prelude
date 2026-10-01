@@ -1659,7 +1659,7 @@ def compute_recommend_summary(
     out["first_alert_date"] = str(pd.to_datetime(df["date"]).min().date())
     out["last_alert_date"] = str(pd.to_datetime(df["date"]).max().date())
 
-    # 최신 추천일 top-3 (오늘 분포). dump_risk⚠️ + calibrated 확률 그대로 노출.
+    # 원 발송 순위와 저장된 추정치만 투영한다. 재추론/재보정/비율 역산 없음.
     last_day = df["date"].max()
     today = df[df["date"] == last_day].sort_values("rank")
     radar = []
@@ -1670,9 +1670,12 @@ def compute_recommend_summary(
             "rank": _safe_int(r.get("rank")),
             "score": _safe_float(r.get("score")),
             "pump_prob_pct": _safe_float(r.get("pump_prob")),  # 0~1 → viewer 가 %
-            "dump_risk_flag": bool(str(r.get("dump_risk_flag")).lower() == "true"),
+            "dump_risk_flag": {"true": True, "false": False}.get(
+                str(r.get("dump_risk_flag")).lower()
+            ),
             "btc_regime": str(r.get("btc_regime", "")),
             "entry_open": _safe_float(r.get("entry_open")),
+            "prediction_evidence": _recommend_prediction_evidence(r),
         })
     out["latest_radar"] = radar
     out["latest_radar_date"] = str(last_day)
@@ -1851,6 +1854,39 @@ def history_rows(
 
     rows.sort(key=lambda x: (x["date"], x["channel"], x["coin"]), reverse=True)
     return rows
+
+
+def _recommend_prediction_evidence(row):
+    """Public allowlist from the SAME stored row; missing is never zero.
+
+    These are day-D open/high/low estimates, not post-delivery first-passage
+    probabilities or validated live calibration. The stored RR is independent
+    of rounded probability displays: never reconstruct it from those displays.
+    """
+    result = {
+        "schema": "prelude_recommend_prediction.v1",
+        "source": "stored_recommend_ledger",
+        "basis": "day_D_0900_KST_open_high_low",
+    }
+    for key in ("p_up10", "p_dn5", "p_dn10", "rr_ratio"):
+        raw = row.get(key)
+        try:
+            value = float(raw)
+        except (TypeError, ValueError, OverflowError):
+            value = float("nan")
+        valid = (
+            not isinstance(raw, (bool, np.bool_))
+            and np.isfinite(value)
+            and value >= 0
+            and (key == "rr_ratio" or value <= 1)
+        )
+        result[key] = value if valid else None
+    # Impossible nesting is not evidence. Keep the alert, hide the conflicting
+    # downside estimates and ratio; do not silently repair the model output.
+    if (result["p_dn5"] is not None and result["p_dn10"] is not None
+            and result["p_dn10"] > result["p_dn5"]):
+        result.update(p_dn5=None, p_dn10=None, rr_ratio=None)
+    return result
 
 
 def _safe_float(v):
