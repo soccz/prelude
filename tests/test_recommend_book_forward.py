@@ -1,7 +1,7 @@
 """Synthetic pre-entry publication → labels → review; never real operations."""
 
 from copy import deepcopy
-from datetime import timedelta
+from datetime import date, timedelta
 import json
 from pathlib import Path
 import sqlite3
@@ -17,6 +17,11 @@ from test_recommend_regime_forward import _at, _inputs, isolated as isolated  # 
 
 @pytest.fixture
 def ready(tmp_path, monkeypatch):
+    # Synthetic Oct 1 cohort only; the repaired production cohort starts Oct 2.
+    monkeypatch.setattr(policy, "START", date(2026, 10, 1))
+    config = deepcopy(policy.CONFIG)
+    config["start_date"] = policy.START.isoformat()
+    monkeypatch.setattr(policy, "CONFIG", config)
     paths = inputs(tmp_path, monkeypatch)
     reference = _inputs(tmp_path / "reference", monkeypatch, day="2026-09-30")[0]
     root = tmp_path / "_workspace/forward"
@@ -201,7 +206,49 @@ def test_end_to_end_cached_evaluation_and_resealed_report_detection(ready, monke
 
 
 def test_rule_continues_after_first_30_day_review_window():
-    assert len(policy.due_dates(_at("12:00:00", "2026-11-03"))) == 33
+    assert len(policy.due_dates(_at("12:00:00", "2026-11-03"))) == 32
+
+
+def test_revised_production_cohort_never_counts_october_first():
+    assert policy.START == date(2026, 10, 2)
+    assert policy.CONFIG["start_date"] == "2026-10-02"
+    assert policy.due_dates(_at("12:00:00", "2026-10-02")) == []
+    assert policy.due_dates(_at("12:00:00", "2026-10-03")) == ["2026-10-02"]
+
+
+@pytest.mark.parametrize("ready_after", [0, 46, 116, 179, None])
+def test_cli_readiness_wait_is_bounded_and_handles_measured_delay(
+    monkeypatch, ready_after
+):
+    clock = [0]
+    attempts = []
+
+    def record(**kwargs):
+        attempts.append(clock[0])
+        if ready_after is None or clock[0] < ready_after:
+            raise io.EvidenceUnavailable("native_record_not_committed")
+        return {"status": "ready"}
+
+    monkeypatch.setattr(io, "record", record)
+    monkeypatch.setattr(io.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        io.time, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds)
+    )
+    assert io.main(["--record"]) == (2 if ready_after is None else 0)
+    assert clock[0] == (180 if ready_after is None else ready_after)
+    assert len(attempts) == clock[0] + 1
+
+
+@pytest.mark.parametrize(
+    "reason", ["publication_deadline_passed_no_backfill", "capture_evidence_invalid"]
+)
+def test_cli_never_waits_on_late_entry_or_invalid_evidence(monkeypatch, reason):
+    def record(**kwargs):
+        raise io.EvidenceUnavailable(reason)
+
+    monkeypatch.setattr(io, "record", record)
+    monkeypatch.setattr(io.time, "sleep", lambda *a: pytest.fail("unsafe retry"))
+    assert io.main(["--record"]) == 2
 
 
 def test_native_record_to_real_sqlite_to_cache_and_review_without_execution_mock(

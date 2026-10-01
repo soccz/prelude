@@ -697,8 +697,10 @@ def main(argv=None):
             result = initialize(args.initialize, root=args.root)
         elif args.record:
             # Wait only for the independent collector's immutable morning files.
-            # The shell imposes a 120s total bound; no detached process or retry after entry.
-            deadline = time.monotonic() + 45
+            # Oct 1 native readiness took ~116s; preserve that missing cohort.
+            # The shell bounds the new cohort to 240s including raw validation.
+            # record() still rejects entry-time/late publication; never backfill.
+            deadline = time.monotonic() + policy.CONFIG["native_readiness_wait_seconds"]
             while True:
                 try:
                     result = record(root=args.root)

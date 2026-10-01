@@ -11,10 +11,13 @@ import numpy as np
 from signals import recommend_book_validation as comparison
 from signals.recommend_experiment_eval import METRICS, _summary
 
-START = date(2026, 10, 1)
+START = date(2026, 10, 2)
 CONFIG = {
-    "schema": "recommend_book_forward_config.v1",
+    "schema": "recommend_book_forward_config.v2",
     "start_date": START.isoformat(),
+    "revision_reason": "native_readiness_wait_after_20261001_missing_record",
+    "supersedes_design_sha256": "0592e7718c8f062fb93f98cb0f9424d7fbbdd6e935ddec409f1d24d02326cef9",
+    "native_readiness_wait_seconds": 180,
     "slot": "open",
     "selector": comparison.CONFIG["selector"].copy(),
     "min_paired_dates": 30,

@@ -180,11 +180,11 @@ if [ "$RECOMMEND_HEALTH_OK" -eq 1 ]; then
 fi
 
 # Independent fixed L1 shadow publication, only AFTER R1 delivery/ledger.
-# Initial 120s total bound (45s readiness wait + raw scan). Research failure
+# Revised 240s total bound (180s readiness wait + raw scan). Research failure
 # never changes R1 delivery or the critical exit status. No detached process.
 echo "[3b/10] L1 pre-entry research record (no live change)" >> "$LOG"
 if [ "$RECOMMEND_HEALTH_OK" -eq 1 ]; then
-    if /usr/bin/timeout --signal=TERM --kill-after=10s 120s \
+    if /usr/bin/timeout --signal=TERM --kill-after=10s 240s \
         python -m ops.recommend_book_forward --record --format text >> "$LOG" 2>&1; then
         :
     else

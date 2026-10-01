@@ -81,6 +81,6 @@ def test_budget_and_backup_and_no_unit_change():
         in (ROOT / "scripts/backup_db.sh").read_text()
     )
     assert (
-        "/usr/bin/timeout --signal=TERM --kill-after=10s 120s"
+        "/usr/bin/timeout --signal=TERM --kill-after=10s 240s"
         in (ROOT / "scripts/daily_run_distribution.sh").read_text()
     )

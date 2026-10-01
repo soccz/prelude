@@ -25,7 +25,7 @@ scripts/daily_run_distribution.sh
    ├─ D1 update + recommend gate: D-1 PIT Top100 + 당일 exact D1
    │  └─ 첫 실패면 current-boundary 결손만 gate별 1회 재수집 후 동일 gate 재검증
    ├─ immutable R1 snapshot → Telegram receipt → 전용 ledger
-   ├─ 고정 L1 진입 전 별도 기록 (총120초 제한, R1 발송 이후, 실패해도 core 계속)
+   ├─ 고정 L1 진입 전 별도 기록 (총240초 제한, R1 발송 이후, 실패해도 core 계속)
    ├─ 4h update + exact closed-boundary gate → legacy distribution record-only
    ├─ R2 / A1 / pump v1 record-only
    └─ pump-v2 terminal KILL 검증 → 정상 no-op
@@ -56,9 +56,15 @@ KST 10:10 dashboard publish → KST 10:30 heartbeat
 ## 0.1 실사용 검증 준비: L1 사전 기록부터 판정표까지 (26차, 2026-09-30)
 
 `ops.recommend_book_forward`는 동결된25차 사후 재생과 별개다. 기존09:05 shell에서 R1 발송·
-원장 다음에 실행하며 원 수집기의 완성 파일을 최대45초 기다린다. 전체120초(초기 운영 예산)를
+원장 다음에 실행하며 원 수집기의 완성 파일을 최대180초 기다린다. 전체240초(수정 운영 예산)를
 넘기면 종료하고 기존4h/후속 작업을 계속한다. **R1 발송 자체는 기다리지 않는다.** 같은 작업의
-후속 record-only 단계는 최대130초 늦어질 수 있다. 새 프로세스를 떼어 두지 않는다.
+후속 record-only 단계는 최대250초 늦어질 수 있다. 새 프로세스를 떼어 두지 않는다.
+
+10-01 첫 실행은09:08:46 시작→09:09:32 대기 종료 뒤에 원 기록이09:10:42 완성되어 누락됐다.
+기존45초가 실제 준비 지연 약116초보다 짧았던 결함이다. 최초 design/report와 실패 근거는
+`_workspace/recommend_book_forward_initial_20261001/`에 보존했다. 수정 config v2는 **10-02부터**
+새 구간으로 고정하며10-01 기록을 사후 생성하지 않는다. 진입 전 저장 제한·선택·평가 기준은 같다.
+일부 날짜의 수집 지연이 새 예산을 넘으면 여전히 missing/late로 드러나며 자동 정상화하지 않는다.
 
 - `output/recommend_book_forward/design.json`: 시작 전 소스27개·선택·R1 버전·검토 기준 고정.
 - `scores/YYYY-MM-DD/{score,commit}.json`: 당일 후보·인과 입력·국면·영수증 기반 진입 시각과

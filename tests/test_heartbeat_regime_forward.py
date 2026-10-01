@@ -29,6 +29,11 @@ def test_probe_is_bounded(tmp_path, mode, rc):
 
 
 def test_probe_has_no_publish_refresh_or_repair_mode():
-    source = (ROOT / "scripts/heartbeat.sh").read_text().split("# 3f)", 1)[1].split("# 3a)", 1)[0]
+    source = (
+        (ROOT / "scripts/heartbeat.sh")
+        .read_text()
+        .split("# 3f)", 1)[1]
+        .split("# 3g)", 1)[0]
+    )
     assert source.count(TIMEOUT) == source.count(PROBE) == 1
     assert "--refresh" not in source
