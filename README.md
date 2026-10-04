@@ -12,6 +12,15 @@
 **전체 여정(실패 포함) 공개 보고서** → [soccz.github.io/projects/prelude](https://soccz.github.io/projects/prelude/) ·
 **일일 대시보드** → [/dashboard](https://soccz.github.io/projects/prelude/dashboard/) (매일 KST 10:10, PIN 암호화)
 
+**2026-10-04 · 알림을 사실대로 고치고 거래지원 종료 경고를 붙였다.**
+08:50 목록은 어제 데이터(D-2 일봉 피처)로 뽑아 어제09:05 추천과 대부분 같다는 사실을 알림에 적었다.
+`⚠️dump_risk`는 오를 때도 빠질 때도 크게 움직이는 종목이라 `↕️변동큼`으로 바꿨다. 업비트가 종료를
+공지한 RVN을 R1이4번 추천한 일을 계기로, 종료 예정이면 `🚫`·유의 종목이면 `⚠️`를 표시만 한다
+(순위·종목 불변, 조회 실패 시 발송은 그대로). 호가30단과 ‘새08:50’ 그림자 순위를 남기는 기록 전용
+timer2개는 opt-in 설치다. **추천 선택식·원장·봉인 소스는 그대로이며 새08:50의 우위는 아직 확인되지 않았다.**
+설계·근거는 [PHASES27차](PHASES.md#실사용-강화-27차--알림-정직화거래지원-종료-경고기록-전용-2종-2026-10-04),
+운영은 [OPS §1.6](OPS.md#16-기록-전용-2종--호가30단새0850-그림자-opt-in-27차-2026-10-04)에서 확인한다.
+
 **2026-10-01 · 실사용 검증 준비와 첫 운영 누락 수리.**
 같은 L1 후보를 **진입 전에 불변 저장**하고, 다음날 기존 R1과 하방·상방·net을 비교한다.
 0/15/30분 지연 진입·추가 비용·국면·기간별 일관성을 자동 확인하는 판정표도 연결했다.
@@ -269,12 +278,18 @@ active KRW − stablecoin 5종 + D1 PIT 거래대금
 |---|---|
 | 07:30 | 전수 pytest selftest (실패 시 OnFailure 경보) |
 | 08:45 | 공개 체결·호가 수집 및 별도 비교 기록 (09-10부터 동점+Top10 시험, 추천 발송과 독립) |
-| 08:50 | R1 **장전 후보** 발송 (09:00 참고가격은 아직 미확정) |
+| 08:50 | R1 **장전 후보** 발송 (09:00 참고가격은 아직 미확정; 어제 데이터라 어제09:05와 대부분 같음 — 오늘 추천은09:05) |
 | 09:05 | R1 **장후 후보** 발송 + challenger shadow ledger (09:00 가격은 참고용, pump-v2는 KILL 후 정상 no-op) |
 | 09:30 | 전일 청산 (−3%SL/+5%TP/EOD, 왕복 0.15% 차감) + 챔피언 재선정 |
 | 10:05 | 전 유니버스 forward 라벨 + 감사 평가 |
 | 10:10 | 암호화 대시보드 publish |
 | 10:30 | heartbeat (이상 시만 알림) · 04:00 content-addressed DB 백업 |
+
+알림 표시: `↕️변동큼` = 오를 때도 빠질 때도 크게 움직이는 종목. 종목 줄 아래 `🚫 거래지원 종료 예정
+MM/DD — 매수 비권장` 또는 `⚠️유의 종목`은 업비트 공개 정보로 붙이는 표시일 뿐 순위를 바꾸지 않으며,
+조회가 안 되면 발송은 그대로 하고 `ℹ️ 유의 종목 정보 확인 불가`를 붙인다.
+기록 전용(opt-in, `--add-depth-record --add-preopen-shadow`): 08:52·09:07 호가30단 원문,
+08:56 ‘새08:50’ 그림자 순위. 알림·원장에 쓰지 않고 실패 경보도 없다. 설치 시 timer는11개다.
 
 유닛 실패 시 `OnFailure`로 Telegram 경보를 시도한다. 서버·스케줄러·네트워크 전체 장애는
 같은 서버의 경보만으로 보장할 수 없으며, 독립 외부 감시는 아직 별도 구축 대상이다.
@@ -360,7 +375,7 @@ PYTHONDONTWRITEBYTECODE=1 python -B -m ops.selftest_status --format text  # 실�
 sudo bash deploy/install_systemd.sh --check-only      # 설치본-저장소 정합 검사
 
 # 전체 검증
-TMPDIR=/home/soccz/22tb/tmp PYTHONDONTWRITEBYTECODE=1 PRELUDE_FORBID_TELEGRAM=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 python -B -m pytest -q -p no:cacheprovider tests/  # 2026-09-30 전수3095 PASS
+TMPDIR=/home/soccz/22tb/tmp PYTHONDONTWRITEBYTECODE=1 PRELUDE_FORBID_TELEGRAM=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 python -B -m pytest -q -p no:cacheprovider tests/  # 2026-10-04 전수3,754 PASS
 ```
 
 ---
@@ -380,7 +395,7 @@ prelude/
 ├── notifier/          # Telegram + durable 발송 intent + delivery receipt
 ├── scripts/           # 일일 러너·백테스트·챌린저·감사 평가기
 ├── deploy/            # systemd 19유닛(9타이머) + 한정 교체/복구 지원 installer
-├── tests/             # 2026-09-30 로컬 전수3095 PASS (warnings=error)
+├── tests/             # 2026-10-04 로컬 전수3,754 PASS (warnings=error)
 ├── _workspace/        # 연구 노트·설계·독립 재검산 판정서 (negative results 박제)
 └── output/            # 산출물 (증거 아티팩트는 gitignore + versioned backup)
 ```

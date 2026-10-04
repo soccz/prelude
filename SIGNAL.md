@@ -21,6 +21,7 @@
 - 현재 확률과 RR는 정렬용 score이며 strict calibrated probability로 해석하지 않음
 - snapshot→delivery receipt→전용 ledger identity가 일치하지 않으면 fail closed
 - 활성 R1 정렬·라벨·모델·표시는 사용자 승인 없이 변경하지 않음
+- 08:50 preopen은 D-2 일봉 피처라 전날09:05 목록과 대부분 같다(§1.3, 27차)
 
 ---
 
@@ -368,6 +369,9 @@ prospective 시작일09-10이며 원 동점 시험의09-08 달력은 바꾸지 �
 - DB 저장은 **KST naive** (pyupbit 기본). timestamp = KST 09:00:00 = 그 봉 시작
 - 추론 시 "오늘 일봉" = KST 09:00 시작 ~ 다음 KST 09:00 마감
 - 추론 시점 KST 09:05 = 어제 일봉 100% 마감 후 5 분
+- 추론 시점 KST 08:50(preopen) = 어제 일봉이 아직 진행 중이라 마감된 D-2 일봉 피처를 쓴다. 그래서
+  전날09:05와 Top3 평균2.75/3이 겹치고(60일) 같은 날09:05와는0.08/3이다(10-04 연구, 알림에 안내 문구).
+  진행 중 D-1 일봉을 쓴 ‘새08:50’은 기록 전용 그림자로만 남긴다(PHASES27차, OPS §1.6).
 - 바이낸스 DB는 UTC-naive로 저장한다. timezone-aware 변환 후 업비트 KST session과
   명시적으로 정렬하며 host timezone이나 naive `+9h`에 의존하지 않는다
 

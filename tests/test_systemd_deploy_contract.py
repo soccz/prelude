@@ -41,6 +41,14 @@ TIMER_UNITS = (
     "prelude-microstructure.timer",
 )
 ALL_UNITS = SERVICE_UNITS + TIMER_UNITS
+# opt-in(--add-depth-record) 기록 전용 쌍 — 기본 설치 집합(ALL_UNITS) 밖.
+DEPTH_RECORD_SERVICE = "prelude-depth-record.service"
+DEPTH_RECORD_TIMER = "prelude-depth-record.timer"
+# opt-in(--add-preopen-shadow) 기록 전용 쌍 — 08:56 fresh D-1 R1 그림자 (2026-10-04).
+PREOPEN_SHADOW_SERVICE = "prelude-preopen-shadow.service"
+PREOPEN_SHADOW_TIMER = "prelude-preopen-shadow.timer"
+RECORD_ONLY_SERVICES = {DEPTH_RECORD_SERVICE, PREOPEN_SHADOW_SERVICE}
+RECORD_ONLY_TIMERS = {DEPTH_RECORD_TIMER, PREOPEN_SHADOW_TIMER}
 
 
 def _unit(path: Path) -> configparser.ConfigParser:
@@ -317,7 +325,12 @@ def _fixture_repo_for_installer(
 
 def test_all_services_pin_kst_network_and_failure_contracts() -> None:
     services = sorted(DEPLOY.glob("prelude-*.service"))
-    operational = [path for path in services if "failure-alert@" not in path.name]
+    # opt-in 기록 전용 유닛(depth-record, preopen-shadow)은 OnFailure 의도적 부재 —
+    # 공통 계약(User/TZ/network/Timeout)만 여기서, 경보 부재는 전용 테스트에서.
+    operational = [
+        path for path in services
+        if "failure-alert@" not in path.name and path.name not in RECORD_ONLY_SERVICES
+    ]
 
     assert len(operational) == 9
     for path in services:
@@ -402,7 +415,10 @@ def test_timer_calendar_and_catchup_contracts_are_explicit_kst() -> None:
         "prelude-microstructure.timer": ("*-*-* 08:45:00 Asia/Seoul", "false"),
     }
 
-    timers = sorted(DEPLOY.glob("prelude-*.timer"))
+    timers = sorted(
+        path for path in DEPLOY.glob("prelude-*.timer")
+        if path.name not in RECORD_ONLY_TIMERS  # opt-in 기록 전용 — 전용 테스트
+    )
     assert {path.name for path in timers} == set(expected)
     for path in timers:
         timer = _unit(path)["Timer"]
@@ -1343,3 +1359,286 @@ def test_installer_requires_safe_microstructure_wrapper_and_trial_runtimes(tmp_p
     assert f"microstructure runtime is missing or unsafe: {relative}" in result.stderr
     assert _unit_identities(env, ALL_UNITS) == before
     assert not Path(env["FAKE_SYSTEMCTL_LOG"]).exists()
+
+
+# ==========================================================================
+# opt-in 기록 전용 depth-record 쌍 (--add-depth-record, 2026-10-04)
+# ==========================================================================
+DEPTH_RECORD_UNITS = (DEPTH_RECORD_SERVICE, DEPTH_RECORD_TIMER)
+
+
+def _run_add_depth_record(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    env = env.copy()
+    env["PRELUDE_INSTALL_FIXTURE"] = "1"
+    return subprocess.run(
+        ["bash", str(INSTALLER), "--add-depth-record"],
+        cwd=ROOT, env=env, text=True, capture_output=True, check=False,
+    )
+
+
+def test_depth_record_units_are_record_only_without_failure_alert() -> None:
+    unit = _unit(DEPLOY / DEPTH_RECORD_SERVICE)
+    section = unit["Service"]
+    assert "OnFailure" not in unit["Unit"]  # 기록 전용 — 경보 소음 금지
+    assert "Before" not in unit["Unit"] and "Requires" not in unit["Unit"]
+    assert shlex.split(section["ExecStart"]) == [
+        "/home/soccz/22tb/prelude/venv/bin/python", "-B",
+        "/home/soccz/22tb/prelude/scripts/record_market_depth.py",
+    ]
+    assert "PRELUDE_FORBID_TELEGRAM=1" in section["Environment"].split()
+    assert "EnvironmentFile" not in section  # 공개 GET 만 — 토큰 불필요
+    assert section["Nice"] == "19" and section["Restart"] == "no"
+    assert 120 <= int(section["TimeoutStartSec"]) <= 300
+    for name in ALL_UNITS:
+        assert "prelude-depth-record" not in (DEPLOY / name).read_text()
+
+    timer_text = (DEPLOY / DEPTH_RECORD_TIMER).read_text()
+    calendars = [line.split("=", 1)[1] for line in timer_text.splitlines()
+                 if line.startswith("OnCalendar=")]
+    assert calendars == ["*-*-* 08:52:00 Asia/Seoul", "*-*-* 09:07:00 Asia/Seoul"]
+    timer = _unit(DEPLOY / DEPTH_RECORD_TIMER)["Timer"]
+    assert timer["Persistent"] == "false"
+    assert timer["RandomizedDelaySec"] == "0"
+
+
+def test_add_depth_record_installs_only_its_pair_and_preserves_nine(tmp_path):
+    env = _fake_install_env(tmp_path)
+    state_root = _stateful_fixture(env, omit_collector=False)
+    (state_root / "prelude-distribution.timer.enabled").write_text("disabled\n")
+    units_before = _unit_identities(env, ALL_UNITS)
+    states_before = {p.name: p.read_bytes() for p in state_root.iterdir()}
+
+    result = _run_add_depth_record(env)
+
+    assert result.returncode == 0, result.stderr
+    assert _unit_identities(env, ALL_UNITS) == units_before
+    for name, payload in states_before.items():
+        assert (state_root / name).read_bytes() == payload
+    assert _mutations(env) == [f"enable:{DEPTH_RECORD_TIMER}", f"restart:{DEPTH_RECORD_TIMER}"]
+    unit_dir = Path(env["PRELUDE_INSTALL_UNIT_DIR"])
+    for unit in DEPTH_RECORD_UNITS:
+        assert (unit_dir / unit).read_bytes() == (DEPLOY / unit).read_bytes()
+        assert (unit_dir / unit).stat().st_mode & 0o777 == 0o644
+    assert not list(unit_dir.glob(".prelude-*"))
+
+
+def test_default_check_and_install_tolerate_but_never_touch_depth_record(tmp_path):
+    env = _fake_install_env(tmp_path)
+    _stateful_fixture(env, omit_collector=False)
+    assert _run_add_depth_record(env).returncode == 0
+    Path(env["FAKE_SYSTEMCTL_LOG"]).unlink()
+    depth_before = _unit_identities(env, DEPTH_RECORD_UNITS)
+
+    check = _run_installer(env)
+    assert check.returncode == 0, check.stderr
+    full = _run_installer(env, check_only=False)
+    assert full.returncode == 0, full.stderr
+
+    assert not _mutations(env)
+    assert _unit_identities(env, DEPTH_RECORD_UNITS) == depth_before
+
+
+def test_default_install_without_depth_record_is_unchanged(tmp_path):
+    env = _fake_install_env(tmp_path)
+    _stateful_fixture(env, omit_collector=False)
+    result = _run_installer(env, check_only=False)
+    assert result.returncode == 0, result.stderr
+    assert not _mutations(env)
+    unit_dir = Path(env["PRELUDE_INSTALL_UNIT_DIR"])
+    assert not any((unit_dir / unit).exists() for unit in DEPTH_RECORD_UNITS)
+
+
+@pytest.mark.parametrize("failure", [
+    "daemon-reload", f"enable:{DEPTH_RECORD_TIMER}", f"restart:{DEPTH_RECORD_TIMER}",
+])
+def test_add_depth_record_failure_rolls_back_only_its_pair(tmp_path, failure):
+    env = _fake_install_env(tmp_path)
+    state_root = _stateful_fixture(env, omit_collector=False)
+    before = _unit_identities(env, ALL_UNITS)
+    states_before = {p.name: p.read_bytes() for p in state_root.iterdir()}
+    env["FAKE_SYSTEMCTL_FAIL_MATCH"] = failure
+
+    result = _run_add_depth_record(env)
+
+    assert result.returncode != 0
+    assert "Previous systemd configuration restored." in result.stderr
+    assert _unit_identities(env, ALL_UNITS) == before
+    assert all(line.endswith(f":{DEPTH_RECORD_TIMER}") for line in _mutations(env))
+    for name, payload in states_before.items():
+        assert (state_root / name).read_bytes() == payload
+    unit_dir = Path(env["PRELUDE_INSTALL_UNIT_DIR"])
+    assert not any((unit_dir / unit).exists() for unit in DEPTH_RECORD_UNITS)
+
+
+def test_add_depth_record_refuses_damaged_existing_units_without_mutation(tmp_path):
+    env = _fake_install_env(tmp_path)
+    _stateful_fixture(env, omit_collector=False)
+    path = Path(env["PRELUDE_INSTALL_UNIT_DIR"]) / "prelude-close.service"
+    path.write_text("[Unit]\nDescription=old\n")
+
+    result = _run_add_depth_record(env)
+
+    assert result.returncode != 0
+    assert not _mutations(env)
+    assert not (path.parent / DEPTH_RECORD_TIMER).exists()
+
+
+# ==========================================================================
+# opt-in 기록 전용 preopen-shadow 쌍 (--add-preopen-shadow, 2026-10-04)
+# ==========================================================================
+PREOPEN_SHADOW_UNITS = (PREOPEN_SHADOW_SERVICE, PREOPEN_SHADOW_TIMER)
+RECORD_ONLY_UNITS = DEPTH_RECORD_UNITS + PREOPEN_SHADOW_UNITS
+
+
+def _run_add_record_only(env: dict[str, str], *flags: str) -> subprocess.CompletedProcess[str]:
+    env = env.copy()
+    env["PRELUDE_INSTALL_FIXTURE"] = "1"
+    return subprocess.run(
+        ["bash", str(INSTALLER), *flags],
+        cwd=ROOT, env=env, text=True, capture_output=True, check=False,
+    )
+
+
+def test_preopen_shadow_units_are_record_only_and_bounded() -> None:
+    unit = _unit(DEPLOY / PREOPEN_SHADOW_SERVICE)
+    section = unit["Service"]
+    assert "OnFailure" not in unit["Unit"]  # 기록 전용 — 경보 소음 금지
+    assert "Before" not in unit["Unit"] and "Requires" not in unit["Unit"]
+    assert shlex.split(section["ExecStart"]) == [
+        "/home/soccz/22tb/prelude/venv/bin/python", "-B",
+        "/home/soccz/22tb/prelude/scripts/record_preopen_fresh_shadow.py",
+    ]
+    environment = section["Environment"].split()
+    assert "PRELUDE_FORBID_TELEGRAM=1" in environment
+    assert "EnvironmentFile" not in section  # 토큰 불필요
+    assert section["Nice"] == "19" and section["IOSchedulingClass"] == "idle"
+    assert section["Restart"] == "no"
+    assert section["TimeoutStartSec"] == "420"
+    # 스크립트 자체 마감(SIGALRM)이 systemd SIGTERM 보다 항상 먼저 와야 한다 —
+    # 08:56 시작 + TimeoutStartSec 가 DEADLINE 보다 최소 2분 늦게.
+    import scripts.record_preopen_fresh_shadow as shadow_rec
+    start_s = 8 * 3600 + 56 * 60
+    deadline_s = (shadow_rec.DEADLINE.hour * 3600 + shadow_rec.DEADLINE.minute * 60
+                  + shadow_rec.DEADLINE.second)
+    assert start_s + int(section["TimeoutStartSec"]) >= deadline_s + 120
+    assert deadline_s < 9 * 3600  # 09:00 이전 종료 — 09:05 운영과 분리
+    # 상한: 08:56 + AccuracySec(5s) + TimeoutStartSec + TimeoutStopSec(SIGKILL 까지)
+    # 가 09:05 운영보다 최소 60초 앞서야 한다 (TimeoutStartSec 을 올려 겹치는 것 방지).
+    accuracy_s = int(_unit(DEPLOY / PREOPEN_SHADOW_TIMER)["Timer"]["AccuracySec"].removesuffix("s"))
+    assert accuracy_s == 5
+    worst_end_s = (start_s + accuracy_s + int(section["TimeoutStartSec"])
+                   + int(section["TimeoutStopSec"]))
+    assert worst_end_s < 9 * 3600 + 5 * 60 - 60
+    for name in ALL_UNITS:
+        assert "prelude-preopen-shadow" not in (DEPLOY / name).read_text()
+
+    timer_text = (DEPLOY / PREOPEN_SHADOW_TIMER).read_text()
+    calendars = [line.split("=", 1)[1] for line in timer_text.splitlines()
+                 if line.startswith("OnCalendar=")]
+    assert calendars == ["*-*-* 08:56:00 Asia/Seoul"]
+    timer = _unit(DEPLOY / PREOPEN_SHADOW_TIMER)["Timer"]
+    assert timer["Persistent"] == "false"
+    assert timer["RandomizedDelaySec"] == "0"
+
+
+@pytest.mark.parametrize("flags", [
+    ("--add-preopen-shadow",),
+    ("--add-depth-record", "--add-preopen-shadow"),
+    ("--add-preopen-shadow", "--add-depth-record"),
+])
+def test_add_record_only_installs_only_requested_pairs_and_preserves_nine(tmp_path, flags):
+    env = _fake_install_env(tmp_path)
+    state_root = _stateful_fixture(env, omit_collector=False)
+    (state_root / "prelude-distribution.timer.enabled").write_text("disabled\n")
+    units_before = _unit_identities(env, ALL_UNITS)
+    states_before = {p.name: p.read_bytes() for p in state_root.iterdir()}
+
+    result = _run_add_record_only(env, *flags)
+
+    assert result.returncode == 0, result.stderr
+    assert _unit_identities(env, ALL_UNITS) == units_before
+    for name, payload in states_before.items():
+        assert (state_root / name).read_bytes() == payload
+    wanted_timers = [DEPTH_RECORD_TIMER] if "--add-depth-record" in flags else []
+    wanted_timers.append(PREOPEN_SHADOW_TIMER)
+    assert sorted(_mutations(env)) == sorted(
+        [f"enable:{t}" for t in wanted_timers] + [f"restart:{t}" for t in wanted_timers])
+    unit_dir = Path(env["PRELUDE_INSTALL_UNIT_DIR"])
+    for unit in RECORD_ONLY_UNITS:
+        wanted = unit.startswith("prelude-preopen-shadow") or "--add-depth-record" in flags
+        assert (unit_dir / unit).exists() == wanted
+        if wanted:
+            assert (unit_dir / unit).read_bytes() == (DEPLOY / unit).read_bytes()
+            assert (unit_dir / unit).stat().st_mode & 0o777 == 0o644
+    assert not list(unit_dir.glob(".prelude-*"))
+
+
+@pytest.mark.parametrize("failure", [
+    "daemon-reload", f"enable:{PREOPEN_SHADOW_TIMER}", f"restart:{PREOPEN_SHADOW_TIMER}",
+])
+def test_add_both_record_only_failure_rolls_back_only_those_pairs(tmp_path, failure):
+    env = _fake_install_env(tmp_path)
+    state_root = _stateful_fixture(env, omit_collector=False)
+    before = _unit_identities(env, ALL_UNITS)
+    states_before = {p.name: p.read_bytes() for p in state_root.iterdir()}
+    env["FAKE_SYSTEMCTL_FAIL_MATCH"] = failure
+
+    result = _run_add_record_only(env, "--add-depth-record", "--add-preopen-shadow")
+
+    assert result.returncode != 0
+    assert "Previous systemd configuration restored." in result.stderr
+    assert _unit_identities(env, ALL_UNITS) == before
+    assert all(line.endswith((f":{DEPTH_RECORD_TIMER}", f":{PREOPEN_SHADOW_TIMER}"))
+               for line in _mutations(env))
+    for name, payload in states_before.items():
+        assert (state_root / name).read_bytes() == payload
+    unit_dir = Path(env["PRELUDE_INSTALL_UNIT_DIR"])
+    assert not any((unit_dir / unit).exists() for unit in RECORD_ONLY_UNITS)
+
+
+@pytest.mark.parametrize("flags", [
+    ("--check-only", "--add-preopen-shadow"),
+    ("--add-microstructure", "--add-depth-record"),
+    ("--update-selftest", "--add-preopen-shadow"),
+    ("--add-preopen-shadow", "--add-preopen-shadow"),
+    ("--check-only", "--check-only"),
+])
+def test_installer_rejects_mode_combinations_without_mutation(tmp_path, flags):
+    env = _fake_install_env(tmp_path)
+    _stateful_fixture(env, omit_collector=False)
+    before = _unit_identities(env, ALL_UNITS)
+
+    result = _run_add_record_only(env, *flags)
+
+    assert result.returncode == 64
+    assert _unit_identities(env, ALL_UNITS) == before
+    assert not Path(env["FAKE_SYSTEMCTL_LOG"]).exists()
+
+
+@pytest.mark.parametrize("unit", RECORD_ONLY_UNITS)
+@pytest.mark.parametrize("damage", ["content", "mode"])
+def test_default_check_only_verifies_installed_record_only_units(tmp_path, unit, damage):
+    env = _fake_install_env(tmp_path)
+    _stateful_fixture(env, omit_collector=False)
+    assert _run_add_record_only(
+        env, "--add-depth-record", "--add-preopen-shadow").returncode == 0
+    assert _run_installer(env).returncode == 0  # 설치 직후 원본과 같으면 통과
+
+    installed = Path(env["PRELUDE_INSTALL_UNIT_DIR"]) / unit
+    if damage == "content":
+        installed.write_text(installed.read_text() + "# drift\n")
+    else:
+        installed.chmod(0o664)
+    result = _run_installer(env)
+
+    assert result.returncode != 0
+    assert unit in result.stderr
+
+
+def test_default_check_only_does_not_require_record_only_units(tmp_path):
+    env = _fake_install_env(tmp_path)
+    _stateful_fixture(env, omit_collector=False)
+    result = _run_installer(env)
+    assert result.returncode == 0, result.stderr
+    unit_dir = Path(env["PRELUDE_INSTALL_UNIT_DIR"])
+    assert not any((unit_dir / unit).exists() for unit in RECORD_ONLY_UNITS)

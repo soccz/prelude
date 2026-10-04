@@ -100,14 +100,19 @@ transaction에서 계산하고 내용 hash를 보존한다. 실제 체결비용/
 | **10:05 매일** | 01:05 | pre-open 청산 + 전일 R1 24h label/evaluator | `scripts/daily_close_preopen.sh` |
 | **10:10 매일** | 01:10 | dashboard JSON 빌드 + publish | `scripts/publish_dashboard.sh` |
 | **10:30 매일** | 01:30 | evidence·publish·ledger·DB heartbeat | `scripts/heartbeat.sh` |
+| 08:52·09:07 (opt-in) | 23:52 전일·00:07 | 기록 전용: KRW 전 종목 호가30단 + market/all 원문 | `scripts/record_market_depth.py` |
+| 08:56 (opt-in) | 23:56 전일 | 기록 전용: 새08:50(진행 중 D-1 일봉) R1 그림자 순위 | `scripts/record_preopen_fresh_shadow.py` |
 
 표의 시각은 nominal calendar다. `RandomizedDelaySec` 때문에 backup은 최대 120초,
 preopen/preopen-close는 최대 30초, microstructure는 random delay 없이 AccuracySec=5초,
-나머지는 최대 60초 뒤 시작할 수 있다.
+나머지는 최대 60초 뒤 시작할 수 있다. opt-in 기록 전용 2종은 random delay 없이 AccuracySec=5초,
+`Persistent=false`다(§1.6). 설치 전에는 위 9개 timer만 동작한다.
 
 ### 1.2 단일 scheduler 계약
 
 지원 scheduler는 `deploy/prelude-*.service`와 9개 timer다(기존8개 + 독립 microstructure).
+27차 기록 전용 2종(§1.6)은 opt-in이라 설치하면 11개가 된다. 기본 설치·`--check-only`는 이 2종을
+설치하거나 요구하지 않고, 설치된 사본이 있으면 저장소 원본과 바이트 비교만 한다.
 새9번째 timer의 실제 설치 결과는 아래 §1.3과 PHASES 8차의 설치 검증을 따른다.
 `deploy/crontab.txt`는 과거 참고 자료이며 활성화하면 안 된다. 설치기는 전체 사용자
 cron과 설치/등록된 prelude timer를 읽고, 중복 작업이 있으면 자동 수정하지 않고
@@ -123,7 +128,7 @@ sudo bash deploy/install_systemd.sh --add-microstructure
 
 08:45 수집 및 08:50·09:05 signal timer는 늦은 catch-up을 막기 위해 `Persistent=false`,
 나머지는 `Persistent=true`다. 9개 service는
-`OnFailure=prelude-failure-alert@%n.service`로 실패를 알리고, stage wrapper가
+`OnFailure=prelude-failure-alert@%n.service`로 실패를 알리고(기록 전용 2종은 `OnFailure` 없음), stage wrapper가
 후속 publish를 선행 stage 성공 증거와 연결한다.
 
 **09-09 설치 완료 확인:** selftest unit은 추천 서비스의 `Before`와 close 서비스의
@@ -584,6 +589,37 @@ PYTHONDONTWRITEBYTECODE=1 PRELUDE_FORBID_TELEGRAM=1 venv/bin/python -B scripts/r
 - 로컬 관리자 권한으로 state와 anchor를 함께 바꾸는 위협까지 방어하려면 추후
   HMAC 비밀키 또는 외부 WORM 저장소가 필요하다.
 
+### 1.6 기록 전용 2종 — 호가30단·새08:50 그림자 (opt-in, 27차, 2026-10-04)
+
+사용자 승인(10-04)으로 추가한 record-only timer다. 알림·snapshot·receipt·원장·텔레그램에 쓰지 않고,
+R1 파이프라인 lock을 잡지 않으며 `OnFailure` 경보도 없다. 실패는 각 산출 폴더의 기록과 journal에만
+남고 R1 발송·close·heartbeat의 성공 상태를 바꾸지 않는다. 늦은 재생은 그 시각의 입력이 아니므로
+`Persistent=false`이고, 놓친 날은 놓친 대로 둔다.
+
+| 시각 (KST) | unit | 산출물 | 장애 격리 |
+|---|---|---|---|
+| 08:52·09:07 | `prelude-depth-record.{service,timer}` | `output/depth_snapshots/YYYY-MM-DD/HHMM.json.gz` (write-once) | 공개 GET만, `.env` 불필요, HTTP≥400은 재시도 없이 실패 기록, `TimeoutStartSec=120` |
+| 08:56 | `prelude-preopen-shadow.{service,timer}` | `output/preopen_fresh_shadow/YYYY-MM-DD.json` (write-once) | 네트워크 호출 없음, 라이브 D1 DB를 read-only 복사해 계산, 08:59:30 마감 |
+
+- 호가 기록: 업비트 KRW 전 종목 호가30단과 market/all 원문을 그대로 남긴다. 30단 호가 깊이는 지금
+  어디에도 저장되지 않고 나중에 받을 수 없기 때문이다.
+- 그림자 기록: 08:50 단계의 D1 갱신(08:53경)이 반영한 진행 중 어제 일봉으로 R1을 open 방식으로
+  계산한 ‘새08:50’ Top3·후보100 순위다. 신선도·R1 preopen health gate를 함께 표시하고, 마감 초과·
+  중단은 failed, 대체정렬은 degraded, 입력 미확인은 stale_input으로 기록한다.
+- 평가: 4~8주 뒤 `scripts/evaluate_preopen_fresh_shadow.py`(수동, 스케줄 없음, 읽기 전용)로 같은 날
+  09:05와 비교한다. 비용 미반영 진단치이며 08:50 교체 여부는 사용자 결정이다.
+
+```bash
+# 설치 (opt-in, 두 플래그는 함께 또는 하나만; 기존9개 timer 정의·상태는 보존)
+sudo bash deploy/install_systemd.sh --add-depth-record --add-preopen-shadow
+systemctl list-timers 'prelude-depth-record*' 'prelude-preopen-shadow*' --no-pager
+# 롤백: 이후 실행만 멈춘다 (이미 남긴 기록은 보존)
+sudo systemctl disable --now prelude-depth-record.timer prelude-preopen-shadow.timer
+```
+
+기본 `--check-only`는 이 2종을 요구하지 않으므로 롤백 뒤에도 기존9개 점검은 그대로다. 두 산출 경로는
+Git 추적에서 제외한다. 첫 기록은 설치 다음 날08:52/08:56이며 이를 미리 성공으로 쓰지 않는다.
+
 ---
 
 ## 2. 현재 데이터 gate (`scripts/health_check.py`)
@@ -622,6 +658,18 @@ service가 nonzero를 반환한다.
 `scripts/pump_detector_v2_today.py`는 immutable KILL 확인 후 전송 전에 끝난다. 아래 distribution/pre-open 예시는
 record-only legacy formatter의 보존 문서이며 현재 R1 메시지 계약이 아니다.
 알림 문구 자체는 사용자 승인 없이 변경하지 않는다.
+
+**R1 메시지 표시 (27차, 10-04 사용자 승인)** — 텍스트만 바뀌고 선택·snapshot·receipt·원장은 그대로다.
+- 08:50 메시지 BTC 줄 아래: `ℹ️ 08:50 목록은 어제 데이터로 뽑아서 어제 09:05 추천과 대부분
+  같습니다 · 오늘 추천은 09:05에 옵니다`.
+- `dump_risk_flag` 종목은 ` ↕️변동큼`, 범례 `• ↕️변동큼 = 오를 때도 빠질 때도 크게 움직이는 종목`.
+  양방향 표시이며 사이즈 축소 문구는 없다.
+- 종목 줄 아래: 종료 공지가 있고 아직 지나지 않았으면 `🚫 거래지원 종료 예정 MM/DD — 매수 비권장`
+  (날짜 미상이면 `(일정은 공지 확인)`), 유의만이면 `⚠️유의 종목`. 순위·종목은 바꾸지 않는다.
+- 조회(`data/upbit_market_status.py`): 업비트 `market/all?isDetails=true`와 공지 API 최대2페이지,
+  연결2초·읽기3초·전체10초 hard timeout. **fail-open** — 실패해도 발송은 그대로이고 끝에
+  `ℹ️ 유의 종목 정보 확인 불가 — 업비트 앱에서 확인`이 붙는다. 조회 소요는 로그에 남긴다.
+- 매수 금액·자금은 표기하지 않는다. 손절 감시는 두지 않는다(사용자 직접 거래).
 
 텔레그램은 ACTIVE 추천만 발송한다. 모델 raw score 는 텔레그램에서 제거하고,
 사용자가 바로 판단할 수 있는 policy/edge 중심으로 표시한다.

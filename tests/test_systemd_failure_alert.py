@@ -40,6 +40,11 @@ def test_every_operational_service_has_onfailure():
     services = [
         p for p in Path("deploy").glob("prelude-*.service")
         if "failure-alert@" not in p.name
+        # 기록 전용(record-only) 유닛은 의도적으로 경보 없음 — 별도 테스트
+        # (tests/test_systemd_deploy_contract.py::
+        #  test_depth_record_units_are_record_only_without_failure_alert,
+        #  test_preopen_shadow_units_are_record_only_and_bounded) 가 OnFailure 부재를 단언.
+        and p.name not in {"prelude-depth-record.service", "prelude-preopen-shadow.service"}
     ]
 
     assert {service.name for service in services} == {

@@ -5,6 +5,9 @@
 #   sudo bash deploy/install_systemd.sh
 #   sudo bash deploy/install_systemd.sh --add-microstructure  # preserve existing eight
 #   sudo bash deploy/install_systemd.sh --update-selftest  # one service; no timer restart
+#   sudo bash deploy/install_systemd.sh --add-depth-record  # opt-in record-only pair; others untouched
+#   sudo bash deploy/install_systemd.sh --add-preopen-shadow  # opt-in record-only pair; others untouched
+#   (the two record-only flags may be combined; every other mode stands alone)
 #
 # Read-only validation (cron spool inspection still requires root):
 #   sudo bash deploy/install_systemd.sh --check-only
@@ -15,22 +18,43 @@ umask 077
 CHECK_ONLY=0
 ADD_MICROSTRUCTURE=0
 UPDATE_SELFTEST=0
+ADD_DEPTH_RECORD=0
+ADD_PREOPEN_SHADOW=0
 FIXTURE_INSTALL=0
-[ "$#" -le 1 ] || { echo "ERROR: expected at most one mode" >&2; exit 64; }
-case "${1:-}" in
-    "") ;;
-    --check-only) CHECK_ONLY=1 ;;
-    --add-microstructure) ADD_MICROSTRUCTURE=1 ;;
-    --update-selftest) UPDATE_SELFTEST=1 ;;
-    -h|--help)
-        sed -n '1,10p' "$0"
-        exit 0
-        ;;
-    *)
-        echo "ERROR: unknown argument: $1" >&2
-        exit 64
-        ;;
-esac
+MODE_COUNT=0
+for arg in "$@"; do
+    case "$arg" in
+        --check-only) CHECK_ONLY=1; MODE_COUNT=$((MODE_COUNT + 1)) ;;
+        --add-microstructure) ADD_MICROSTRUCTURE=1; MODE_COUNT=$((MODE_COUNT + 1)) ;;
+        --update-selftest) UPDATE_SELFTEST=1; MODE_COUNT=$((MODE_COUNT + 1)) ;;
+        --add-depth-record)
+            [ "$ADD_DEPTH_RECORD" -eq 0 ] ||
+                { echo "ERROR: duplicate argument: $arg" >&2; exit 64; }
+            ADD_DEPTH_RECORD=1
+            ;;
+        --add-preopen-shadow)
+            [ "$ADD_PREOPEN_SHADOW" -eq 0 ] ||
+                { echo "ERROR: duplicate argument: $arg" >&2; exit 64; }
+            ADD_PREOPEN_SHADOW=1
+            ;;
+        -h|--help)
+            sed -n '1,13p' "$0"
+            exit 0
+            ;;
+        *)
+            echo "ERROR: unknown argument: $arg" >&2
+            exit 64
+            ;;
+    esac
+done
+ADD_RECORD_ONLY=0
+if [ "$ADD_DEPTH_RECORD" -eq 1 ] || [ "$ADD_PREOPEN_SHADOW" -eq 1 ]; then
+    ADD_RECORD_ONLY=1
+fi
+if [ "$MODE_COUNT" -gt 1 ] || { [ "$MODE_COUNT" -eq 1 ] && [ "$ADD_RECORD_ONLY" -eq 1 ]; }; then
+    echo "ERROR: expected at most one mode (only record-only add flags combine)" >&2
+    exit 64
+fi
 
 die() {
     echo "ERROR: $*" >&2
@@ -123,6 +147,20 @@ TIMER_UNITS=(
 )
 ALL_UNITS=("${SERVICE_UNITS[@]}" "${TIMER_UNITS[@]}")
 MICROSTRUCTURE_UNITS=(prelude-microstructure.service prelude-microstructure.timer)
+# Opt-in record-only pairs (no OnFailure).  Never installed or required by the
+# default install/--check-only; tolerated as known names once added, and the
+# default --check-only compares any installed copy with its repo source.
+DEPTH_RECORD_SERVICE=prelude-depth-record.service
+DEPTH_RECORD_TIMER=prelude-depth-record.timer
+DEPTH_RECORD_UNITS=("$DEPTH_RECORD_SERVICE" "$DEPTH_RECORD_TIMER")
+PREOPEN_SHADOW_SERVICE=prelude-preopen-shadow.service
+PREOPEN_SHADOW_TIMER=prelude-preopen-shadow.timer
+PREOPEN_SHADOW_UNITS=("$PREOPEN_SHADOW_SERVICE" "$PREOPEN_SHADOW_TIMER")
+RECORD_ONLY_SERVICES=("$DEPTH_RECORD_SERVICE" "$PREOPEN_SHADOW_SERVICE")
+RECORD_ONLY_TIMERS=("$DEPTH_RECORD_TIMER" "$PREOPEN_SHADOW_TIMER")
+RECORD_ONLY_UNITS=("${RECORD_ONLY_SERVICES[@]}" "${RECORD_ONLY_TIMERS[@]}")
+EXTRA_UNITS=()
+EXTRA_TIMERS=()
 INSTALL_UNITS=("${ALL_UNITS[@]}")
 INSTALL_TIMERS=("${TIMER_UNITS[@]}")
 if [ "$ADD_MICROSTRUCTURE" -eq 1 ]; then
@@ -133,6 +171,36 @@ if [ "$UPDATE_SELFTEST" -eq 1 ]; then
     INSTALL_UNITS=(prelude-selftest.service)
     INSTALL_TIMERS=()
 fi
+if [ "$ADD_DEPTH_RECORD" -eq 1 ]; then
+    EXTRA_UNITS+=("${DEPTH_RECORD_UNITS[@]}")
+    EXTRA_TIMERS+=("$DEPTH_RECORD_TIMER")
+fi
+if [ "$ADD_PREOPEN_SHADOW" -eq 1 ]; then
+    EXTRA_UNITS+=("${PREOPEN_SHADOW_UNITS[@]}")
+    EXTRA_TIMERS+=("$PREOPEN_SHADOW_TIMER")
+fi
+if [ "$ADD_RECORD_ONLY" -eq 1 ]; then
+    INSTALL_UNITS=("${EXTRA_UNITS[@]}")
+    INSTALL_TIMERS=("${EXTRA_TIMERS[@]}")
+fi
+
+is_extra_timer() {
+    local candidate="$1"
+    local expected
+    for expected in ${EXTRA_TIMERS[@]+"${EXTRA_TIMERS[@]}"}; do
+        [ "$candidate" = "$expected" ] && return 0
+    done
+    return 1
+}
+
+is_record_only_unit() {
+    local candidate="$1"
+    local expected
+    for expected in "${RECORD_ONLY_UNITS[@]}"; do
+        [ "$candidate" = "$expected" ] && return 0
+    done
+    return 1
+}
 
 if [ "$EUID" -ne 0 ] && [ "$CRON_ROOT" = "/" ]; then
     die "root is required to inspect every user's cron spool (use sudo)"
@@ -150,7 +218,7 @@ root_path() {
 is_expected_timer() {
     local candidate="$1"
     local expected
-    for expected in "${TIMER_UNITS[@]}"; do
+    for expected in "${TIMER_UNITS[@]}" "${RECORD_ONLY_TIMERS[@]}"; do
         if [ "$candidate" = "$expected" ]; then
             return 0
         fi
@@ -161,7 +229,7 @@ is_expected_timer() {
 is_expected_service() {
     local candidate="$1"
     local expected
-    for expected in "${SERVICE_UNITS[@]}"; do
+    for expected in "${SERVICE_UNITS[@]}" "${RECORD_ONLY_SERVICES[@]}"; do
         if [ "$candidate" = "$expected" ]; then
             return 0
         fi
@@ -340,7 +408,19 @@ validate_repo_contract() {
         [ -x "$REPO/deploy/run_pipeline_stage.sh" ] ||
         die "pipeline wrapper is not executable"
 
-    for unit in "${ALL_UNITS[@]}"; do
+    if [ "$ADD_DEPTH_RECORD" -eq 1 ]; then
+        [ -f "$REPO/scripts/record_market_depth.py" ] &&
+            [ ! -L "$REPO/scripts/record_market_depth.py" ] &&
+            [ -r "$REPO/scripts/record_market_depth.py" ] ||
+            die "depth record runtime is missing or unsafe: scripts/record_market_depth.py"
+    fi
+    if [ "$ADD_PREOPEN_SHADOW" -eq 1 ]; then
+        [ -f "$REPO/scripts/record_preopen_fresh_shadow.py" ] &&
+            [ ! -L "$REPO/scripts/record_preopen_fresh_shadow.py" ] &&
+            [ -r "$REPO/scripts/record_preopen_fresh_shadow.py" ] ||
+            die "preopen shadow runtime is missing or unsafe: scripts/record_preopen_fresh_shadow.py"
+    fi
+    for unit in "${ALL_UNITS[@]}" ${EXTRA_UNITS[@]+"${EXTRA_UNITS[@]}"}; do
         [ -e "$REPO/deploy/$unit" ] ||
             die "unit source missing: deploy/$unit"
         [ ! -L "$REPO/deploy/$unit" ] ||
@@ -370,8 +450,11 @@ validate_installed_contract() {
     [ -d "$UNIT_DIR" ] ||
         die "systemd unit path is not a directory: $UNIT_DIR"
 
-    for unit in "${ALL_UNITS[@]}"; do
+    for unit in "${ALL_UNITS[@]}" ${EXTRA_UNITS[@]+"${EXTRA_UNITS[@]}"}; do
         if [ "$scope" = "existing" ] && [[ "$unit" = prelude-microstructure.* ]]; then
+            continue
+        fi
+        if [ "$scope" = "existing" ] && is_record_only_unit "$unit"; then
             continue
         fi
         if [ "$scope" = "except-selftest" ] && [ "$unit" = "prelude-selftest.service" ]; then
@@ -416,8 +499,9 @@ validate_installed_contract() {
     done
 
     [ "$scope" = "all" ] || return 0
-    for unit in "${TIMER_UNITS[@]}"; do
+    for unit in "${TIMER_UNITS[@]}" ${EXTRA_TIMERS[@]+"${EXTRA_TIMERS[@]}"}; do
         if { [ "$ADD_MICROSTRUCTURE" -eq 1 ] && [ "$unit" != "prelude-microstructure.timer" ]; } ||
+           { [ "$ADD_RECORD_ONLY" -eq 1 ] && ! is_extra_timer "$unit"; } ||
            [ "$UPDATE_SELFTEST" -eq 1 ]; then
             read_timer_state "$unit"
             [ "$CURRENT_ENABLED_STATE" = "${PREVIOUS_ENABLED_STATE[$unit]}" ] &&
@@ -429,6 +513,31 @@ validate_installed_contract() {
             die "timer is not enabled: $unit"
         "$SYSTEMCTL_BIN" is-active --quiet "$unit" ||
             die "timer is not active: $unit"
+    done
+}
+
+validate_installed_record_only_units() {
+    # Default --check-only: record-only pairs are optional, but an installed
+    # copy must still match its repo source (mode 0644, root-owned, no symlink).
+    local installed_path
+    local unit
+
+    for unit in "${RECORD_ONLY_UNITS[@]}"; do
+        installed_path="$UNIT_DIR/$unit"
+        [ -e "$installed_path" ] || [ -L "$installed_path" ] || continue
+        [ ! -L "$installed_path" ] ||
+            die "installed record-only unit must not be a symlink: $installed_path"
+        [ -f "$installed_path" ] && [ -r "$installed_path" ] ||
+            die "installed record-only unit is not a readable regular file: $installed_path"
+        [ "$(/usr/bin/stat -c '%a' "$installed_path")" = "644" ] ||
+            die "installed record-only unit mode must be 0644: $unit"
+        if [ "$CRON_ROOT" = "/" ]; then
+            [ "$(/usr/bin/stat -c '%U' "$installed_path")" = "root" ] ||
+                die "installed record-only unit owner must be root: $unit"
+        fi
+        [ -f "$REPO/deploy/$unit" ] && [ ! -L "$REPO/deploy/$unit" ] &&
+            /usr/bin/cmp -s "$REPO/deploy/$unit" "$installed_path" ||
+            die "installed record-only unit differs from source: $unit"
     done
 }
 
@@ -545,6 +654,7 @@ reject_duplicate_systemd_schedules
 
 if [ "$CHECK_ONLY" -eq 1 ]; then
     validate_installed_contract
+    validate_installed_record_only_units
     echo "prelude systemd preflight: OK"
     exit 0
 fi
@@ -736,7 +846,7 @@ trap 'exit 143' TERM
 STAGE_DIR=$(/usr/bin/mktemp -d "$UNIT_DIR/.prelude-install.XXXXXX")
 BACKUP_DIR=$(/usr/bin/mktemp -d "$UNIT_DIR/.prelude-backup.XXXXXX")
 stage_paths=()
-for unit in "${ALL_UNITS[@]}"; do
+for unit in "${ALL_UNITS[@]}" ${EXTRA_UNITS[@]+"${EXTRA_UNITS[@]}"}; do
     /usr/bin/install -m 0644 "$REPO/deploy/$unit" "$STAGE_DIR/$unit"
     /usr/bin/cmp -s "$REPO/deploy/$unit" "$STAGE_DIR/$unit" ||
         die "staged unit differs from source: $unit"
@@ -745,11 +855,11 @@ done
 "$SYSTEMD_ANALYZE_BIN" verify "${stage_paths[@]}" ||
     die "systemd-analyze rejected one or more staged units"
 
-for unit in "${TIMER_UNITS[@]}"; do
+for unit in "${TIMER_UNITS[@]}" ${EXTRA_TIMERS[@]+"${EXTRA_TIMERS[@]}"}; do
     snapshot_timer_state "$unit"
 done
 
-if [ "$ADD_MICROSTRUCTURE" -eq 1 ]; then
+if [ "$ADD_MICROSTRUCTURE" -eq 1 ] || [ "$ADD_RECORD_ONLY" -eq 1 ]; then
     # Add-only is not permission to repair or enable the original scheduler.
     validate_installed_contract existing
 fi
@@ -823,7 +933,7 @@ validate_installed_contract
 
 echo
 echo "=== Installed timers ==="
-"$SYSTEMCTL_BIN" list-timers --no-pager "${TIMER_UNITS[@]}"
+"$SYSTEMCTL_BIN" list-timers --no-pager "${TIMER_UNITS[@]}" ${EXTRA_TIMERS[@]+"${EXTRA_TIMERS[@]}"}
 TRANSACTION_ACTIVE=0
 cleanup_temp_tree "$STAGE_DIR" install ||
     die "could not remove completed install staging directory"

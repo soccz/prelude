@@ -1,0 +1,12 @@
+[Unit]
+Description=prelude 08:50 fresh D-1 R1 shadow score record-only daily 08:56 KST
+
+[Timer]
+OnCalendar=*-*-* 08:56:00 Asia/Seoul
+# 늦은 재생은 그 시각의 입력이 아니다 — 놓치면 놓친 대로 둔다 (마감 08:59:30).
+Persistent=false
+RandomizedDelaySec=0
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

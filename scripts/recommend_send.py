@@ -14,7 +14,10 @@
      (P(≥5/10/20%) / P(≤-5/-10%) / E[하방]); strict calibrated 확률은 아님.
   3. risk-reward 레이더 메시지로 포맷 (헤더에 champion_id + fallback 이면 "SHADOW fallback").
      pre-open slot 은 진입가 미확정 → "진입가 09:00 open(개장 후 확정)" 표기.
-  4. notifier.telegram.send_telegram 으로 발송.
+  4. 발송 직전 업비트 공개 API 로 Top3 의 거래지원 종료 예정·유의 종목을 조회해
+     표시만 붙인다(순위·종목 불변). 조회 실패는 fail-open — 발송은 그대로,
+     메시지 끝에 '확인 불가' 한 줄 (data/upbit_market_status.py).
+  5. notifier.telegram.send_telegram 으로 발송.
 
 ★★★ 이 채널은 SHADOW(검증중) 다 (CLAUDE.md §2.2/§3.1, ops-steward §0):
     - 자동주문·업비트 API key 절대 없음. 사람이 보고 본인 판단으로 매매.
@@ -49,6 +52,7 @@ import sys
 from contextlib import contextmanager
 from datetime import date, datetime, time, timezone, timedelta
 from pathlib import Path
+from time import monotonic
 from typing import Callable, Iterator, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -70,6 +74,10 @@ from ops.champion_selector import (  # noqa: E402
     ChampionStateError,
     get_champion,
     load_champion_state_artifact,
+)
+from data.upbit_market_status import (  # noqa: E402
+    MarketStatus,
+    lookup_market_status,
 )
 from ops.file_lock import file_lock  # noqa: E402
 from signals.model_registry import ModelSpec, get_model  # noqa: E402
@@ -93,6 +101,19 @@ CHAMPION_STATE_PATH = (
     Path(__file__).resolve().parent.parent / "output" / "champion_state.json"
 )
 _BEAR = {"bear", "bear_quiet", "bear_volatile"}
+
+# 2026-10-04 문구 — 사용자 최종 확인 완료("좋아", 알림 포맷 변경 = 사용자 컨펌 사항).
+# 08:50 목록은 전날 D1(어제 09:05 와 같은 feature_date) 기준이라 어제 09:05 Top3 와
+# 대부분 겹친다 (62일 평균 2.75/3, 연구 2026-10-04) → 그 사실을 그대로 안내.
+PREOPEN_NOTICE = (
+    "ℹ️ 08:50 목록은 어제 데이터로 뽑아서 어제 09:05 추천과 대부분 같습니다"
+    " · 오늘 추천은 09:05에 옵니다"
+)
+# dump_risk_flag 표시. open 유니버스 62일: 플래그 종목 −5% 도달 35% vs 20%,
+# +10% 도달 19% vs 9% → 하방 전용 경고가 아니라 '양방향으로 크게 움직임'.
+VOLATILE_TAG = " ↕️변동큼"
+VOLATILE_LEGEND = "• ↕️변동큼 = 오를 때도 빠질 때도 크게 움직이는 종목"
+MARKET_STATUS_UNAVAILABLE = "ℹ️ 유의 종목 정보 확인 불가 — 업비트 앱에서 확인"
 
 
 def _today_kst() -> str:
@@ -406,8 +427,22 @@ def call_predict(spec: ModelSpec, asof: str, slot: str,
 # ==========================================================================
 # risk-reward 레이더 메시지 포맷 (notifier 책임 — 알림 포맷 변경은 사용자 컨펌 게이트)
 # ==========================================================================
+def _market_badge(coin: str, status: MarketStatus, now: datetime) -> tuple[str | None, bool]:
+    """(표시 문구, 정상 여부). 표시 계산 오류도 발송을 막지 않는다."""
+    try:
+        return status.badge(coin, now), True
+    except Exception as exc:  # noqa: BLE001 — 표시 전용 fail-open
+        log.warning("market status badge failed for %s: %s", coin, exc)
+        return None, False
+
+
 def format_radar(res: dict, slot: str, *, dry_run: bool = False,
-                 champion_id: str = "", is_fallback: bool = False) -> str:
+                 champion_id: str = "", is_fallback: bool = False,
+                 market_status: MarketStatus | None = None,
+                 now: datetime | None = None) -> str:
+    """레이더 메시지 텍스트. market_status=None 이면 종료 예정·유의 표시를 생략
+    (조회 자체를 하지 않은 호출). 조회 실패는 available=False 로 넘어와 끝에
+    '확인 불가' 한 줄이 붙는다."""
     asof = res.get("asof", "")
     regime = res.get("btc_regime", "unknown")
     slot_label = SLOT_TIME.get(slot, slot)
@@ -426,6 +461,11 @@ def format_radar(res: dict, slot: str, *, dry_run: bool = False,
         f"BTC: {_regime_kr(regime)} | universe top100 ({res.get('universe_n', 0)})"
         f" | risk-reward · downside-first · SHADOW(검증중)"
     )
+    # 진입가 표기: open=실제 09:00 open. preopen=미개장이라 미확정.
+    resolved_slot = str(res.get("slot", slot))
+    is_preopen = resolved_slot == "preopen"
+    if is_preopen:
+        lines.append(PREOPEN_NOTICE)
     lines.append("")
 
     top3 = res.get("top3") or []
@@ -437,16 +477,15 @@ def format_radar(res: dict, slot: str, *, dry_run: bool = False,
             lines.append("(유니버스 내 스코어 후보 없음)")
         return "\n".join(lines)
 
-    # 진입가 표기: open=실제 09:00 open. preopen=미개장이라 미확정.
-    resolved_slot = str(res.get("slot", slot))
-    is_preopen = resolved_slot == "preopen"
+    status_now = now or datetime.now(KST)
+    status_ok = market_status is None or market_status.available
 
     lines.append(f"━━━ risk-reward 레이더 top{len(top3)} ━━━")
     lines.append("(상방=고가가 그만큼 갈 가능성 / 하방=저가가 그만큼 빠질 가능성, 검증 중 추정치·안전 보장 아님)")
     lines.append("")
     for it in top3:
         coin = str(it.get("coin", "")).replace("KRW-", "")
-        warn = " ⚠️dump_risk" if it.get("dump_risk_flag") else ""
+        warn = VOLATILE_TAG if it.get("dump_risk_flag") else ""
         entry = it.get("entry_open")
         if is_preopen or entry is None:
             # pre-open(08:50): 09:00 미개장 → 진입가 미확정. None 을 "—" 로 보이지 않게.
@@ -454,6 +493,11 @@ def format_radar(res: dict, slot: str, *, dry_run: bool = False,
         else:
             entry_line = f"09:00 참고가격 ≈ {entry:g} (현재 체결가격 아님)"
         lines.append(f"#{it.get('rank', '?')} {coin}  {entry_line}{warn}")
+        if market_status is not None:
+            badge, badge_ok = _market_badge(coin, market_status, status_now)
+            status_ok = status_ok and badge_ok
+            if badge:
+                lines.append(f"   {badge}")
         lines.append(
             f"   ▸ 상방  ≥5% {_pct(it.get('p_up5'))} · ≥10% {_pct(it.get('p_up10'))}"
             f" · ≥20% {_pct(it.get('p_up20'))}"
@@ -468,8 +512,31 @@ def format_radar(res: dict, slot: str, *, dry_run: bool = False,
     lines.append("• 자동매매 없음 — 알림만. 본인 판단으로 직접 매매")
     lines.append("• 09:00 가격은 참고만. -3% 손절(SL) / +5% 익절(TP)는 가상평가 설정이며 실제 체결가격 기준으로 직접 판단")
     lines.append("• 검증중(SHADOW) — 가상 ledger·dashboard 로 성과 추적, 실거래 주문 X")
-    lines.append("• ⚠️dump_risk = 과열·고유동 board-top — 하방 클 수 있으니 사이즈 축소")
+    lines.append(VOLATILE_LEGEND)
+    if not status_ok:
+        lines.append(MARKET_STATUS_UNAVAILABLE)
     return "\n".join(lines)
+
+
+def _lookup_market_status() -> MarketStatus:
+    """발송 직전 공개 API 조회. lookup_market_status 자체가 fail-open 이지만
+    발송 경로 보호를 위해 한 번 더 감싼다."""
+    started = monotonic()
+    try:
+        status = lookup_market_status(now=_now_kst())
+    except Exception as exc:  # noqa: BLE001
+        status = MarketStatus.unavailable(f"{type(exc).__name__}: {exc}")
+    # 발송 지연 → L1 진입봉 계산에 영향이 있으므로 소요 시간을 남긴다.
+    elapsed_ms = int((monotonic() - started) * 1000)
+    log.info("market status lookup took %d ms (available=%s)", elapsed_ms, status.available)
+    if not status.available:
+        log.warning("market status lookup degraded (fail-open): %s",
+                    "; ".join(status.errors) or "unknown")
+    else:
+        log.info("market status: warnings=%d delistings=%s undated=%s",
+                 len(status.warnings), sorted(status.delistings),
+                 sorted(status.undated_delistings))
+    return status
 
 
 # ==========================================================================
@@ -771,8 +838,11 @@ def send_recommendation(asof: str, slot: str, *, dry_run: bool = False,
              res["universe_n"], res["calibration_source"], len(res["top3"]))
     log.info("score snapshot id=%s path=%s",
              res.get("snapshot_id"), res.get("snapshot_path"))
+    # 거래지원 종료 예정·유의 표시 — 순위·종목·snapshot 은 건드리지 않는다.
+    market_status = _lookup_market_status() if res.get("top3") else None
     msg = format_radar(res, slot, dry_run=dry_run,
-                       champion_id=spec.id, is_fallback=is_fallback)
+                       champion_id=spec.id, is_fallback=is_fallback,
+                       market_status=market_status, now=_now_kst())
 
     if dry_run:
         # preview는 영속 receipt의 성공 여부와 무관하게 항상 렌더링한다.

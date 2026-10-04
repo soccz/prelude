@@ -1,0 +1,26 @@
+[Unit]
+Description=prelude public KRW orderbook depth-30 record-only snapshot (R1-independent)
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor=/home/soccz/22tb/prelude
+# 기록 전용: OnFailure 경보 없음 (실패는 output/depth_snapshots/record.log·journal 에만).
+
+[Service]
+Type=oneshot
+User=soccz
+UMask=0077
+NoNewPrivileges=true
+WorkingDirectory=/home/soccz/22tb/prelude
+Environment=TZ=Asia/Seoul PYTHONDONTWRITEBYTECODE=1 PRELUDE_FORBID_TELEGRAM=1
+# 공개 GET 만 사용 — .env(토큰) 불필요. R1 파이프라인 lock 을 잡지 않는다.
+ExecStart=/home/soccz/22tb/prelude/venv/bin/python -B /home/soccz/22tb/prelude/scripts/record_market_depth.py
+Restart=no
+Nice=19
+IOSchedulingClass=idle
+CPUQuota=25%
+MemoryMax=512M
+TimeoutStartSec=120
+TimeoutStopSec=15
+KillMode=control-group
+StandardOutput=journal
+StandardError=journal

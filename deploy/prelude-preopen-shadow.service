@@ -1,0 +1,30 @@
+[Unit]
+Description=prelude 08:50 fresh D-1 R1 shadow score record-only (no Telegram/ledger/snapshot)
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor=/home/soccz/22tb/prelude
+# 기록 전용: OnFailure 경보 없음 (결과·실패는 output/preopen_fresh_shadow/ 와 journal 에만).
+# 네트워크 호출 없음 — 라이브 D1 DB 를 read-only 로 임시 복사해 계산한다.
+
+[Service]
+Type=oneshot
+User=soccz
+UMask=0077
+NoNewPrivileges=true
+WorkingDirectory=/home/soccz/22tb/prelude
+Environment=TZ=Asia/Seoul PYTHONDONTWRITEBYTECODE=1 PRELUDE_FORBID_TELEGRAM=1 PRELUDE_FORBID_MARKET_STATUS_FETCH=1
+# R1 파이프라인 lock 을 잡지 않는다. 08:59:30 KST 마감 가드(SIGALRM)는 스크립트 안에 있다.
+# TimeoutStartSec=420 (08:56 시작 → 09:03 SIGTERM) 은 스크립트 마감보다 확실히 늦다 —
+# 스크립트 자체 마감이 항상 먼저 와서 failed 기록을 쓰고 끝낸다 (계약 테스트로 고정).
+# 임시 DB 복사본은 /home/soccz/22tb/tmp/prelude_shadow_work 아래 (라이브 output 밖).
+# 실측(2026-10-04): 점수 계산 약 18초, 최대 RSS 약 580MB.
+ExecStart=/home/soccz/22tb/prelude/venv/bin/python -B /home/soccz/22tb/prelude/scripts/record_preopen_fresh_shadow.py
+Restart=no
+Nice=19
+IOSchedulingClass=idle
+MemoryMax=2G
+TimeoutStartSec=420
+TimeoutStopSec=15
+KillMode=control-group
+StandardOutput=journal
+StandardError=journal

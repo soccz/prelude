@@ -127,3 +127,8 @@ secrets/
 
 # 사용자 사고 스크린샷 (로컬 증거 — repo 반영 안 함)
 /IMG_*.PNG
+
+# 호가 30단 기록 전용 스냅샷 (scripts/record_market_depth.py — 로컬 보관, git 추적 X)
+/output/depth_snapshots/
+# 08:56 fresh D-1 R1 그림자 기록 (record-only, 2026-10-04)
+/output/preopen_fresh_shadow/

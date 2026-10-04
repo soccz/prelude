@@ -1,0 +1,13 @@
+[Unit]
+Description=prelude orderbook depth-30 record-only snapshot daily 08:52 / 09:07 KST
+
+[Timer]
+OnCalendar=*-*-* 08:52:00 Asia/Seoul
+OnCalendar=*-*-* 09:07:00 Asia/Seoul
+# 늦은 재생은 그 시각의 호가가 아니다 — 놓치면 놓친 대로 둔다.
+Persistent=false
+RandomizedDelaySec=0
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

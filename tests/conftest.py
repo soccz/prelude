@@ -23,6 +23,10 @@ from pathlib import Path
 import pytest
 
 os.environ["PRELUDE_FORBID_TELEGRAM"] = "1"
+# 발송 직전 업비트 공개 API 조회(data/upbit_market_status.py)도 테스트에선 원천
+# 차단 — 실네트워크 의존·호출 예산 소모 방지. 조회 경로를 검증하는 테스트는
+# get_json 을 주입하고 이 변수를 monkeypatch.delenv 로 해제한다.
+os.environ["PRELUDE_FORBID_MARKET_STATUS_FETCH"] = "1"
 
 # 실 운영 DB 디렉토리 — 테스트가 여기 접근하면 hermeticity 위반이다.
 _PRODUCTION_DATA_ROOT = str(
