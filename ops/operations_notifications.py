@@ -114,6 +114,7 @@ def notify(
         active.update({k: list(v) for k, v in observations.items()})
         current = {k for k in active if not k.startswith("research:")}
         acknowledged = set(state["acknowledged"]) - (current - previous_active)
+        state["acknowledged"] = sorted(acknowledged)
         uncertain = (
             set(state.get("uncertain_target", []))
             | set(state.get("pending_target", []))

@@ -76,6 +76,17 @@ def test_failed_delivery_is_not_acknowledged_and_can_retry(tmp_path):
     )
 
 
+def test_failed_recovery_cannot_acknowledge_a_new_recurrence(tmp_path):
+    path = tmp_path / "state.json"
+    assert heartbeat("- publish missing", state_path=path, sender=lambda _: True) == "sent"
+    with pytest.raises(RuntimeError):
+        heartbeat("", state_path=path, sender=lambda _: False)
+    with pytest.raises(RuntimeError):
+        heartbeat("- publish missing", state_path=path, sender=lambda _: False)
+    assert json.loads(path.read_text())["acknowledged"] == []
+    assert heartbeat("- publish missing", state_path=path, sender=lambda _: True) == "sent"
+
+
 def test_ambiguous_acceptance_is_not_replayed_or_claimed_success(tmp_path):
     sent = []
 
