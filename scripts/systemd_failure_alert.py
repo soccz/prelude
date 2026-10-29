@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from notifier.telegram import send_telegram  # noqa: E402
+from ops.operations_notifications import failure  # noqa: E402
 
 
 def build_message(unit: str, *, now: datetime | None = None) -> str:
@@ -31,7 +31,12 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--unit", required=True)
     args = parser.parse_args()
-    return 0 if send_telegram(build_message(args.unit)) else 1
+    try:
+        print("operations notification:", failure(args.unit))
+        return 0
+    except (RuntimeError, ValueError, OSError) as exc:
+        print(f"operational notification failed: {type(exc).__name__}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

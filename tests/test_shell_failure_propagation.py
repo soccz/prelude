@@ -1109,8 +1109,9 @@ def test_preopen_close_label_failure_propagates_but_partial_retries_as_warning(t
         fail_exact=command,
         fail_rc=2,
     )
-    assert partial.returncode == 2
+    assert partial.returncode == 0
     assert "score label partial" in partial_logs
+    assert "[DEGRADED] full-universe score labeling partial" in partial_logs
 
 
 def test_preopen_close_evaluator_failure_is_critical_and_followups_continue(
@@ -1171,7 +1172,7 @@ def test_backup_and_heartbeat_finish_nonzero_on_detected_failures():
     assert "output/close_policy_blocked" in backup
     assert 'EXIT=1' in heartbeat
     assert 'exit "$EXIT"' in heartbeat
-    assert "send_telegram(os.environ['HEARTBEAT_MESSAGE']) else 1" in heartbeat
+    assert "notify_heartbeat_from_environment()" in heartbeat
     assert "heartbeat alert delivery FAIL" in heartbeat
 
 
@@ -2255,7 +2256,7 @@ def test_backup_rejects_symlink_member_from_evidence_archive(
 
 @pytest.mark.parametrize(
     ("delivery_rc", "expected_rc", "expected_log"),
-    [(0, 0, "[alert sent]"), (19, 1, "delivery FAIL")],
+    [(0, 0, "[notification processed]"), (19, 1, "delivery FAIL")],
 )
 def test_heartbeat_uses_onfailure_only_when_detailed_alert_delivery_fails(
     tmp_path, delivery_rc, expected_rc, expected_log
@@ -2526,7 +2527,7 @@ def test_heartbeat_policy_and_snapshot_probes_use_exit_code_contracts():
         assert 'print("ok")' not in probe
 
     assert "raise SystemExit(1)" in policy_probe
-    assert "raise SystemExit(1)" in snapshot_probe
+    assert "raise SystemExit(1 if delivery_bad else 3)" in snapshot_probe
 
 
 def test_heartbeat_v2_terminal_contract_is_noop_not_daily_alert():
@@ -2770,7 +2771,7 @@ exit 0
     assert expected_log in log
     if probe in {"policy", "snapshot"}:
         assert f"{probe} probe diagnostic" in log
-    assert "[alert sent]" in log
+    assert "[notification processed]" in log
 
 
 def test_heartbeat_disk_probe_failure_is_alerted_not_silently_skipped(
@@ -2904,7 +2905,7 @@ def test_heartbeat_after_schedule_fails_closed_when_publish_log_missing(
     # needed even though the publish problem is recorded and sent.
     assert result.returncode == 0
     assert "publish 예정 시각 이후 로그 없음" in log
-    assert "[alert sent]" in log
+    assert "[notification processed]" in log
 
 
 def test_heartbeat_requires_today_latest_publish_session_to_complete(
@@ -2926,7 +2927,7 @@ def test_heartbeat_requires_today_latest_publish_session_to_complete(
 
     assert result.returncode == 0
     assert "publish 오늘 최신 세션 성공 완료 marker 없음" in log
-    assert "[alert sent]" in log
+    assert "[notification processed]" in log
 
 
 def test_heartbeat_accepts_today_latest_publish_success_marker(

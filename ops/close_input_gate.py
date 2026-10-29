@@ -57,7 +57,7 @@ from scripts.pump_detector_v2_today import (
 from scripts.pump_detector_v2_today import (
     _validate_receipt as _validate_v2_receipt,
 )
-from signals.recommend_snapshot import SNAPSHOT_SCHEMA_VERSION, load_snapshot
+from signals.recommend_live_snapshot import SNAPSHOT_SCHEMA_VERSION, load_snapshot
 from signals.pump_detector_v1 import (
     EST_PUMP20_PROB as PUMP_V1_PROB,
 )

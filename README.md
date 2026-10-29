@@ -4,6 +4,13 @@
 > KST 08:50·09:05에 알려 주는 개인 트레이딩 보조 레이더.
 > 사용자가 직접 판단·매매하며 **자동 주문은 없다.**
 
+**2026-10-29 · 추천 전달 복구와 반복 경고 정리.** 독립 확률 추정치가 서로 모순되면
+해당 확률을 확인불가로 표시하고, 원래 종목·순위·원본 기록은 보존한다. 같은 운영 장애는
+반복 발송하지 않고 새 중요 장애·복구를 알리며 연구 상세는 기록에 남긴다. 연구의 일부
+미완결이 핵심 마감과 대시보드 게시를 막던 상태 처리도 보완했다. 기존 연구35파일은 보존하며
+추천 성능 향상을 주장하지 않는다. [설계·검증](PHASES.md),
+[운영 규칙](OPS.md), [개발일지](https://soccz.github.io/projects/prelude/#operational-recovery).
+
 ![tests](https://img.shields.io/badge/tests-full%20suite%20pre--push%20gate-brightgreen)
 ![status](https://img.shields.io/badge/verdict-radar--not--strategy-orange)
 ![evidence](https://img.shields.io/badge/evidence-snapshot%E2%86%92receipt%E2%86%92label-blue)

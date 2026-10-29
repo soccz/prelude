@@ -179,7 +179,7 @@ def test_label_error_does_not_undo_completed_r1(tmp_path):
         tmp_path, SHELLS[1], fail_command="scripts/label_recommend_snapshots.py",
         fail_rc=2, hang_command=EVALUATOR,
     )
-    assert result.returncode == 2
+    assert result.returncode == 124
     assert "DONE:r1-preopen" in calls
     assert "score label partial" in logs
     assert "exit=124" in logs
@@ -216,8 +216,22 @@ def test_deadline_applies_only_to_research_with_no_runtime_override(shell):
     assert len(bounded) == len(expected)
     for command in expected:
         assert any(f"run_research_step python {command} >>" in line for line in bounded)
-    assert "still block" in source
-    assert "not complete research/publish isolation" in source
+    if shell == SHELLS[0]:
+        assert "still block" in source
+        assert "not complete research/publish isolation" in source
+    else:
+        assert "documented partial/readiness states" in source
+
+
+@pytest.mark.parametrize("command,code", [("scripts/label_recommend_snapshots.py", 2),
+                                          ("-m ops.recommend_trial_review", 1)])
+def test_documented_research_readiness_does_not_block_core_success_marker(tmp_path, command, code):
+    result, calls, logs, repo, _ = _run(tmp_path, SHELLS[1],
+        fail_command=command, fail_rc=code, via_pipeline=True)
+    assert result.returncode == 0
+    assert "DONE:r1-preopen" in calls
+    assert "[DEGRADED]" in logs
+    assert list((repo / "output/pipeline_state").glob("preopen-close_*.ok"))
 
 
 @pytest.mark.parametrize(("ignore_term", "expected_rc"), [(False, 124), (True, 137)])

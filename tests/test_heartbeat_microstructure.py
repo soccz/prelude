@@ -183,7 +183,7 @@ def test_any_nonzero_probe_warns_once_without_trusting_ok_stdout(tmp_path, probe
     assert "microstructure daily status checked" not in log
     assert "scripts/v2_scoreboard.py" in calls
     assert "backup manifest/archive/checksum provenance ok" in log
-    assert "[alert sent] 1 issue" in log
+    assert "[notification processed] 1 issue" in log
     assert message is not None and message.count(WARNING) == 1
     assert "status=ok" not in message
     assert "probe diagnostic stderr" not in message
@@ -193,7 +193,7 @@ def test_empty_failed_probe_output_still_warns(tmp_path):
     result, _, log, message = _run(tmp_path, mode="empty", probe_rc=2)
     assert result.returncode == 0
     assert "status=" not in log
-    assert "[alert sent] 1 issue" in log
+    assert "[notification processed] 1 issue" in log
     assert message is not None and WARNING in message
 
 
@@ -203,7 +203,7 @@ def test_real_timeout_and_forced_kill_remain_visible(tmp_path, mode, expected_rc
     assert result.returncode == 0
     assert f"exit={expected_rc}; details logged" in log
     assert "scripts/v2_scoreboard.py" in calls
-    assert "[alert sent] 1 issue" in log
+    assert "[notification processed] 1 issue" in log
     assert message is not None and WARNING in message
 
 
@@ -217,7 +217,7 @@ def test_large_probe_output_is_logged_without_pipe_or_message_pollution(
     assert "end-of-large-probe" in log
     if probe_rc:
         assert message is not None and "end-of-large-probe" not in message
-        assert "[alert sent] 1 issue" in log
+        assert "[notification processed] 1 issue" in log
     else:
         assert message is None
 
@@ -227,7 +227,7 @@ def test_alert_delivery_failure_preserves_onfailure_fallback(tmp_path):
     assert result.returncode == 1
     assert WARNING in message
     assert "heartbeat alert delivery FAIL (exit=19)" in log
-    assert "[alert sent]" not in log
+    assert "[notification processed]" not in log
 
 
 def test_hook_contract_uses_readonly_cli_once_and_fixed_bound():

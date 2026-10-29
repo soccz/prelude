@@ -47,3 +47,16 @@ def test_inconsistent_downside_is_not_silently_repaired():
     out = _recommend_prediction_evidence(dict(p_up10=.2, p_dn5=.1, p_dn10=.3, rr_ratio=2))
     assert out["p_up10"] == .2
     assert all(out[k] is None for k in ("p_dn5", "p_dn10", "rr_ratio"))
+
+
+def test_inconsistent_upside_is_masked_without_changing_rank_or_raw_ledger():
+    row = dict(date="2026-10-29", coin="KRW-T", rank=1, status="open",
+        p_up5=.3, p_up10=.1, p_up20=.2, pump_prob=.2,
+        p_dn5=.1, p_dn10=.03, rr_ratio=1)
+    evidence = _recommend_prediction_evidence(row)
+    assert evidence["p_up10"] is None and evidence["rr_ratio"] is None
+    assert evidence["p_dn5"] == .1
+    output = compute_recommend_summary(pd.DataFrame([row]), asof="2026-10-29")["latest_radar"][0]
+    assert output["pump_prob_pct"] is None
+    assert output["unavailable_probability_families"] == ["upside"]
+    assert output["rank"] == 1 and row["p_up20"] == .2

@@ -32,7 +32,7 @@ def test_selftest_fault_warns_once_and_preserves_other_checks(tmp_path, probe_rc
     assert log.count(WARNING) == 1
     assert message is not None and message.count(WARNING) == 1
     assert "[ok] all checks pass" not in log
-    assert "[alert sent] 1 issue" in log
+    assert "[notification processed] 1 issue" in log
 
 
 @pytest.mark.parametrize("mode,expected", [("term", 124), ("kill", 137)])

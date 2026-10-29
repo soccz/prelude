@@ -53,8 +53,8 @@ record_critical_failure() {
 # Initial 300s research budget: the 2026-09-08 evaluator took about 110.6s,
 # making 120s too close to normal runtime; 300s is about 2.7x that observation.
 # Bound hangs without changing core close
-# or label deadlines. Failures remain nonzero/OnFailure-visible and still block
-# publish; this reduces core latency, not complete research/publish isolation.
+# or label deadlines. Unexpected execution failures still block publication;
+# documented partial/readiness states remain visible research diagnostics.
 run_research_step() {
     /usr/bin/timeout --signal=TERM --kill-after=10s 300s "$@"
 }
@@ -193,7 +193,7 @@ else
     rc=$?
     if [ "$rc" -eq 2 ]; then
         echo "  score label partial — 수집 보강 후 다음 실행에서 자동 재시도" >> "$LOG"
-        record_critical_failure "$rc" "full-universe score labeling partial"
+        echo "  [DEGRADED] full-universe score labeling partial (exit=$rc); core close complete, retry research later" >> "$LOG"
     else
         record_critical_failure "$rc" "full-universe score labeling"
     fi
@@ -220,7 +220,12 @@ echo "[2c/5] post-label trial review (record-only; no promotion)" >> "$LOG"
 if run_research_step python -m ops.recommend_trial_review --refresh >> "$LOG" 2>&1; then
     :
 else
-    record_critical_failure "$?" "post-label trial review"
+    rc=$?
+    if [ "$rc" -eq 1 ]; then
+        echo "  [DEGRADED] post-label trial review incomplete (exit=$rc); core close continues" >> "$LOG"
+    else
+        record_critical_failure "$rc" "post-label trial review"
+    fi
 fi
 
 # Independent new-date L1 replay. A research failure must not suppress the

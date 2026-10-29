@@ -80,6 +80,11 @@ output/recommend_book_validation/
 output/recommend_book_forward/
 output/recommend_trial_review.json
 output/recommend_regime_failures_*.json
+output/operations_notifications.json
+output/operations_notifications.lock
+_workspace/alert_repair_20261029*
+_workspace/build_repair_assets_20261029.py
+_workspace/verify_r1_delivery_repair_20261029.py
 
 # Private row-level research bundles and local status evidence
 /_workspace/recommend_*.json

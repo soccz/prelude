@@ -224,7 +224,7 @@ from ops.close_input_gate import validate_policy_noop
 from scripts.evaluate_recommend_score_labels import _report_digest
 from scripts.pump_detector_v2_today import _validate_decision_document
 from signals.recommend_score_labels import load_label_artifact
-from signals.recommend_snapshot import load_snapshot
+from signals.recommend_live_snapshot import load_snapshot
 
 root = Path("output")
 now = datetime.now(ZoneInfo("Asia/Seoul"))
@@ -289,6 +289,7 @@ except Exception as exc:
     )
 
 yesterday_dir = root / "recommend_snapshots" / yesterday
+delivery_bad = list(bad)
 yesterday_snapshots = sorted(
     path for path in yesterday_dir.glob("*.json")
     if ".limit" not in path.name
@@ -335,13 +336,17 @@ if yesterday_snapshots:
 
 if bad:
     print("; ".join(bad), file=sys.stderr)
-    raise SystemExit(1)
+    raise SystemExit(1 if delivery_bad else 3)
 PYEOF
 then
     echo "  recommend snapshot chain ok" >> "$LOG"
 else
     probe_rc=$?
-    WARN "recommend snapshot chain probe FAIL (exit=$probe_rc; details logged)"
+    if [ "$probe_rc" -eq 3 ]; then
+        WARN "research snapshot label/evaluation probe FAIL (exit=$probe_rc; details logged)"
+    else
+        WARN "recommend snapshot chain probe FAIL (exit=$probe_rc; details logged)"
+    fi
 fi
 
 # 2s) A healthy recommendation chain does not prove today's test suite passed.
@@ -618,9 +623,9 @@ if [ ${#ALERTS[@]} -gt 0 ]; then
     MSG="${MSG%$'\n'}"
     cd "$PROJ_ROOT"
     if HEARTBEAT_MESSAGE="$MSG" python -c \
-        "import os,sys; from notifier.telegram import send_telegram; sys.exit(0 if send_telegram(os.environ['HEARTBEAT_MESSAGE']) else 1)" \
+        "from ops.operations_notifications import notify_heartbeat_from_environment; notify_heartbeat_from_environment()" \
         >> "$LOG" 2>&1; then
-        echo "[alert sent] ${#ALERTS[@]} issue" >> "$LOG"
+        echo "[notification processed] ${#ALERTS[@]} issue (new incidents/recoveries only)" >> "$LOG"
     else
         DELIVERY_RC=$?
         echo "[critical] heartbeat alert delivery FAIL (exit=$DELIVERY_RC)" >> "$LOG"
@@ -629,7 +634,12 @@ if [ ${#ALERTS[@]} -gt 0 ]; then
         EXIT=1
     fi
 else
-    echo "[ok] all checks pass — silent" >> "$LOG"
+    if [ -f "$PROJ_ROOT/output/operations_notifications.json" ]; then
+        HEARTBEAT_MESSAGE="" python -c \
+            "from ops.operations_notifications import notify_heartbeat_from_environment; notify_heartbeat_from_environment()" \
+            >> "$LOG" 2>&1 || EXIT=1
+    fi
+    echo "[ok] all checks pass — notification state processed if present" >> "$LOG"
 fi
 echo "" >> "$LOG"
 exit "$EXIT"

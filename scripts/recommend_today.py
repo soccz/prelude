@@ -45,7 +45,7 @@ from notifier.delivery_receipt import (  # noqa: E402
     read_delivery_receipt,
 )
 from ledger.csv_store import atomic_write_csv, ledger_lock  # noqa: E402
-from signals.recommend_snapshot import (  # noqa: E402
+from signals.recommend_live_snapshot import (  # noqa: E402
     DEFAULT_SNAPSHOT_ROOT,
     SNAPSHOT_SCHEMA_VERSION,
     get_or_create_recommend_snapshot,

@@ -81,7 +81,10 @@ from data.upbit_market_status import (  # noqa: E402
 )
 from ops.file_lock import file_lock  # noqa: E402
 from signals.model_registry import ModelSpec, get_model  # noqa: E402
-from signals.recommend_snapshot import get_or_create_recommend_snapshot  # noqa: E402
+from signals.recommend_live_snapshot import (  # noqa: E402
+    get_or_create_recommend_snapshot,
+    inconsistent_families,
+)
 from signals.recommend_snapshot import SNAPSHOT_SCHEMA_VERSION  # noqa: E402
 
 KST = timezone(timedelta(hours=9))
@@ -484,6 +487,12 @@ def format_radar(res: dict, slot: str, *, dry_run: bool = False,
     lines.append("(상방=고가가 그만큼 갈 가능성 / 하방=저가가 그만큼 빠질 가능성, 검증 중 추정치·안전 보장 아님)")
     lines.append("")
     for it in top3:
+        invalid = inconsistent_families(it)
+
+        def estimate(name):
+            family = "upside" if name.startswith("p_up") else "downside"
+            return "확인불가" if family in invalid else _pct(it.get(name))
+
         coin = str(it.get("coin", "")).replace("KRW-", "")
         warn = VOLATILE_TAG if it.get("dump_risk_flag") else ""
         entry = it.get("entry_open")
@@ -499,15 +508,17 @@ def format_radar(res: dict, slot: str, *, dry_run: bool = False,
             if badge:
                 lines.append(f"   {badge}")
         lines.append(
-            f"   ▸ 상방  ≥5% {_pct(it.get('p_up5'))} · ≥10% {_pct(it.get('p_up10'))}"
-            f" · ≥20% {_pct(it.get('p_up20'))}"
+            f"   ▸ 상방  ≥5% {estimate('p_up5')} · ≥10% {estimate('p_up10')}"
+            f" · ≥20% {estimate('p_up20')}"
         )
         lines.append(
-            f"   ▸ 하방  ≤-5% {_pct(it.get('p_dn5'))} · ≤-10% {_pct(it.get('p_dn10'))}"
+            f"   ▸ 하방  ≤-5% {estimate('p_dn5')} · ≤-10% {estimate('p_dn10')}"
             f" · E[하방] {_signed_pct(it.get('exp_downside'))}"
         )
         lines.append("")
 
+    if any(inconsistent_families(item) for item in top3):
+        lines.append("ℹ️ 서로 일치하지 않는 상·하방 확률은 확인불가로 표시했습니다. 종목·순위는 원래 R1 계산 결과이며 원본 추정치는 기록에 보존합니다.")
     lines.append("━━━ 사용 ━━━")
     lines.append("• 자동매매 없음 — 알림만. 본인 판단으로 직접 매매")
     lines.append("• 09:00 가격은 참고만. -3% 손절(SL) / +5% 익절(TP)는 가상평가 설정이며 실제 체결가격 기준으로 직접 판단")

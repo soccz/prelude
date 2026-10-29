@@ -1664,18 +1664,21 @@ def compute_recommend_summary(
     today = df[df["date"] == last_day].sort_values("rank")
     radar = []
     for _, r in today.iterrows():
+        from signals.recommend_live_snapshot import inconsistent_families
+        unavailable = inconsistent_families(r)
         radar.append({
             "date": str(r["date"]),
             "coin": str(r["coin"]).replace("KRW-", ""),
             "rank": _safe_int(r.get("rank")),
             "score": _safe_float(r.get("score")),
-            "pump_prob_pct": _safe_float(r.get("pump_prob")),  # 0~1 → viewer 가 %
+            "pump_prob_pct": None if "upside" in unavailable else _safe_float(r.get("pump_prob")),
             "dump_risk_flag": {"true": True, "false": False}.get(
                 str(r.get("dump_risk_flag")).lower()
             ),
             "btc_regime": str(r.get("btc_regime", "")),
             "entry_open": _safe_float(r.get("entry_open")),
             "prediction_evidence": _recommend_prediction_evidence(r),
+            "unavailable_probability_families": unavailable,
         })
     out["latest_radar"] = radar
     out["latest_radar_date"] = str(last_day)
@@ -1881,6 +1884,10 @@ def _recommend_prediction_evidence(row):
             and (key == "rr_ratio" or value <= 1)
         )
         result[key] = value if valid else None
+    from signals.recommend_live_snapshot import inconsistent_families
+
+    if "upside" in inconsistent_families(row):
+        result.update(p_up10=None, rr_ratio=None)
     # Impossible nesting is not evidence. Keep the alert, hide the conflicting
     # downside estimates and ratio; do not silently repair the model output.
     if (result["p_dn5"] is not None and result["p_dn10"] is not None

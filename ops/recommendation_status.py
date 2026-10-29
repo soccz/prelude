@@ -21,7 +21,7 @@ from notifier.delivery_receipt import (
     receipt_path,
 )
 from notifier.telegram import telegram_error_is_ambiguous
-from signals.recommend_snapshot import (
+from signals.recommend_live_snapshot import (
     DEFAULT_SNAPSHOT_ROOT,
     SNAPSHOT_SCHEMA_VERSION,
     SnapshotError,
