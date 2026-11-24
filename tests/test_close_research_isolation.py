@@ -212,7 +212,8 @@ def test_deadline_applies_only_to_research_with_no_runtime_override(shell):
     bounded = [line.strip() for line in source.splitlines() if "if run_research_step" in line]
     expected = COMMON_RESEARCH + (PREOPEN_RESEARCH if shell == SHELLS[1] else ())
     if shell == SHELLS[1]:
-        expected += ("-m ops.recommend_book_validation --refresh", "-m ops.recommend_book_forward --refresh")
+        expected += ("-m ops.season_shadow", "-m ops.recommend_book_validation --refresh",
+                     "-m ops.recommend_book_forward --refresh")
     assert len(bounded) == len(expected)
     for command in expected:
         assert any(f"run_research_step python {command} >>" in line for line in bounded)
@@ -224,7 +225,8 @@ def test_deadline_applies_only_to_research_with_no_runtime_override(shell):
 
 
 @pytest.mark.parametrize("command,code", [("scripts/label_recommend_snapshots.py", 2),
-                                          ("-m ops.recommend_trial_review", 1)])
+                                          ("-m ops.recommend_trial_review", 1),
+                                          ("-m ops.season_shadow", 1)])
 def test_documented_research_readiness_does_not_block_core_success_marker(tmp_path, command, code):
     result, calls, logs, repo, _ = _run(tmp_path, SHELLS[1],
         fail_command=command, fail_rc=code, via_pipeline=True)

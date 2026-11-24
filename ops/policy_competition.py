@@ -72,7 +72,9 @@ from scripts.pump_detector_today import (  # noqa: E402
 from signals.recommend_snapshot import (  # noqa: E402
     DEFAULT_SNAPSHOT_ROOT,
     load_snapshot,
+    SnapshotError,
 )
+from ops.research_snapshot_exclusion import marked_exclusion  # noqa: E402
 
 OUT_CSV = _ROOT / "output" / "policy_competition_summary.csv"
 OUT_JSON = _ROOT / "output" / "policy_competition_summary.json"
@@ -149,6 +151,8 @@ POLICY_GENERATOR_SOURCES = (
     "signals/pump_detector_v1.py",
     "signals/pump_detector_v2.py",
     "signals/recommend_snapshot.py",
+    "signals/recommend_live_snapshot.py",
+    "ops/research_snapshot_exclusion.py",
 )
 
 DB_SCHEMA = """
@@ -582,6 +586,7 @@ def _source_observed_dates(
     pump_v1_decision_root: Path = PUMP_V1_DECISION_ROOT,
     pump_v2_decision_root: Path = PUMP_V2_DECISION_ROOT,
     pump_v2_receipt_root: Path = PUMP_V2_RECEIPT_ROOT,
+    excluded: list[str] | None = None,
 ) -> tuple[list[pd.Timestamp], str]:
     """Return completed decision dates, preferring validated score snapshots.
 
@@ -671,14 +676,17 @@ def _source_observed_dates(
                 ) from exc
             if path_date >= asof:
                 continue
-            document = load_snapshot(
-                snapshot_file,
-                asof=snapshot_file.parent.name,
-                slot=slot,
-                ranking=ranking,
-                limit_markets=None,
-                model_id=spec.id,
-            )
+            identity_args = dict(asof=snapshot_file.parent.name, slot=slot,
+                                 ranking=ranking, limit_markets=None, model_id=spec.id)
+            try:
+                document = load_snapshot(snapshot_file, **identity_args)
+            except SnapshotError as exc:
+                if not marked_exclusion(snapshot_file, exc, **identity_args):
+                    raise
+                dates.discard(path_date)
+                if excluded is not None:
+                    excluded.append(path_date.date().isoformat())
+                continue
             decision_date = pd.Timestamp(document["asof"]).normalize()
             dates.add(decision_date)
 
@@ -1778,6 +1786,7 @@ def _run_unlocked(
         )
         for spec in MODELS
     }
+    exclusions = {spec.id: [] for spec in MODELS}
     source_observations = {
         spec.id: _source_observed_dates(
             spec,
@@ -1786,9 +1795,16 @@ def _run_unlocked(
             pump_v1_decision_root=pump_v1_decision_root,
             pump_v2_decision_root=pump_v2_decision_root,
             pump_v2_receipt_root=pump_v2_receipt_root,
+            excluded=exclusions[spec.id],
         )
         for spec in MODELS
     }
+    for model_id, days in exclusions.items():
+        frame = model_rows[model_id]
+        if days and frame is not None and not frame.empty:
+            model_rows[model_id] = frame.loc[
+                ~pd.to_datetime(frame["date"]).dt.normalize().isin(pd.to_datetime(days))
+            ].copy()
     all_dates = sorted({
         date
         for dates, _basis in source_observations.values()
@@ -1870,6 +1886,7 @@ def _run_unlocked(
         "asof": str(asof.date()),
         "generated_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "input_manifest": input_manifest,
+        "delivery_only_research_exclusions": {k: sorted(v) for k, v in exclusions.items() if v},
         "config": _policy_config(),
         "radar_terminal": radar_terminal,
         "rows": rows_payload,

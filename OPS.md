@@ -942,3 +942,18 @@ systemd stdout/stderr는 journal에 남고 runner는 위 날짜별/고정 로그
 | `output/cron_*.log` | 운영 로그 |
 | `output/drift_state.json` | legacy drift evaluator 실행 시 생성 (현재 bootstrap 미생성) |
 | `output/retrain_history.json` | legacy retrain 실행 시 생성 (현재 미생성) |
+
+## 기한 없는 09:05 시즌 비교 (2026-11-24)
+
+08:50·09:05 실발송, R1 점수, 10월부터의 기존 실험과 별개다. 10:05 기존 preopen-close가
+마감된 shortlist 평가를 읽어 다음날용 조건표를 `output/season_shadow/YYYY-MM-DD/{plan,commit}.json`에
+한 번만 기록한다. 오늘 보고서가 없거나 오래됐으면 현재 원자료로 shortlist 평가만 재생성한다.
+손상된 보고서를 덮거나 어제 계획을 다시 쓰지 않는다. 과거 실험의 09:20 이후 평가 시각을
+오늘의 선택 시각으로 간주하지도 않는다. 새 unit/권한/추가 알림은 없다.
+
+밤사이 확정한 선택표와 아침에 이미 저장하는 원안·대안 Top3, 성공 영수증을 결합한다.
+둘 중 늦은 증거가 진입 시각과 같아도 탈락이다. 시장 상태나 버전이 미관측이면 R1을 유지한다.
+다음 마감에서 정본 라벨과 당시 선택을 검산하고, 전체 날짜 및 실제 교체 날짜 각각에 대해
+안전상승·상승·하락 등을 날짜 동일 가중으로 집계한다. 최신 `output/season_shadow/review.json`은
+누락·지각·손상을 성과 0과 분리한다. 기간 상한이나 자동 승격 없음. 당일 heartbeat는
+`venv/bin/python -B -m ops.season_shadow --check`로 읽기만 하고 기존 증거 백업에 포함된다.

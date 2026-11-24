@@ -137,3 +137,4 @@ secrets/
 /output/depth_snapshots/
 # 08:56 fresh D-1 R1 그림자 기록 (record-only, 2026-10-04)
 /output/preopen_fresh_shadow/
+/output/season_shadow/

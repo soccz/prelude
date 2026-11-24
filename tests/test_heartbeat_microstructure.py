@@ -54,7 +54,7 @@ def _run(
     source = source.replace(
         SELFTEST_TIMEOUT, SELFTEST_TIMEOUT.replace("5s 15s", "0.2s 0.3s")
     )
-    assert source.count(REVIEW_TIMEOUT) == 1
+    assert source.count(REVIEW_TIMEOUT) == 2
     source = source.replace(REVIEW_TIMEOUT, REVIEW_TIMEOUT.replace("5s 20s", "0.2s 0.3s"))
     script = scripts / "heartbeat.sh"
     script.write_text(source)
@@ -80,6 +80,7 @@ fi
 if [ "$*" = "-m ops.recommend_microstructure_status --format text" ] || \
    [ "$*" = "-m ops.recommend_trade_shortlist_status --format text" ] || \
    [ "$*" = "-m ops.recommend_trial_review --format text" ] || \
+   [ "$*" = "-m ops.season_shadow --check" ] || \
    [ "$*" = "-m ops.recommend_regime_forward --format text" ] || \
    [ "$*" = "-m ops.recommend_book_validation --format text" ] || \
    [ "$*" = "-m ops.recommend_book_forward --format text" ] || \

@@ -28,6 +28,7 @@ from signals.recommend_score_labels import (  # noqa: E402
     label_recommend_snapshot,
 )
 from signals.recommend_snapshot import DEFAULT_SNAPSHOT_ROOT  # noqa: E402
+from ops.research_snapshot_exclusion import marked_exclusion  # noqa: E402
 
 
 def _iso_date(value: str) -> str:
@@ -143,6 +144,14 @@ def main() -> int:
             if result["artifact_status"] == "partial":
                 had_partial = True
         except Exception as exc:  # CLI batch에서 나머지 snapshot은 계속 처리한다.
+            try:
+                if marked_exclusion(path, exc):
+                    summaries.append({"snapshot": str(path), "status": "research_excluded",
+                                      "reason": "validated_delivery_only_probabilities"})
+                    had_partial = True
+                    continue
+            except Exception as invalid:
+                exc = invalid
             summaries.append({
                 "snapshot": str(path),
                 "status": "error",

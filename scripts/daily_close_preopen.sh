@@ -228,6 +228,14 @@ else
     fi
 fi
 
+# Freeze tomorrow's conditional choices on every regular close, even when a
+# different trial is incomplete. The consumer rejects a stale/missing review.
+if run_research_step python -m ops.season_shadow >> "$LOG" 2>&1; then
+    :
+else
+    echo "[DEGRADED] day-ahead season plan/review failed (exit=$?); no backfill, core continues" >> "$LOG"
+fi
+
 # Independent new-date L1 replay. A research failure must not suppress the
 # existing recommendation/publication path; heartbeat checks the saved report.
 echo "[2d/5] fixed L1 new-date validation (post-label replay only)" >> "$LOG"

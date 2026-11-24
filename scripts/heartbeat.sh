@@ -424,6 +424,12 @@ else
     WARN "regime forward publication probe FAIL (exit=$regime_probe_rc; details logged)"
 fi
 
+# Day-ahead conditional table and current review; no new Telegram category.
+if ! /usr/bin/timeout --signal=TERM --kill-after=5s 20s \
+    python -m ops.season_shadow --check >>"$LOG" 2>&1; then
+    WARN "regime forward day-ahead plan/review unavailable (research only)"
+fi
+
 # 3g) L1 pre-entry publication and execution review, read-only.
 if /usr/bin/timeout --signal=TERM --kill-after=5s 30s \
     python -m ops.recommend_book_forward --format text >>"$LOG" 2>&1; then

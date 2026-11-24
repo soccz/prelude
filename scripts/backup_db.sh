@@ -404,6 +404,7 @@ for item in \
     output/recommend_microstructure_trials \
     output/recommend_trade_shortlist_trials \
     output/recommend_regime_forward \
+    output/season_shadow \
     output/recommend_book_validation \
     output/recommend_book_forward \
     output/pump_v1_decisions \
