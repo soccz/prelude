@@ -38,6 +38,7 @@ from ops.champion_selector import (  # noqa: E402
     load_champion_state_artifact,
 )
 from ops.dashboard_current import validate_current_system  # noqa: E402
+from ops.dashboard_day_ahead import validate_day_ahead  # noqa: E402
 from ops.dashboard_book_validation import validate_book_validation  # noqa: E402
 from ops.dashboard_book_forward import validate_book_forward  # noqa: E402
 from ops.dashboard_research import validate_research_progress  # noqa: E402
@@ -364,6 +365,11 @@ def _validate_summary(
             )
         except (ValueError, TypeError, KeyError) as exc:
             raise DashboardAssetError("summary.research_progress invalid") from exc
+    if "day_ahead_season" in payload:
+        try:
+            validate_day_ahead(payload["day_ahead_season"], asof=expected_asof.isoformat())
+        except (ValueError, TypeError, KeyError) as exc:
+            raise DashboardAssetError("summary.day_ahead_season invalid") from exc
     if "book_forward" in payload:
         try:
             validate_book_forward(payload["book_forward"], asof=expected_asof.isoformat(), now=now)
@@ -658,11 +664,39 @@ def _validate_cross_asset_identity(
         )
 
 
+def _validate_delivered_radar(summary, asof):
+    """A PIN card labelled as today's delivery must match its original receipt and ranks."""
+    from notifier.delivery_receipt import read_delivery_receipt
+    from signals.recommend_live_snapshot import load_snapshot
+    from signals.recommend_snapshot import snapshot_path
+
+    slot = summary.get("current_system", {}).get("live", {}).get("open", {})
+    if slot.get("state") not in {"delivered_empty", "delivered_candidates"}:
+        return
+    source = load_snapshot(snapshot_path(asof, "open"), asof=asof, slot="open", ranking="R1", model_id="recommend_r1_open")
+    receipt = read_delivery_receipt(source)
+    _require(receipt and receipt["delivery_ok"] is True and receipt["snapshot_id"] == source["snapshot_id"]
+             and datetime.fromisoformat(receipt["sent_at"]) == datetime.fromisoformat(slot["sent_at"]),
+             "dashboard R1 delivery receipt mismatch")
+    radar = summary["channels"]["recommend"]
+    expected = [(r["rank"], r["coin"]) for r in source["top3"]]
+    _require(len(expected) == slot["candidate_count"], "dashboard R1 count mismatch")
+    if not expected and radar.get("latest_radar_date") != asof:
+        return  # Previous radar remains explicitly dated, not a recommendation for today.
+    cards = radar.get("latest_radar", [])
+    _require([(r["rank"], "KRW-" + r["coin"]) for r in cards] == expected
+             and all(r["date"] == asof for r in cards)
+             and (not expected or (radar.get("latest_radar_date") == asof
+                                   and radar.get("latest_radar_snapshot_id") == source["snapshot_id"])),
+             "dashboard R1 date, ranking or snapshot does not match Telegram delivery")
+
+
 def _validate_current_sources(
     payloads: Mapping[str, dict[str, Any]],
     *,
     expected_asof: date,
 ) -> None:
+    _validate_delivered_radar(payloads["summary.json"], expected_asof.isoformat())
     try:
         policy = load_policy_artifact(
             PROJECT_ROOT / "output/policy_competition_summary.json",

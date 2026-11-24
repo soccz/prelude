@@ -60,6 +60,7 @@ from ops.champion_selector import (  # noqa: E402
     load_champion_state_artifact,
 )
 from ops.dashboard_current import build_current_system  # noqa: E402
+from ops.dashboard_day_ahead import build_day_ahead  # noqa: E402
 from ops.dashboard_book_validation import build_book_validation  # noqa: E402
 from ops.dashboard_book_forward import build_book_forward  # noqa: E402
 from ops.dashboard_research import build_research_progress  # noqa: E402
@@ -1682,6 +1683,13 @@ def compute_recommend_summary(
         })
     out["latest_radar"] = radar
     out["latest_radar_date"] = str(last_day)
+    # PIN asset only. An unbound/legacy row never inherits a sibling's ID.
+    if "snapshot_id" in today:
+        ids = today["snapshot_id"].tolist()
+        if ids and all(isinstance(x, str) and x == ids[0] for x in ids):
+            digest = ids[0].removeprefix("recommend-")
+            if ids[0] == "recommend-" + digest and len(digest) == 20 and all(c in "0123456789abcdef" for c in digest):
+                out["latest_radar_snapshot_id"] = ids[0]
 
     # 실현(closed) 요약 — realized_pct는 이미 net(%p). 같은 날은 equal-weight,
     # 무추천일 cash, 복리·초기 equity·√365·날짜-cluster CI를 공통 엔진으로 계산한다.
@@ -2226,6 +2234,7 @@ def main():
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "current_system": build_current_system(asof=asof.date().isoformat()),
         "research_progress": build_research_progress(asof=asof.date().isoformat()),
+        "day_ahead_season": build_day_ahead(asof=asof.date().isoformat()),
         "book_validation": build_book_validation(asof=asof.date().isoformat()),
         "book_forward": build_book_forward(asof=asof.date().isoformat()),
         "channels": {
