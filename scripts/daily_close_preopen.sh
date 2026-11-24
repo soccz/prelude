@@ -217,7 +217,10 @@ fi
 # Morning write-once evaluations predate the previous day's completed labels.
 # Refresh a separate derived review only after core close/label work is done.
 echo "[2c/5] post-label trial review (record-only; no promotion)" >> "$LOG"
-if run_research_step python -m ops.recommend_trial_review --refresh >> "$LOG" 2>&1; then
+# This one command rechecks growing archived trials. On 2026-11-24 it took
+# 277s warm and was still advancing at 300s cold. Keep a hard stop and the
+# same failure semantics, with headroom inside the 3600s service budget.
+if /usr/bin/timeout --signal=TERM --kill-after=10s 900s python -m ops.recommend_trial_review --refresh >> "$LOG" 2>&1; then
     :
 else
     rc=$?

@@ -21,6 +21,7 @@ EVALUATOR = "scripts/evaluate_recommend_score_labels.py"
 TRIAL_REVIEW = "-m ops.recommend_trial_review --refresh"
 PREOPEN_RESEARCH = (EVALUATOR, TRIAL_REVIEW)
 BUDGET_COMMAND = "/usr/bin/timeout --signal=TERM --kill-after=10s 300s"
+REVIEW_BUDGET = "/usr/bin/timeout --signal=TERM --kill-after=10s 900s"
 
 
 def _run(
@@ -42,6 +43,7 @@ def _run(
     assert source.count(BUDGET_COMMAND) == 1
     # Only the copied fixture has a shorter deadline; no production override.
     source = source.replace(BUDGET_COMMAND, BUDGET_COMMAND.replace("10s 300s", "0.2s 0.3s"))
+    source = source.replace(REVIEW_BUDGET, REVIEW_BUDGET.replace("10s 900s", "0.2s 0.3s"))
     script = scripts / shell
     script.write_text(source)
     fake_python = fake_bin / "python"
@@ -210,8 +212,10 @@ def test_deadline_applies_only_to_research_with_no_runtime_override(shell):
     source = (ROOT / "scripts" / shell).read_text()
     assert source.count(BUDGET_COMMAND) == 1
     bounded = [line.strip() for line in source.splitlines() if "if run_research_step" in line]
-    expected = COMMON_RESEARCH + (PREOPEN_RESEARCH if shell == SHELLS[1] else ())
+    expected = COMMON_RESEARCH + ((EVALUATOR,) if shell == SHELLS[1] else ())
+    assert source.count(REVIEW_BUDGET) == int(shell == SHELLS[1])
     if shell == SHELLS[1]:
+        assert f"if {REVIEW_BUDGET} python {TRIAL_REVIEW} >>" in source
         expected += ("-m ops.season_shadow", "-m ops.recommend_book_validation --refresh",
                      "-m ops.recommend_book_forward --refresh")
     assert len(bounded) == len(expected)
